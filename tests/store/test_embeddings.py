@@ -1,6 +1,5 @@
 import pytest
 import tempfile
-import os
 from novelizer.store.embeddings import EmbeddingStore
 from novelizer.store.models import WorldEntry
 

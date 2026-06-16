@@ -12,8 +12,8 @@ class OllamaEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings:
         result = []
         for text in input:
-            resp = ollama_client.embeddings(model=self._model, prompt=text)
-            result.append(resp["embedding"])
+            resp = ollama_client.embed(model=self._model, input=text)
+            result.append(resp.embeddings[0])
         return result
 
 
