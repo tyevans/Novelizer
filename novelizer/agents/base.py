@@ -1,10 +1,8 @@
 from __future__ import annotations
-import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 import ollama
-from pydantic_graph import BaseNode, End, Graph, GraphRunContext
 from novelizer.store.queries import Store
 
 
@@ -15,36 +13,12 @@ class AgentState:
     context: dict[str, Any] = field(default_factory=dict)
 
 
-class Idle(BaseNode[AgentState]):
-    async def run(self, ctx: GraphRunContext[AgentState]) -> "Polling":
-        return Polling()
-
-
-class Polling(BaseNode[AgentState]):
-    async def run(self, ctx: GraphRunContext[AgentState]) -> "Working":
-        return Working()
-
-
-class Working(BaseNode[AgentState]):
-    async def run(self, ctx: GraphRunContext[AgentState]) -> "Committing":
-        return Committing()
-
-
-class Committing(BaseNode[AgentState]):
-    async def run(self, ctx: GraphRunContext[AgentState]) -> Idle:
-        return Idle()
-
-
-_base_graph = Graph(nodes=[Idle, Polling, Working, Committing])
-
-
 class BaseAgent:
     """
-    Wraps a pydantic-graph instance with pause/resume, rate limiting,
+    Async agent base with pause/resume, rate limiting,
     and a readiness_check hook for the scheduler.
 
-    Subclasses override poll(), work(), and commit() instead of touching
-    graph nodes directly. The graph is re-entered on each scheduler tick.
+    Subclasses override poll(), work(), and commit().
     """
 
     def __init__(self, name: str, store: Store, min_interval: int, llm_model: str = "llama3.2") -> None:
@@ -77,8 +51,9 @@ class BaseAgent:
     async def commit(self, state: AgentState) -> None:
         """Write results from state.context to store. Override in subclasses."""
 
-    def _llm(self, messages: list[dict]) -> str:
-        resp = ollama.chat(model=self.llm_model, messages=messages)
+    async def _llm(self, messages: list[dict]) -> str:
+        import asyncio
+        resp = await asyncio.to_thread(ollama.chat, model=self.llm_model, messages=messages)
         return resp["message"]["content"]
 
     async def run_once(self) -> None:
