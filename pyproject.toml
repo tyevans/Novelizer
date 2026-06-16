@@ -1,0 +1,26 @@
+[project]
+name = "novelizer"
+version = "0.1.0"
+description = "Autonomous world-building and storytelling agent system"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "chromadb>=0.5.0",
+    "click>=8.2.1",
+    "ollama>=0.5.3",
+    "pydantic>=2.11.7",
+    "pydantic-graph>=0.1.0",
+    "pydantic-settings>=2.10.1",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "rich>=14.1.0",
+    "textual>=5.3.0",
+]
+
+[project.scripts]
+novelizer = "novelizer.director.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = ["ollama: requires running Ollama instance"]
