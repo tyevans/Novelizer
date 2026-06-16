@@ -64,6 +64,9 @@ class Store:
     async def list_chapters(self, status: Optional[str] = None) -> list[Chapter]:
         return await self.db.list_chapters(status=status)
 
+    async def get_chapter(self, chapter_id: str) -> Optional[Chapter]:
+        return await self.db.get_chapter(chapter_id)
+
     # RetconRequest
 
     async def save_retcon_request(self, req: RetconRequest) -> None:

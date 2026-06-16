@@ -147,6 +147,13 @@ class WorldDB:
         rows = await cur.fetchall()
         return [Chapter.model_validate_json(r[0]) for r in rows]
 
+    async def get_chapter(self, chapter_id: str) -> Optional[Chapter]:
+        cur = await self._conn.execute(
+            "SELECT data FROM chapters WHERE id = ?", (chapter_id,)
+        )
+        row = await cur.fetchone()
+        return Chapter.model_validate_json(row[0]) if row else None
+
     # --- RetconRequest ---
 
     async def save_retcon_request(self, req: RetconRequest) -> None:
