@@ -18,6 +18,7 @@ _NEVER_GATED = {
     EventType.THREAD_TOUCHED,
     EventType.THREAD_PAID_OFF,
     EventType.THREAD_ABANDONED,
+    EventType.ANNOTATION_STRUCTURE_SCORED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

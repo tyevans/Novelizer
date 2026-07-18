@@ -66,3 +66,9 @@ async def test_thread_events_are_never_gated(level, event_type):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("author", event_type) is False
     assert await policy.is_gated("editor", event_type) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+async def test_annotation_structure_scored_is_never_gated(level):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("structure_analyst", EventType.ANNOTATION_STRUCTURE_SCORED) is False
