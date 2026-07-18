@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from novelizer.config import Settings
+from novelizer.settings import EffectiveSettings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
@@ -19,7 +19,7 @@ from novelizer.voices.loader import load_voice_pack
 
 
 class Runtime:
-    def __init__(self, settings: Settings, runner=None, runners: Optional[dict] = None) -> None:
+    def __init__(self, settings: EffectiveSettings, runner=None, runners: Optional[dict] = None) -> None:
         self.settings = settings
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)

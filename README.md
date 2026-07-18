@@ -24,17 +24,20 @@ uv sync
 
 ## Configuration
 
-Settings are read from environment variables (prefix `NOVELIZER_`) or a `.env` file:
+Settings layer in this order (later wins): built-in defaults ← global config ←
+story config ← `NOVELIZER_*` environment variables.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `NOVELIZER_DB_PATH` | `stories/world.db` | SQLite event store / projections path |
-| `NOVELIZER_LLM_BASE_URL` | `http://localhost:8080/v1` | OpenAI-compatible endpoint for agents |
-| `NOVELIZER_LLM_API_KEY` | `not-needed` | API key sent to the endpoint, if required |
-| `NOVELIZER_AUTHOR_MODEL` | `local-model` | Model name passed to the endpoint for the Author |
-| `NOVELIZER_AUTHOR_TEMPERATURE` | `0.8` | Sampling temperature for the Author |
-| `NOVELIZER_AUTHOR_INTERVAL` | `300` | Seconds between Author drafting passes |
-| `NOVELIZER_PROJECTOR_INTERVAL` | `0.5` | Seconds between projector catch-up passes |
+- **Global:** `~/.config/novelizer/config.toml` — see
+  `docs/examples/config.example.toml` for a documented example.
+- **Per story:** each story is a self-contained directory
+  (`world.db`, `chroma/`, `story.toml`). `story.toml` can override voice,
+  models, temperatures, and cadence for that story. Secrets are never valid
+  in `story.toml`.
+- **Env:** any setting, e.g. `NOVELIZER_AUTHOR_MODEL=qwen3`.
+
+Open a specific story with `novelizer --story path/to/story/`. With no
+`--story`, novelizer uses `stories/default/` (offering a one-time migration
+if it finds a legacy flat `stories/world.db`).
 
 ## Usage
 

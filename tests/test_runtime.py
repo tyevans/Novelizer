@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from novelizer.config import Settings
+from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.canon.events import EventType
 from novelizer.agents.author import ChapterDraft

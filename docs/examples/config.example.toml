@@ -1,0 +1,37 @@
+# Novelizer global configuration.
+# Location: ~/.config/novelizer/config.toml  (or $XDG_CONFIG_HOME/novelizer/config.toml)
+#
+# Layering: built-in defaults <- this file <- story.toml <- NOVELIZER_* env vars.
+# Any setting here can be overridden per story in <story>/story.toml, EXCEPT:
+#   llm_base_url, llm_api_key, default_stories_dir, last_opened_story (global-only;
+#   llm_api_key in a story.toml is an error — stories are shareable).
+
+# --- LLM endpoint (OpenAI-compatible) ---
+llm_base_url = "http://localhost:8080/v1"
+# llm_api_key = "sk-..."        # only if your endpoint needs one; keep this file
+                                 # chmod 0600 (the setup wizard will write it that way)
+
+# --- Models ---
+author_model = "local-model"
+agent_model = "local-model"
+embed_model = "nomic-embed-text"
+
+# --- Generation ---
+author_temperature = 0.8
+agent_temperature = 0.7
+
+# --- Agent cadence (seconds) ---
+author_interval = 300
+default_agent_interval = 120
+continuity_interval = 900
+structure_analyst_interval = 180
+projector_interval = 0.5
+
+# --- Voice ---
+# voice_pack = "/path/to/pack.toml"   # defaults to the shipped default pack
+prose_profile = "plain"
+
+# --- App ---
+# default_stories_dir: read by the upcoming story picker; not yet used to
+# locate the default story.
+default_stories_dir = "stories"
