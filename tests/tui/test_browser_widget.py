@@ -36,3 +36,30 @@ async def test_browser_lists_sections_and_items():
             assert any("One" in str(c.label) for c in chapters_node.children)
     finally:
         await read.close(); await proj.close(); await events.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_expansion_preserved_when_item_count_changes():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    try:
+        await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        await proj.catch_up()
+        app = _Host(read)
+        async with app.run_test():
+            tree = app.query_one(StoryBrowser)
+            chapters_node = next(n for n in tree.root.children if "Chapters" in str(n.label))
+            chapters_node.expand()
+            assert chapters_node.is_expanded is True
+
+            await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p2"))
+            await proj.catch_up()
+            await tree.refresh_sections(read)
+
+            chapters_node = next(n for n in tree.root.children if "Chapters" in str(n.label))
+            assert chapters_node.is_expanded is True
+            assert len(chapters_node.children) == 2
+    finally:
+        await read.close(); await proj.close(); await events.close(); os.unlink(path)

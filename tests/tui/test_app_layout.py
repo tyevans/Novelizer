@@ -38,14 +38,21 @@ async def test_mission_control_panes_present_and_populate():
             assert app.query_one("#browser", Tree) is not None
             assert app.query_one("#roster", Static) is not None
             assert app.query_one("#statusbar", Static) is not None
-            await pilot.pause(0.8)
-            await pilot.pause(0.8)
-            await pilot.pause(0.8)
+            import time
+            deadline = time.monotonic() + 5.0
+            roster_text = ""
+            all_labels = []
+            while time.monotonic() < deadline:
+                await pilot.pause(0.2)
+                roster_text = str(app.query_one("#roster", Static).renderable)
+                tree = app.query_one("#browser", Tree)
+                all_labels = [str(n.label) for n in tree.root.children] + [str(c.label) for n in tree.root.children for c in n.children]
+                if "author" in roster_text and (
+                    any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
+                ):
+                    break
             # roster shows agent names; browser shows the authored chapter
-            roster_text = str(app.query_one("#roster", Static).renderable)
             assert "author" in roster_text
-            tree = app.query_one("#browser", Tree)
-            all_labels = [str(n.label) for n in tree.root.children] + [str(c.label) for n in tree.root.children for c in n.children]
             assert any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
     finally:
         await rt.close(); os.unlink(path)

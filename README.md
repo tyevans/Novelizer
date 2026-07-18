@@ -54,7 +54,7 @@ The dashboard displays four synchronized panes:
 
 Command palette (focus with `Ctrl+K` or `:`, then type):
 - `seed <text>` — inject a narrative seed
-- `focus <agent>` — assign focus to an agent (runs solo on next tick)
+- `focus <agent>` — inject a focus/steer signal that agents pick up as context on their next run
 - `pause <agent>` — pause an agent
 - `resume <agent>` — resume a paused agent
 

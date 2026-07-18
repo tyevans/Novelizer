@@ -31,11 +31,6 @@ async def test_command_input_seeds_via_dispatch():
     app = NovelizerApp(rt)
     try:
         async with app.run_test() as pilot:
-            from textual.widgets import Input
-            inp = app.query_one("#command", Input)
-            inp.value = "seed a storm is coming"
-            await inp.action_submit() if hasattr(inp, "action_submit") else app.set_focus(inp)
-            # Fallback: call the handler directly for determinism
             await app._run_command("seed a storm is coming")
             await pilot.pause(0.3)
             log = await rt.events.events_since(0)
@@ -45,6 +40,7 @@ async def test_command_input_seeds_via_dispatch():
                 and "storm" in e.payload.get("body", "")
             ]
             assert created, "seed command should append a director_signal.created event"
+            assert len(created) == 1, "seed command should append exactly one event, not double-append"
     finally:
         await rt.close(); os.unlink(path)
 
