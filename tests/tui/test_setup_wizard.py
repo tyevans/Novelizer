@@ -12,9 +12,20 @@ async def _fake_probe_fail(base_url, api_key="not-needed", **kwargs):
     return ProbeResult(ok=False, error="connection refused")
 
 
+async def test_wizard_fields_render_at_natural_height():
+    """Regression: inputs must not be crunched to height:1/border:none."""
+    app = SetupWizardApp(probe=_fake_probe_ok)
+    async with app.run_test(size=(80, 50)) as pilot:
+        await pilot.pause()
+        base_url = app.query_one("#base_url", Input)
+        assert base_url.outer_size.height >= 3
+        assert base_url.styles.border_top[0] != "none"
+        app.exit(None)
+
+
 async def test_probe_then_save_returns_config():
     app = SetupWizardApp(probe=_fake_probe_ok)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 50)) as pilot:
         app.query_one("#base_url", Input).value = "http://h:1/v1"
         app.query_one("#api_key", Input).value = "sk-x"
         await pilot.click("#probe")
@@ -35,7 +46,7 @@ async def test_probe_then_save_returns_config():
 
 async def test_probe_failure_shows_error_and_keeps_save_disabled():
     app = SetupWizardApp(probe=_fake_probe_fail)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 50)) as pilot:
         app.query_one("#base_url", Input).value = "http://bad:1/v1"
         await pilot.click("#probe")
         await pilot.pause()
@@ -46,7 +57,7 @@ async def test_probe_failure_shows_error_and_keeps_save_disabled():
 
 async def test_skip_saves_without_models():
     app = SetupWizardApp(probe=_fake_probe_fail)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 50)) as pilot:
         app.query_one("#base_url", Input).value = "http://h:1/v1"
         app.query_one("#stories_dir", Input).value = "~/novels"
         await pilot.click("#skip")
@@ -58,7 +69,7 @@ async def test_skip_saves_without_models():
 
 async def test_skip_with_blank_base_url_shows_error_not_crash():
     app = SetupWizardApp(probe=_fake_probe_fail)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 50)) as pilot:
         app.query_one("#base_url", Input).value = "   "
         await pilot.click("#skip")
         await pilot.pause()
