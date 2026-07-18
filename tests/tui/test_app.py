@@ -1,0 +1,15 @@
+from novelizer.tui.app import format_event
+from novelizer.canon.events import StoredEvent, EventType
+
+
+def test_format_chapter_created_mentions_title():
+    ev = StoredEvent(sequence=1, id="e1", event_type=EventType.CHAPTER_CREATED,
+                     aggregate_id="c1", payload={"title": "The Salt Road"}, created_at="t")
+    line = format_event(ev)
+    assert "The Salt Road" in line and "Author" in line
+
+
+def test_format_director_signal_created_mentions_body():
+    ev = StoredEvent(sequence=2, id="e2", event_type=EventType.DIRECTOR_SIGNAL_CREATED,
+                     aggregate_id="s1", payload={"body": "a storm is coming"}, created_at="t")
+    assert "a storm is coming" in format_event(ev)
