@@ -96,12 +96,14 @@ async def test_full_pipeline_runs_under_runtime(settings):
         "editor": ScriptedRunner(EditorVerdict(verdict="approve", notes="ok")),
         "continuity_checker": ScriptedRunner(ContinuityOutput()),
         "retconner": ScriptedRunner(RetconAmendments()),
+        "structure_analyst": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
     try:
         assert {a.name for a in rt.agents} == {
-            "world_architect", "author", "character_keeper", "editor", "continuity_checker", "retconner"
+            "world_architect", "author", "character_keeper", "editor", "continuity_checker",
+            "retconner", "structure_analyst",
         }
         # Drive each agent once directly (deterministic), projecting between.
         for name in ["world_architect", "author", "editor"]:
@@ -167,6 +169,7 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
         "retconner": ScriptedRunner(RetconAmendments(amended_entries=[
             WorldEntryDraft(title="Suns", body="One sun.", supersedes_id=known_world_entry_id)
         ])),
+        "structure_analyst": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
@@ -231,8 +234,47 @@ class _FakeAgentRunner:
 def _all_fake_runners():
     return {
         name: _FakeAgentRunner()
-        for name in ("author", "world_architect", "character_keeper", "editor", "continuity_checker", "retconner")
+        for name in (
+            "author", "world_architect", "character_keeper", "editor",
+            "continuity_checker", "retconner", "structure_analyst",
+        )
     }
+
+
+async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        settings = Settings(db_path=path)
+        runners = _all_fake_runners()
+        runners["structure_analyst"] = _FakeAgentRunner()
+        rt = Runtime(settings, runners=runners)
+        await rt.start()
+        assert {a.name for a in rt.agents} == {
+            "world_architect", "author", "character_keeper", "editor",
+            "continuity_checker", "retconner", "structure_analyst",
+        }
+        assert rt.structure_analyst is not None
+        assert rt.structure_analyst._committer is rt.committer
+        assert rt.structure_analyst.interval == settings.structure_analyst_interval
+        await rt.close()
+    finally:
+        os.unlink(path)
+
+
+async def test_runtime_wires_structure_analyst_personality_from_the_pack():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        settings = Settings(db_path=path)
+        runners = _all_fake_runners()
+        runners["structure_analyst"] = _FakeAgentRunner()
+        rt = Runtime(settings, runners=runners)
+        await rt.start()
+        assert rt.structure_analyst.personality == rt.voice_pack.agent_personalities.get("structure_analyst", "")
+        await rt.close()
+    finally:
+        os.unlink(path)
 
 
 async def test_runtime_wires_active_prose_profile_into_author():
