@@ -41,6 +41,43 @@ class ThreadIntent(BaseModel):
     note: str = ""
 
 
+class KnowledgeIntent(BaseModel):
+    """One agent-declared secret-knowledge action from structured output.
+
+    `plant` mints a new secret from a freeform `title` (the system slugs it
+    into an id -- see novelizer.canon.secrets.slugify_secret_name); `learn`,
+    `reveal`, and `uses` must cite an existing secret's `id` rather than
+    inventing one. `learn`/`uses` additionally require `character_id` (the
+    character who learns/uses the secret); `reveal` and `plant` leave it
+    blank. `BaseAgent._commit_knowledge_intents` turns validated intents
+    into secret.* commits (see novelizer/agents/base.py). CharacterKeeper is
+    restricted to `learn` only (Locked decision #1) -- minting/revealing a
+    secret is a narrative-authoring act reserved for Author/Editor.
+    """
+
+    action: Literal["plant", "learn", "reveal", "uses"]
+    title: str = ""
+    id: str = ""
+    character_id: str = ""
+    note: str = ""
+
+
+class CausalIntent(BaseModel):
+    """One agent-declared causal-edge claim from structured output.
+
+    An edge has no minted identity and no lifecycle (Locked decision #4):
+    `cause_chapter_id`/`effect_chapter_id` must each cite an existing
+    chapter id. `BaseAgent._commit_causal_intents` drops self-edges
+    (cause == effect) and edges citing an unknown chapter id, with a logged
+    warning; every other declared edge is committed as its own fact, with
+    no deduplication (see novelizer/agents/base.py).
+    """
+
+    cause_chapter_id: str
+    effect_chapter_id: str
+    note: str = ""
+
+
 class RetconDraft(BaseModel):
     description: str
     conflicting_entry_ids: list[str] = Field(default_factory=list)
@@ -50,6 +87,7 @@ class RetconDraft(BaseModel):
 class KeeperOutput(BaseModel):
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     feed_note: str = ""
 
 
@@ -58,6 +96,8 @@ class EditorVerdict(BaseModel):
     notes: str = ""
     feed_note: str = ""
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
+    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    causal_intents: list[CausalIntent] = Field(default_factory=list)
 
 
 class ContinuityOutput(BaseModel):

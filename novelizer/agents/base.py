@@ -6,7 +6,7 @@ from novelizer.canon.events import (
     EventType, AgentRemark, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
 )
 from novelizer.canon.threads import slugify_thread_name
-from novelizer.agents.schemas import ThreadIntent
+from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,8 @@ class ChapterDraft(BaseModel):
     character_ids: list[str] = Field(default_factory=list)
     feed_note: str = ""
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
+    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    causal_intents: list[CausalIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):
