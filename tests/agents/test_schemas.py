@@ -44,3 +44,38 @@ def test_feed_note_roundtrips_when_set():
     assert draft.model_validate_json(draft.model_dump_json()).feed_note == "Another storm, another chapter."
     verdict = EditorVerdict(verdict="approve", notes="clean", feed_note="Finally, a clean draft.")
     assert verdict.feed_note == "Finally, a clean draft."
+
+
+def test_thread_intent_plant_defaults():
+    from novelizer.agents.schemas import ThreadIntent
+    intent = ThreadIntent(action="plant", name="The Locket")
+    assert intent.id == "" and intent.note == ""
+
+
+def test_thread_intent_touch_roundtrips():
+    from novelizer.agents.schemas import ThreadIntent
+    intent = ThreadIntent(action="touch", id="the-locket", note="reappears")
+    again = ThreadIntent.model_validate_json(intent.model_dump_json())
+    assert again == intent
+
+
+def test_editor_verdict_default_thread_intents_empty():
+    assert EditorVerdict().thread_intents == []
+
+
+def test_editor_verdict_carries_thread_intents():
+    from novelizer.agents.schemas import ThreadIntent
+    v = EditorVerdict(verdict="approve", thread_intents=[ThreadIntent(action="touch", id="the-locket")])
+    assert v.thread_intents[0].id == "the-locket"
+
+
+def test_chapter_draft_default_thread_intents_empty():
+    from novelizer.agents.base import ChapterDraft
+    assert ChapterDraft(title="T", prose="P").thread_intents == []
+
+
+def test_chapter_draft_carries_thread_intents():
+    from novelizer.agents.base import ChapterDraft
+    from novelizer.agents.schemas import ThreadIntent
+    d = ChapterDraft(title="T", prose="P", thread_intents=[ThreadIntent(action="plant", name="The Locket")])
+    assert d.thread_intents[0].name == "The Locket"

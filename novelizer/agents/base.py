@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Protocol
 from pydantic import BaseModel, Field
 from novelizer.canon.events import EventType, AgentRemark
+from novelizer.agents.schemas import ThreadIntent
 
 
 class ChapterDraft(BaseModel):
@@ -9,6 +10,7 @@ class ChapterDraft(BaseModel):
     prose: str
     character_ids: list[str] = Field(default_factory=list)
     feed_note: str = ""
+    thread_intents: list[ThreadIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):
