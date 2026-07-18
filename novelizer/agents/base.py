@@ -8,6 +8,7 @@ class ChapterDraft(BaseModel):
     title: str
     prose: str
     character_ids: list[str] = Field(default_factory=list)
+    feed_note: str = ""
 
 
 class Runner(Protocol):

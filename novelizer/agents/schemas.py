@@ -13,6 +13,7 @@ class WorldEntryDraft(BaseModel):
 
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
+    feed_note: str = ""
 
 
 class CharacterUpdate(BaseModel):
@@ -32,16 +33,20 @@ class RetconDraft(BaseModel):
 class KeeperOutput(BaseModel):
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    feed_note: str = ""
 
 
 class EditorVerdict(BaseModel):
     verdict: Literal["approve", "revise"] = "approve"
     notes: str = ""
+    feed_note: str = ""
 
 
 class ContinuityOutput(BaseModel):
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    feed_note: str = ""
 
 
 class RetconAmendments(BaseModel):
     amended_entries: list[WorldEntryDraft] = Field(default_factory=list)
+    feed_note: str = ""
