@@ -1,11 +1,13 @@
 from __future__ import annotations
 import asyncio
+from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
+from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import AgentRoster
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
@@ -72,6 +74,7 @@ def _status_line(state: AutonomyState) -> str:
 class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
     CSS_PATH = "app.tcss"
+    SETTINGS_POLL_INTERVAL: float = 1.0
 
     # Note: Textual 5.3.0 does not accept "colon" as a key name for BINDINGS,
     # so "ctrl+k" is used to focus the command input instead.
@@ -115,6 +118,7 @@ class NovelizerApp(App):
         self.run_worker(self._statusbar_loop(), exclusive=False)
         self.run_worker(self._thread_board_loop(), exclusive=False)
         self.run_worker(self._story_shape_loop(), exclusive=False)
+        self.run_worker(self._settings_watch_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -204,6 +208,40 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("story_shape", e)
             await asyncio.sleep(1.0)
+
+    async def _settings_watch_loop(self) -> None:
+        story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
+        watched = [story_dir.story_toml, global_config_path()]
+
+        def snapshot() -> tuple:
+            return tuple(p.stat().st_mtime if p.exists() else 0.0 for p in watched)
+
+        last = snapshot()
+        while True:
+            await asyncio.sleep(self.SETTINGS_POLL_INTERVAL)
+            current = snapshot()
+            if current == last:
+                continue
+            last = current
+            try:
+                new_settings = load_effective_settings(story_dir=story_dir)
+            except TOMLFileError as e:
+                self._report_worker_error("settings", e)
+                continue
+            try:
+                result = self.runtime.apply_settings(new_settings)
+            except Exception as e:
+                self._report_worker_error("settings", e)
+                continue
+            log = self.query_one("#feed", RichLog)
+            if result["applied"]:
+                line = f"⚙ settings applied: {', '.join(result['applied'])}"
+                log.write(line)
+                self.messages.append(line)
+            if result["restart_required"]:
+                line = f"⚙ restart required: {', '.join(result['restart_required'])}"
+                log.write(line)
+                self.messages.append(line)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))
