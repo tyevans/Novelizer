@@ -6,6 +6,9 @@ from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.canon.events import EventType
 from novelizer.store.models import DirectorSignal, SignalKind
+from novelizer.agents.schemas import (
+    WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments,
+)
 
 
 class BoomRunner:
@@ -13,12 +16,39 @@ class BoomRunner:
         raise RuntimeError("boom")
 
 
+class _Idle:
+    """A runner whose output never raises readiness for its agent."""
+
+    def __init__(self, out):
+        self._out = out
+
+    async def ainvoke(self, inputs):
+        return {"structured_response": self._out}
+
+
+def _idle_room_runners():
+    return {
+        "world_architect": _Idle(WorldEntriesDraft(entries=[])),
+        "character_keeper": _Idle(KeeperOutput()),
+        "author": BoomRunner(),
+        "editor": _Idle(EditorVerdict(verdict="approve", notes="")),
+        "continuity_checker": _Idle(ContinuityOutput()),
+        "retconner": _Idle(RetconAmendments()),
+    }
+
+
 @pytest.mark.asyncio
 async def test_author_loop_survives_exception_and_feed_keeps_working():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    settings = Settings(db_path=path, author_interval=1, projector_interval=0.1)
-    rt = Runtime(settings, runner=BoomRunner())
+    settings = Settings(
+        db_path=path,
+        author_interval=1,
+        default_agent_interval=100,
+        continuity_interval=100,
+        projector_interval=0.1,
+    )
+    rt = Runtime(settings, runners=_idle_room_runners())
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -26,7 +56,7 @@ async def test_author_loop_survives_exception_and_feed_keeps_working():
             await pilot.pause(1.3)  # let author loop hit the boom at least once
 
             # 1. error was surfaced, not swallowed
-            assert any("boom" in m and "author" in m for m in app.messages)
+            assert any("boom" in m and "scheduler" in m for m in app.messages)
 
             # 2. worker loops are still alive: a subsequently-appended event
             # still flows through the projector/feed loops.
