@@ -6,6 +6,7 @@ from rich.table import Table
 from novelizer.config import Settings
 from novelizer.runtime import Runtime
 from novelizer.director import commands
+from novelizer.voices.loader import load_voice_pack
 
 console = Console()
 
@@ -109,6 +110,26 @@ def retcons(ctx):
             table.add_row(r.id[:8], r.description, r.proposed_resolution)
         console.print(table)
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command()
+@click.option("--pack", "pack_path", default=None, help="Inspect a voice pack other than the active one.")
+@click.pass_context
+def voices(ctx, pack_path: str | None):
+    """List the active (or given) voice pack's prose profiles."""
+    settings = ctx.obj["settings"]
+    path = pack_path or settings.voice_pack
+    pack = load_voice_pack(path)
+    active_name = settings.prose_profile if pack_path is None else None
+    table = Table(title=f"Voice pack: {pack.name}")
+    table.add_column("Active", style="green", no_wrap=True)
+    table.add_column("Profile")
+    table.add_column("Casting note")
+    for name, profile in pack.prose_profiles.items():
+        marker = "*" if name == active_name else ""
+        snippet = profile.casting_note.strip().replace("\n", " ")[:80]
+        table.add_row(marker, name, snippet)
+    console.print(table)
 
 
 @cli.command()
