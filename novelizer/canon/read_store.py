@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 import aiosqlite
 from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest
+from novelizer.canon.autonomy import Proposal, AutonomyState
 
 
 class ReadStore:
@@ -71,3 +72,22 @@ class ReadStore:
         else:
             cur = await self._conn.execute("SELECT data FROM retcon_requests ORDER BY rowid")
         return [RetconRequest.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_proposals(self, status: Optional[str] = None) -> list[Proposal]:
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM proposals WHERE status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM proposals ORDER BY rowid")
+        return [Proposal.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_proposal(self, proposal_id: str) -> Optional[Proposal]:
+        cur = await self._conn.execute("SELECT data FROM proposals WHERE id=?", (proposal_id,))
+        row = await cur.fetchone()
+        return Proposal.model_validate_json(row[0]) if row else None
+
+    async def get_autonomy_state(self) -> AutonomyState:
+        cur = await self._conn.execute("SELECT data FROM autonomy_state WHERE id='singleton'")
+        row = await cur.fetchone()
+        return AutonomyState.model_validate_json(row[0]) if row else AutonomyState()

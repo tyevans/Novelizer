@@ -5,6 +5,7 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.events import EventType
+from novelizer.canon.autonomy import Proposal, AutonomyState, AutonomyLevel
 from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, SignalKind
 
 
@@ -47,3 +48,35 @@ async def test_consumed_signal_disappears(stack):
     await events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, "s1", sig)
     await proj.catch_up()
     assert await read.list_unconsumed_signals() == []
+
+
+async def test_list_and_get_proposals(stack):
+    events, proj, read = stack
+    prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
+                     target_aggregate_id="c1", payload={"title": "One"})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    await proj.catch_up()
+    open_props = await read.list_proposals(status="open")
+    assert len(open_props) == 1 and open_props[0].proposing_agent == "author"
+    fetched = await read.get_proposal(prop.id)
+    assert fetched is not None and fetched.target_aggregate_id == "c1"
+    assert await read.get_proposal("missing") is None
+
+
+async def test_get_autonomy_state_defaults_to_full_auto(stack):
+    _, _, read = stack
+    st = await read.get_autonomy_state()
+    assert st.global_level == AutonomyLevel.full_auto
+    assert st.overrides == {}
+
+
+async def test_get_autonomy_state_reflects_latest_change(stack):
+    events, proj, read = stack
+    await events.append(
+        EventType.AUTONOMY_CHANGED, "singleton",
+        AutonomyState(global_level=AutonomyLevel.gated_all, overrides={"author": AutonomyLevel.full_auto}),
+    )
+    await proj.catch_up()
+    st = await read.get_autonomy_state()
+    assert st.global_level == AutonomyLevel.gated_all
+    assert st.overrides["author"] == AutonomyLevel.full_auto
