@@ -48,3 +48,20 @@ def test_character_voice_roundtrips_through_json():
     dumped = c.model_dump_json()
     restored = Character.model_validate_json(dumped)
     assert restored.voice == "Clipped sentences, never says 'I love you' outright."
+
+
+from novelizer.store.models import ThreadState, ThreadRecord
+
+
+def test_thread_record_defaults():
+    t = ThreadRecord(id="the-locket", name="The Locket")
+    assert t.state == ThreadState.planted
+    assert t.touch_count == 0
+    assert t.last_note == ""
+    assert t.last_chapter_id == ""
+
+
+def test_thread_record_roundtrips_through_json():
+    t = ThreadRecord(id="the-locket", name="The Locket", state=ThreadState.touched, touch_count=2, last_note="advanced")
+    again = ThreadRecord.model_validate_json(t.model_dump_json())
+    assert again == t
