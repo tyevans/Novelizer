@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
-from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal
+from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest
 
 
 class ReadStore:
@@ -57,3 +57,17 @@ class ReadStore:
         if target_agent is not None:
             sigs = [s for s in sigs if s.target_agent is None or s.target_agent == target_agent]
         return sigs
+
+    async def get_character(self, character_id: str) -> Optional[Character]:
+        cur = await self._conn.execute("SELECT data FROM characters WHERE id=?", (character_id,))
+        row = await cur.fetchone()
+        return Character.model_validate_json(row[0]) if row else None
+
+    async def list_retcon_requests(self, status: Optional[str] = None) -> list[RetconRequest]:
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM retcon_requests WHERE status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM retcon_requests ORDER BY rowid")
+        return [RetconRequest.model_validate_json(r[0]) for r in await cur.fetchall()]
