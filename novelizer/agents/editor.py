@@ -36,6 +36,8 @@ class Editor(BaseAgent):
             "target": drafts[0] if drafts else None,
             "threads": await self._read.list_threads(),
             "scores": await self._read.list_structure_scores(),
+            "secrets": await self._read.list_secrets(),
+            "chapters": await self._read.list_chapters(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -78,6 +80,10 @@ class Editor(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_secret_ids = {s.id for s in ctx["secrets"]}
+        await self._commit_knowledge_intents(verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id)
+        valid_chapter_ids = {c.id for c in ctx["chapters"]}
+        await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
         await self._remark(verdict.feed_note)
 
     async def run_once(self) -> None:

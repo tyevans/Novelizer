@@ -244,3 +244,66 @@ async def test_editor_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert sent == "Chapter title: One\n\nProse:\np"
+
+
+from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
+from novelizer.canon.events import SecretCreated
+
+
+async def test_editor_commit_uses_a_known_active_secret(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        knowledge_intents=[KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    refs = await read.list_secret_references(secret_id="the-heir-lives")
+    assert len(refs) == 1 and refs[0].chapter_id == "c1"
+
+
+async def test_editor_commit_declares_a_valid_causal_edge(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="Zero", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        causal_intents=[CausalIntent(cause_chapter_id="c0", effect_chapter_id="c1", note="sets up the reveal")],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    edges = await read.list_causal_edges()
+    assert len(edges) == 1 and edges[0].cause_chapter_id == "c0" and edges[0].effect_chapter_id == "c1"
+
+
+async def test_editor_commit_drops_unknown_secret_id(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        knowledge_intents=[KnowledgeIntent(action="reveal", id="ghost-secret")],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []
+
+
+async def test_editor_commit_with_no_knowledge_or_causal_intents_emits_no_new_event_types(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean")
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith(("secret.", "causal_edge."))] == []
