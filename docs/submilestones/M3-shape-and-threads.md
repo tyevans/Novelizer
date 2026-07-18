@@ -36,13 +36,13 @@ the Thread Board's render-time helper no longer reports the thread stale. This r
 with no live model call, and is a normal black-box test in the existing agent-test style.
 
 **(b) Live-LLM smoke check** — the actual claim ("the Author, unprompted, picks a stale
-thread back up"): an `ollama`-marked test (or documented manual run), following the M1/M2
+thread back up"): a `live_llm`-marked test (or documented manual run), following the M1/M2
 precedent for behavior that depends on real model output, that seeds the same stale-thread
 fixture, runs the real Author against the injected `BrainContext`, and confirms it reacts
 by including a matching thread intent — with no director signal and no manual prompt
 beyond what the room already injects. **CI cannot prove this causality** — a
 `FakeRunner`-driven test only proves the pipe is connected, not that an LLM will act on
-what flows through it. The ollama-marked check is the true done-when observation for M3;
+what flows through it. The live_llm-marked check is the true done-when observation for M3;
 (a) is a necessary but not sufficient precondition for it.
 
 ## Load-bearing design decisions

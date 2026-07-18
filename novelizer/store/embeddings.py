@@ -1,26 +1,19 @@
 from __future__ import annotations
 import chromadb
-from chromadb import EmbeddingFunction, Documents, Embeddings
-import ollama as ollama_client
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from novelizer.store.models import WorldEntry, Character, Chapter
 
 
-class OllamaEmbeddingFunction(EmbeddingFunction):
-    def __init__(self, model: str) -> None:
-        self._model = model
-
-    def __call__(self, input: Documents) -> Embeddings:
-        result = []
-        for text in input:
-            resp = ollama_client.embed(model=self._model, input=text)
-            result.append(resp.embeddings[0])
-        return result
-
-
 class EmbeddingStore:
-    def __init__(self, path: str, embed_model: str = "nomic-embed-text") -> None:
+    def __init__(
+        self,
+        path: str,
+        embed_model: str = "nomic-embed-text",
+        base_url: str = "http://localhost:8080/v1",
+        api_key: str = "not-needed",
+    ) -> None:
         self._client = chromadb.PersistentClient(path=path)
-        ef = OllamaEmbeddingFunction(embed_model)
+        ef = OpenAIEmbeddingFunction(api_key=api_key, model_name=embed_model, api_base=base_url)
         self._world = self._client.get_or_create_collection("world_entries", embedding_function=ef)
         self._chars = self._client.get_or_create_collection("characters", embedding_function=ef)
         self._chapters = self._client.get_or_create_collection("chapters", embedding_function=ef)

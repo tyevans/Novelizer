@@ -271,11 +271,12 @@ Run the test suite:
 uv run pytest
 ```
 
-By default, tests marked `ollama` (embedding-store tests that require a locally running
-Ollama server) are deselected via `addopts = "-m 'not ollama'"` in `pyproject.toml`, so the
-default run is green without any external services. To run them explicitly (with Ollama
-running and the configured embedding model pulled):
+By default, tests marked `live_llm` (embedding-store tests and the Author live-LLM smoke test,
+which require a running OpenAI-compatible LLM endpoint — see `Settings.llm_base_url`) are
+deselected via `addopts = "-m 'not live_llm'"` in `pyproject.toml`, so the default run is green
+without any external services. To run them explicitly (with the configured endpoint reachable
+and serving the configured models):
 
 ```bash
-uv run pytest -m ollama
+uv run pytest -m live_llm
 ```
