@@ -80,3 +80,17 @@ async def test_get_autonomy_state_reflects_latest_change(stack):
     st = await read.get_autonomy_state()
     assert st.global_level == AutonomyLevel.gated_all
     assert st.overrides["author"] == AutonomyLevel.full_auto
+
+
+async def test_list_and_get_threads(stack):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+    events, proj, read = stack
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_PLANTED, "mira-revenge", ThreadPlanted(id="mira-revenge", name="Mira's Revenge"))
+    await events.append(EventType.THREAD_TOUCHED, "the-locket", ThreadTouched(id="the-locket", note="reappears"))
+    await proj.catch_up()
+    threads = await read.list_threads()
+    assert {t.id for t in threads} == {"the-locket", "mira-revenge"}
+    fetched = await read.get_thread("the-locket")
+    assert fetched is not None and fetched.touch_count == 1
+    assert await read.get_thread("missing") is None
