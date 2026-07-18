@@ -53,6 +53,30 @@ def test_acyclic_forward_graph_has_no_candidates():
     assert find_paradoxes(edges, ["c1", "c2", "c3"]) == []
 
 
+def test_cross_edge_into_a_finished_subtree_that_still_closes_a_cycle_is_flagged():
+    # c1->c2->c4->c1 and c1->c3->c4->c1 are both cycles sharing node c4.
+    # With chapter order [c1,c2,c3,c4] and a path-DFS visiting c2 before c3,
+    # c4 is already fully visited (black) by the time c3->c4 is examined, so
+    # a naive back-edge-only DFS misses it even though it lies on a cycle.
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c3"),
+        CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c4"),
+        CausalEdgeRecord(cause_chapter_id="c3", effect_chapter_id="c4"),
+        CausalEdgeRecord(cause_chapter_id="c4", effect_chapter_id="c1"),
+    ]
+    result = find_paradoxes(edges, ["c1", "c2", "c3", "c4"])
+    got = {(p.cause_chapter_id, p.effect_chapter_id, p.reason) for p in result}
+    assert got == {
+        ("c1", "c2", "cycle"),
+        ("c1", "c3", "cycle"),
+        ("c2", "c4", "cycle"),
+        ("c3", "c4", "cycle"),
+        ("c4", "c1", "ordering"),
+    }
+    assert len(result) == 5
+
+
 def test_paradox_description_starts_with_the_pinned_tag():
     p = ParadoxCandidate(cause_chapter_id="c3", effect_chapter_id="c1", reason="ordering")
     desc = paradox_description(p)
