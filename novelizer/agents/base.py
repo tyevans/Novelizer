@@ -94,6 +94,26 @@ class BaseAgent:
                     logger.warning("%s: dropped thread plant intent with empty name", self.name)
                     continue
                 thread_id = slugify_thread_name(intent.name)
+                if thread_id in active_thread_ids:
+                    # A thread id is minted exactly once, at thread.planted. This
+                    # plant collides with an id that's already live, so the agent
+                    # clearly means "this thread is live" — downgrade to a touch
+                    # instead of committing a planted event the projection would
+                    # just no-op.
+                    logger.info(
+                        "%s: plant %r collides with active thread id %r, downgrading to touch",
+                        self.name, intent.name, thread_id,
+                    )
+                    await self._committer.commit(
+                        self.name, EventType.THREAD_TOUCHED, thread_id,
+                        ThreadTouched(id=thread_id, chapter_id=chapter_id, note=intent.note),
+                    )
+                    continue
+                logger.warning(
+                    "%s: plant %r mints id %r; if this id already exists (terminal or unknown "
+                    "to the caller) the commit will be a projection no-op",
+                    self.name, intent.name, thread_id,
+                )
                 await self._committer.commit(
                     self.name, EventType.THREAD_PLANTED, thread_id,
                     ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note),

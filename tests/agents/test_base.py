@@ -140,3 +140,16 @@ async def test_commit_thread_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_thread_intents([], active_thread_ids=set())
     assert await events.events_since(0) == []
+
+
+async def test_commit_thread_intents_plant_colliding_with_active_id_downgrades_to_touch(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="plant", name="The Locket", note="still going")],
+        active_thread_ids={"the-locket"}, chapter_id="c1",
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.THREAD_TOUCHED
+    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going"}

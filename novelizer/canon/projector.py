@@ -154,14 +154,22 @@ class Projector:
                 "UPDATE proposals SET status=? WHERE id=?", (new_status, p["id"])
             )
         elif t == EventType.THREAD_PLANTED:
-            record = ThreadRecord(
-                id=p["id"], name=p["name"], state=ThreadState.planted,
-                last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
-            )
-            await self._conn.execute(
-                "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
-                (record.id, record.model_dump_json(), record.state.value),
-            )
+            cur = await self._conn.execute("SELECT id FROM threads WHERE id=?", (p["id"],))
+            existing = await cur.fetchone()
+            if existing is None:
+                record = ThreadRecord(
+                    id=p["id"], name=p["name"], state=ThreadState.planted,
+                    last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                    (record.id, record.model_dump_json(), record.state.value),
+                )
+            # else: a thread id is minted exactly once. A second thread.planted
+            # for an id that already has a row (any state, including terminal)
+            # is a projection no-op — the event remains a fact in the log, but
+            # first-plant-wins so replanting can never reset state/touch_count
+            # or resurrect an absorbed terminal thread.
         elif t in (EventType.THREAD_TOUCHED, EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED):
             cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (p["id"],))
             row = await cur.fetchone()

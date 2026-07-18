@@ -25,6 +25,8 @@ def _expected_state(actions: list[str]) -> tuple[ThreadState, int]:
     state = ThreadState.planted
     touch_count = 0
     for action in actions:
+        if action == "plant":
+            continue  # first-plant-wins: a re-plant of an existing id is always a no-op
         if state in TERMINAL:
             continue  # absorbing: any event after a terminal state is a no-op
         _, _, new_state = _ACTION_EVENTS[action]
@@ -47,6 +49,9 @@ async def _run_sequence(actions: list[str]) -> tuple[ThreadState, int, ThreadSta
 
         await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
         for action in actions:
+            if action == "plant":
+                await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+                continue
             event_type, payload_cls, _ = _ACTION_EVENTS[action]
             await events.append(event_type, "t1", payload_cls(id="t1"))
         await proj.catch_up()
@@ -70,7 +75,7 @@ async def _run_sequence(actions: list[str]) -> tuple[ThreadState, int, ThreadSta
         os.unlink(path)
 
 
-@given(st.lists(st.sampled_from(["touch", "pay_off", "abandon"]), max_size=8))
+@given(st.lists(st.sampled_from(["touch", "pay_off", "abandon", "plant"]), max_size=8))
 @settings(max_examples=50, deadline=None)
 def test_thread_state_machine_holds_for_any_event_sequence(actions):
     """For any interleaving of touch/pay_off/abandon events following a plant,
