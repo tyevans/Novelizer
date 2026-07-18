@@ -63,7 +63,7 @@ def format_event(ev: StoredEvent) -> str:
 def _status_line(state: AutonomyState) -> str:
     base = (
         f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
-        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id>"
+        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings"
     )
     if state.overrides:
         summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
@@ -250,6 +250,13 @@ class NovelizerApp(App):
         self.query_one("#body").toggle_class("room")
 
     async def _run_command(self, line: str) -> None:
+        cmd = line.strip().lstrip(":").split(maxsplit=1)
+        if cmd and cmd[0].lower() == "settings":
+            from novelizer.tui.settings_screen import SettingsScreen
+
+            story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
+            self.push_screen(SettingsScreen(story_dir, lambda: self.runtime.settings))
+            return
         result = await commands.dispatch(self.runtime, line)
         log = self.query_one("#feed", RichLog)
         log.write(f"» {result}")
