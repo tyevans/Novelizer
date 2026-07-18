@@ -64,6 +64,9 @@ class ThreadPlanted(BaseModel):
     name: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadTouched(BaseModel):
@@ -72,6 +75,9 @@ class ThreadTouched(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadPaidOff(BaseModel):
@@ -83,6 +89,9 @@ class ThreadPaidOff(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadAbandoned(BaseModel):
@@ -122,6 +131,9 @@ class SecretLearned(BaseModel):
     character_id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class SecretReferenced(BaseModel):
@@ -135,6 +147,9 @@ class SecretReferenced(BaseModel):
     character_id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class SecretRevealed(BaseModel):
@@ -160,6 +175,9 @@ class CausalEdgeDeclared(BaseModel):
     cause_chapter_id: str
     effect_chapter_id: str
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class AnnotationStructureScored(BaseModel):

@@ -87,7 +87,11 @@ class BaseAgent:
         )
 
     async def _commit_thread_intents(
-        self, intents: list[ThreadIntent], active_thread_ids: set[str], chapter_id: str = ""
+        self,
+        intents: list[ThreadIntent],
+        active_thread_ids: set[str],
+        chapter_id: str = "",
+        source: str = "declared",
     ) -> None:
         """Turn agent-declared ThreadIntent entries into thread.* commits.
 
@@ -116,7 +120,7 @@ class BaseAgent:
                     )
                     await self._committer.commit(
                         self.name, EventType.THREAD_TOUCHED, thread_id,
-                        ThreadTouched(id=thread_id, chapter_id=chapter_id, note=intent.note),
+                        ThreadTouched(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source),
                     )
                     continue
                 logger.warning(
@@ -126,7 +130,7 @@ class BaseAgent:
                 )
                 await self._committer.commit(
                     self.name, EventType.THREAD_PLANTED, thread_id,
-                    ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note),
+                    ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note, source=source),
                 )
                 continue
             if intent.id not in active_thread_ids:
@@ -139,10 +143,11 @@ class BaseAgent:
                 "pay_off": (ThreadPaidOff, EventType.THREAD_PAID_OFF),
                 "abandon": (ThreadAbandoned, EventType.THREAD_ABANDONED),
             }[intent.action]
-            await self._committer.commit(
-                self.name, event_type, intent.id,
-                payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note),
-            )
+            if payload_cls is ThreadAbandoned:
+                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+            else:
+                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source)
+            await self._committer.commit(self.name, event_type, intent.id, payload)
 
     async def _commit_knowledge_intents(
         self,
@@ -150,6 +155,7 @@ class BaseAgent:
         active_secret_ids: set[str],
         chapter_id: str = "",
         allowed_actions: frozenset[str] = frozenset({"plant", "learn", "reveal", "uses"}),
+        source: str = "declared",
     ) -> None:
         """Turn agent-declared KnowledgeIntent entries into secret.* commits.
 
@@ -209,11 +215,14 @@ class BaseAgent:
                 payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
             else:
                 payload = payload_cls(
-                    id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note
+                    id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note,
+                    source=source,
                 )
             await self._committer.commit(self.name, event_type, intent.id, payload)
 
-    async def _commit_causal_intents(self, intents: list[CausalIntent], valid_chapter_ids: set[str]) -> None:
+    async def _commit_causal_intents(
+        self, intents: list[CausalIntent], valid_chapter_ids: set[str], source: str = "declared"
+    ) -> None:
         """Turn agent-declared CausalIntent entries into
         causal_edge.declared commits.
 
@@ -247,5 +256,6 @@ class BaseAgent:
                     cause_chapter_id=intent.cause_chapter_id,
                     effect_chapter_id=intent.effect_chapter_id,
                     note=intent.note,
+                    source=source,
                 ),
             )
