@@ -45,23 +45,41 @@ class NovelizerApp(App):
         self.run_worker(self._author_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
 
+    def _report_worker_error(self, worker_name: str, e: Exception) -> None:
+        line = f"⚠ {worker_name} error: {e}"
+        try:
+            log = self.query_one("#feed", RichLog)
+            log.write(line)
+        except Exception:
+            pass
+        self.messages.append(line)
+
     async def _projector_loop(self) -> None:
         while True:
-            await self.runtime.projector.catch_up()
+            try:
+                await self.runtime.projector.catch_up()
+            except Exception as e:
+                self._report_worker_error("projector", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _author_loop(self) -> None:
         while True:
-            await self.runtime.author.run_once()
+            try:
+                await self.runtime.author.run_once()
+            except Exception as e:
+                self._report_worker_error("author", e)
             await asyncio.sleep(self.runtime.author.interval)
 
     async def _feed_loop(self) -> None:
         log = self.query_one("#feed", RichLog)
         while True:
-            events = await self.runtime.events.events_since(self._last_seq)
-            for ev in events:
-                rendered = format_event(ev)
-                log.write(rendered)
-                self.messages.append(rendered)
-                self._last_seq = ev.sequence
+            try:
+                events = await self.runtime.events.events_since(self._last_seq)
+                for ev in events:
+                    rendered = format_event(ev)
+                    log.write(rendered)
+                    self.messages.append(rendered)
+                    self._last_seq = ev.sequence
+            except Exception as e:
+                self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)

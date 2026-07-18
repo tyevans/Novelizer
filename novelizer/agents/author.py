@@ -56,7 +56,8 @@ class Author:
         chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
         await self._events.append(EventType.CHAPTER_CREATED, chapter.id, chapter)
         for sig in ctx["signals"]:
-            await self._events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, sig.id, sig)
+            consumed_sig = sig.model_copy(update={"consumed": True})
+            await self._events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, sig.id, consumed_sig)
 
     async def run_once(self) -> None:
         ctx = await self.poll()
