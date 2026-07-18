@@ -1,7 +1,7 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import EditorVerdict
-from novelizer.brain.context import pacing_flags_note
+from novelizer.brain.context import causal_flags_note, pacing_flags_note
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -38,6 +38,7 @@ class Editor(BaseAgent):
             "scores": await self._read.list_structure_scores(),
             "secrets": await self._read.list_secrets(),
             "chapters": await self._read.list_chapters(),
+            "causal_edges": await self._read.list_causal_edges(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -62,7 +63,9 @@ class Editor(BaseAgent):
         cast = f"\n\nIn character: {self.personality}" if self.personality else ""
         voices = await self._character_voices_block(ch.character_ids)
         pacing = pacing_flags_note(ctx["scores"])
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}"
+        chapter_order = [c.id for c in ctx["chapters"]]
+        causal = causal_flags_note(ctx["causal_edges"], chapter_order)
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
