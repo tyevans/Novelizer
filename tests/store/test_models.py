@@ -1,5 +1,6 @@
 import pytest
 from datetime import datetime, timezone
+from pydantic import ValidationError
 from novelizer.store.models import (
     WorldEntry, Character, CharacterRelationship, Event,
     Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
@@ -72,7 +73,5 @@ def test_structure_score_roundtrips_through_json():
 
 
 def test_structure_score_tension_is_bounded():
-    import pytest
-    from pydantic import ValidationError
     with pytest.raises(ValidationError):
         StructureScore(chapter_id="c1", tension=2.0)
