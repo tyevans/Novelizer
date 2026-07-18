@@ -24,6 +24,11 @@ class EventType:
     THREAD_TOUCHED = "thread.touched"
     THREAD_PAID_OFF = "thread.paid_off"
     THREAD_ABANDONED = "thread.abandoned"
+    SECRET_CREATED = "secret.created"
+    SECRET_LEARNED = "secret.learned"
+    SECRET_REFERENCED = "secret.referenced"
+    SECRET_REVEALED = "secret.revealed"
+    CAUSAL_EDGE_DECLARED = "causal_edge.declared"
     ANNOTATION_STRUCTURE_SCORED = "annotation.structure_scored"
 
 
@@ -88,6 +93,72 @@ class ThreadAbandoned(BaseModel):
 
     id: str
     chapter_id: str = ""
+    note: str = ""
+
+
+class SecretCreated(BaseModel):
+    """Payload for secret.created — mints a new secret's identity.
+
+    `id` is the slug minted from `title` (see
+    novelizer.canon.secrets.slugify_secret_name) at creation time; every
+    later secret.* event for this secret must cite this id, never re-derive
+    it (Locked decision #1). Any prose-producing agent (Author, Editor) may
+    mint a secret; CharacterKeeper never does.
+    """
+
+    id: str
+    title: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class SecretLearned(BaseModel):
+    """Payload for secret.learned — one character learns an existing secret,
+    cited by id. Projected as a row in the secret_knowledge join table
+    (idempotent: learning the same secret twice is a no-op, not a counter).
+    """
+
+    id: str
+    character_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class SecretReferenced(BaseModel):
+    """Payload for secret.referenced — a character uses/references an
+    existing secret in a chapter, cited by id. This is the durable,
+    replayable 'uses' record M4.2's LeakDetector reads (Locked decision #3)
+    — never deduped, every reference is its own fact.
+    """
+
+    id: str
+    character_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class SecretRevealed(BaseModel):
+    """Payload for secret.revealed — an existing secret becomes public,
+    cited by id. Secret-level, set-once: the KnowledgeProjection sets a
+    `revealed` flag on the secret's own record once, never per character
+    (Locked decision #2) — the matrix accessor derives `revealed` for every
+    character, including ones created after this event.
+    """
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class CausalEdgeDeclared(BaseModel):
+    """Payload for causal_edge.declared — a claimed cause/effect relationship
+    between two existing chapters. No minted identity and no lifecycle
+    (Locked decision #4): every declaration is committed and projected as
+    its own row, never deduped or superseded.
+    """
+
+    cause_chapter_id: str
+    effect_chapter_id: str
     note: str = ""
 
 

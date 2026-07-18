@@ -7,7 +7,8 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, RetconDraft
+from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, RetconDraft, KnowledgeIntent
+from novelizer.canon.events import SecretCreated
 from novelizer.store.models import Character, Chapter, RetconStatus
 
 
@@ -108,3 +109,42 @@ async def test_updates_character_voice_and_leaves_unset_voice_unchanged(stack):
     mira2 = await read.get_character("c1")
     assert mira2.voice == "Now trails off mid-sentence when scared."
     assert mira2.arc_status == "cracking"
+
+
+async def test_character_keeper_commit_learn_commits_secret_learned(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    out = KeeperOutput(
+        knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="pieced it together")],
+    )
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    matrix = await read.knowledge_matrix()
+    assert "mara" in matrix["the-heir-lives"]["known_by"]
+
+
+async def test_character_keeper_commit_drops_non_learn_actions(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await proj.catch_up()
+    out = KeeperOutput(knowledge_intents=[KnowledgeIntent(action="plant", title="Should Not Commit")])
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []
+
+
+async def test_character_keeper_commit_with_no_knowledge_intents_emits_no_secret_events(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await proj.catch_up()
+    out = KeeperOutput()
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []

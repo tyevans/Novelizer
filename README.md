@@ -285,6 +285,34 @@ declared a matching thread-touch intent unprompted — demonstrating the end-to-
 flow from staleness detection through prompt injection to live-LLM reaction.
 Test timing: ~9m15s on local inference (model: as configured in `NOVELIZER_AUTHOR_MODEL`).
 
+### Secret & causal-edge ledgers (Story Brain, Phase 2)
+
+The Author and Editor can declare secret bookkeeping alongside their normal
+output: `plant` a new secret from a freeform title (slugged into a stable
+id, same rule as threads), `learn` an existing secret for a character,
+`reveal` a secret publicly, or record a character `uses` an existing secret
+in a chapter. CharacterKeeper may only declare `learn` — minting or
+revealing a secret is a narrative-authoring act reserved for Author/Editor.
+Author and Editor can also declare `causal_intents`: a claimed
+`(cause_chapter_id, effect_chapter_id, note)` relationship between two
+existing chapters.
+
+```bash
+novelizer proposals   # secret.created/learned/referenced and
+                       # causal_edge.declared never appear here, at any
+                       # autonomy level; secret.revealed can, under
+                       # gated_canon or gated_all
+```
+
+The knowledge matrix (`ReadStore.knowledge_matrix()`) tracks, per secret,
+which characters have `learned` it and whether it has been `revealed`
+(revealed is secret-level, set-once state that applies to every character
+— including ones created after the reveal — never written per character).
+`secret.referenced` events are the durable record of a character using a
+secret in a chapter; the causal-edge ledger (`ReadStore.list_causal_edges()`)
+is a strict, never-deduped append of every declared edge. Leak/paradox
+detection over these ledgers, and their TUI views, are M4.2/M4.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole

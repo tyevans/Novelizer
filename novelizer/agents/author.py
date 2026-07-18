@@ -53,6 +53,7 @@ class Author(BaseAgent):
             "chapters": chapters,
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
             "threads": await self._read.list_threads(),
+            "secrets": await self._read.list_secrets(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -69,6 +70,10 @@ class Author(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter.id)
+        active_secret_ids = {s.id for s in ctx["secrets"]}
+        await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter.id)
+        valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}
+        await self._commit_causal_intents(draft.causal_intents, valid_chapter_ids)
         await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 

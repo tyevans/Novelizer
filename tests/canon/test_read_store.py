@@ -109,3 +109,55 @@ async def test_list_and_get_structure_scores(stack):
     fetched = await read.get_structure_score("c1")
     assert fetched is not None and fetched.tension == 0.6
     assert await read.get_structure_score("missing") is None
+
+
+async def test_list_and_get_secrets(stack):
+    from novelizer.canon.events import SecretCreated
+    events, proj, read = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_CREATED, "the-map-is-forged", SecretCreated(id="the-map-is-forged", title="The Map Is Forged"))
+    await proj.catch_up()
+    secrets = await read.list_secrets()
+    assert {s.id for s in secrets} == {"the-heir-lives", "the-map-is-forged"}
+    fetched = await read.get_secret("the-heir-lives")
+    assert fetched is not None and fetched.title == "The Heir Lives"
+    assert await read.get_secret("missing") is None
+
+
+async def test_knowledge_matrix_reflects_learned_and_revealed(stack):
+    from novelizer.canon.events import SecretCreated, SecretLearned, SecretRevealed
+    events, proj, read = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_CREATED, "the-map-is-forged", SecretCreated(id="the-map-is-forged", title="The Map Is Forged"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await events.append(EventType.SECRET_REVEALED, "the-map-is-forged", SecretRevealed(id="the-map-is-forged"))
+    await proj.catch_up()
+    matrix = await read.knowledge_matrix()
+    assert matrix["the-heir-lives"] == {"revealed": False, "known_by": {"mara"}}
+    assert matrix["the-map-is-forged"] == {"revealed": True, "known_by": set()}
+
+
+async def test_list_causal_edges(stack):
+    from novelizer.canon.events import CausalEdgeDeclared
+    events, proj, read = stack
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c2", CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c2"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c3", CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c3", note="the letter arrives"))
+    await proj.catch_up()
+    edges = await read.list_causal_edges()
+    assert [(e.cause_chapter_id, e.effect_chapter_id, e.note) for e in edges] == [
+        ("c1", "c2", ""), ("c2", "c3", "the letter arrives"),
+    ]
+
+
+async def test_list_secret_references_filters_by_secret_id(stack):
+    from novelizer.canon.events import SecretCreated, SecretReferenced
+    events, proj, read = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives", SecretReferenced(id="the-heir-lives", character_id="mara", chapter_id="c3"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives", SecretReferenced(id="the-heir-lives", character_id="ren", chapter_id="c4"))
+    await proj.catch_up()
+    all_refs = await read.list_secret_references()
+    assert len(all_refs) == 2
+    filtered = await read.list_secret_references(secret_id="the-heir-lives")
+    assert {r.character_id for r in filtered} == {"mara", "ren"}
+    assert await read.list_secret_references(secret_id="missing") == []

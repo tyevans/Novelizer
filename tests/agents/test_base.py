@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, AgentRemark, ThreadPlanted
 from novelizer.agents.base import BaseAgent
-from novelizer.agents.schemas import ThreadIntent
+from novelizer.agents.schemas import ThreadIntent, CausalIntent
 from novelizer.store.models import DirectorSignal, SignalKind
 
 
@@ -153,3 +153,158 @@ async def test_commit_thread_intents_plant_colliding_with_active_id_downgrades_t
     assert len(log) == 1
     assert log[0].event_type == EventType.THREAD_TOUCHED
     assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going"}
+
+
+from novelizer.agents.schemas import KnowledgeIntent
+from novelizer.canon.events import SecretCreated
+
+
+async def test_commit_knowledge_intents_plant_mints_slugged_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="plant", title="The Heir Lives")], active_secret_ids=set(),
+    )
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.SECRET_CREATED
+    assert log[0].payload["id"] == "the-heir-lives"
+    assert log[0].payload["title"] == "The Heir Lives"
+
+
+async def test_commit_knowledge_intents_plant_dropped_when_title_blank(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents([KnowledgeIntent(action="plant", title="   ")], active_secret_ids=set())
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_plant_dropped_on_id_collision(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="plant", title="The Heir Lives")],
+        active_secret_ids={"the-heir-lives"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_learn_commits_when_id_known(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="found the letter")],
+        active_secret_ids={"the-heir-lives"}, chapter_id="c2",
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.SECRET_LEARNED
+    assert log[0].payload == {"id": "the-heir-lives", "character_id": "mara", "chapter_id": "c2", "note": "found the letter"}
+
+
+async def test_commit_knowledge_intents_learn_dropped_when_character_id_blank(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="the-heir-lives")], active_secret_ids={"the-heir-lives"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_drops_unknown_id_with_no_event(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="reveal", id="not-a-real-secret")], active_secret_ids={"the-heir-lives"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_reveal_commits_without_character_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="reveal", id="the-heir-lives", note="told the crowd")],
+        active_secret_ids={"the-heir-lives"}, chapter_id="c5",
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.SECRET_REVEALED
+    assert log[0].payload == {"id": "the-heir-lives", "chapter_id": "c5", "note": "told the crowd"}
+
+
+async def test_commit_knowledge_intents_uses_commits_secret_referenced(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+        active_secret_ids={"the-heir-lives"}, chapter_id="c6",
+    )
+    log = await events.events_since(0)
+    assert log[0].event_type == EventType.SECRET_REFERENCED
+    assert log[0].payload["character_id"] == "mara"
+
+
+async def test_commit_knowledge_intents_respects_allowed_actions(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="plant", title="Should Not Commit")],
+        active_secret_ids=set(), allowed_actions=frozenset({"learn"}),
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_noop_on_empty_list(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents([], active_secret_ids=set())
+    assert await events.events_since(0) == []
+
+
+async def test_commit_causal_intents_commits_when_both_chapters_valid(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="c3", note="fire forces the move")],
+        valid_chapter_ids={"c1", "c3"},
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.CAUSAL_EDGE_DECLARED
+    assert log[0].payload == {"cause_chapter_id": "c1", "effect_chapter_id": "c3", "note": "fire forces the move"}
+
+
+async def test_commit_causal_intents_drops_self_edge(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="c1")], valid_chapter_ids={"c1"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_causal_intents_drops_unknown_chapter_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="ghost")], valid_chapter_ids={"c1"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_causal_intents_does_not_dedup_repeated_identical_edges(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    intent = CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2")
+    await agent._commit_causal_intents([intent, intent], valid_chapter_ids={"c1", "c2"})
+    log = await events.events_since(0)
+    assert len(log) == 2
+
+
+async def test_commit_causal_intents_noop_on_empty_list(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents([], valid_chapter_ids=set())
+    assert await events.events_since(0) == []

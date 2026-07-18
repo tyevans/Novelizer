@@ -6,6 +6,7 @@ from novelizer.store.models import (
     Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
     StructureScore,
     CanonStatus, EditorialStatus, RetconStatus, SignalKind, Domain,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord,
 )
 
 
@@ -75,3 +76,28 @@ def test_structure_score_roundtrips_through_json():
 def test_structure_score_tension_is_bounded():
     with pytest.raises(ValidationError):
         StructureScore(chapter_id="c1", tension=2.0)
+
+
+def test_secret_record_defaults():
+    s = SecretRecord(id="the-heir-lives", title="The Heir Lives")
+    assert s.revealed is False
+
+
+def test_secret_record_roundtrips_through_json():
+    s = SecretRecord(id="the-heir-lives", title="The Heir Lives", revealed=True)
+    again = SecretRecord.model_validate_json(s.model_dump_json())
+    assert again == s
+
+
+def test_causal_edge_record_defaults_and_roundtrips():
+    e = CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c3")
+    assert e.note == ""
+    again = CausalEdgeRecord.model_validate_json(e.model_dump_json())
+    assert again == e
+
+
+def test_secret_reference_record_defaults_and_roundtrips():
+    r = SecretReferenceRecord(secret_id="the-heir-lives", character_id="mara", chapter_id="c3")
+    assert r.note == ""
+    again = SecretReferenceRecord.model_validate_json(r.model_dump_json())
+    assert again == r

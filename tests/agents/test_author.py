@@ -288,3 +288,77 @@ async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stal
     assert thread_after.touch_count == 1
     chapters_after = await read.list_chapters()
     assert "STALE" not in thread_board_line(thread_after, chapters_after)
+
+
+from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
+from novelizer.canon.events import SecretCreated
+from novelizer.store.models import Chapter
+
+
+async def test_author_commit_plants_a_secret_from_structured_output(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="T", prose="P",
+        knowledge_intents=[KnowledgeIntent(action="plant", title="The Heir Lives")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    secret = await read.get_secret("the-heir-lives")
+    assert secret is not None and secret.title == "The Heir Lives"
+
+
+async def test_author_commit_uses_a_known_active_secret(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="T", prose="P",
+        knowledge_intents=[KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    refs = await read.list_secret_references(secret_id="the-heir-lives")
+    assert len(refs) == 1 and refs[0].character_id == "mara"
+
+
+async def test_author_commit_drops_causal_edge_citing_unknown_chapter(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="Two", prose="P",
+        causal_intents=[CausalIntent(cause_chapter_id="c1", effect_chapter_id="ghost")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    assert await read.list_causal_edges() == []
+
+
+async def test_author_commit_declares_a_valid_causal_edge_between_prior_chapters(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="Three", prose="P",
+        causal_intents=[CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2", note="sets it up")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    edges = await read.list_causal_edges()
+    assert len(edges) == 1
+    assert edges[0].cause_chapter_id == "c1" and edges[0].effect_chapter_id == "c2"
+
+
+async def test_author_commit_with_no_knowledge_or_causal_intents_emits_no_new_event_types(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith(("secret.", "causal_edge."))] == []

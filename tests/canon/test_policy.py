@@ -72,3 +72,29 @@ async def test_thread_events_are_never_gated(level, event_type):
 async def test_annotation_structure_scored_is_never_gated(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("structure_analyst", EventType.ANNOTATION_STRUCTURE_SCORED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.SECRET_CREATED, EventType.SECRET_LEARNED,
+    EventType.SECRET_REFERENCED, EventType.CAUSAL_EDGE_DECLARED,
+])
+async def test_knowledge_bookkeeping_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("author", event_type) is False
+    assert await policy.is_gated("editor", event_type) is False
+    assert await policy.is_gated("character_keeper", event_type) is False
+
+
+async def test_secret_revealed_is_gated_under_gated_canon_and_gated_all():
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=AutonomyLevel.gated_canon)))
+    assert await policy.is_gated("author", EventType.SECRET_REVEALED) is True
+    policy_all = AutonomyPolicy(FakeRead(AutonomyState(global_level=AutonomyLevel.gated_all)))
+    assert await policy_all.is_gated("author", EventType.SECRET_REVEALED) is True
+
+
+async def test_secret_revealed_is_not_gated_under_full_auto_or_gated_retcons():
+    policy_full = AutonomyPolicy(FakeRead(AutonomyState(global_level=AutonomyLevel.full_auto)))
+    assert await policy_full.is_gated("author", EventType.SECRET_REVEALED) is False
+    policy_retcons = AutonomyPolicy(FakeRead(AutonomyState(global_level=AutonomyLevel.gated_retcons)))
+    assert await policy_retcons.is_gated("author", EventType.SECRET_REVEALED) is False
