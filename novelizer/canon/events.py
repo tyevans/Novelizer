@@ -12,6 +12,9 @@ class EventType:
     CHAPTER_STATUS_CHANGED = "chapter.status_changed"
     DIRECTOR_SIGNAL_CREATED = "director_signal.created"
     DIRECTOR_SIGNAL_CONSUMED = "director_signal.consumed"
+    RETCON_REQUEST_CREATED = "retcon_request.created"
+    RETCON_REQUEST_RESOLVED = "retcon_request.resolved"
+    RETCON_REQUEST_REJECTED = "retcon_request.rejected"
 
 
 class StoredEvent(BaseModel):

@@ -1,7 +1,7 @@
 from __future__ import annotations
-from novelizer.agents.base import ChapterDraft, Runner
-from novelizer.canon.event_store import EventStore
+from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
 from novelizer.canon.read_store import ReadStore
+from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.store.models import Chapter
 
@@ -22,14 +22,9 @@ def _summarize(ctx: dict) -> str:
     )
 
 
-class Author:
-    name = "author"
-
-    def __init__(self, runner: Runner, read_store: ReadStore, event_store: EventStore, interval: int = 300) -> None:
-        self._runner = runner
-        self._read = read_store
-        self._events = event_store
-        self.interval = interval
+class Author(BaseAgent):
+    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 300) -> None:
+        super().__init__(runner, read_store, committer, interval, name="author")
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status="draft"))
@@ -45,19 +40,15 @@ class Author:
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
-        result = await self._runner.ainvoke(
-            {"messages": [{"role": "user", "content": _summarize(ctx)}]}
-        )
+        result = await self._runner.ainvoke({"messages": [{"role": "user", "content": _summarize(ctx)}]})
         return result.get("structured_response")
 
     async def commit(self, draft: ChapterDraft | None, ctx: dict) -> None:
         if draft is None:
             return
         chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
-        await self._events.append(EventType.CHAPTER_CREATED, chapter.id, chapter)
-        for sig in ctx["signals"]:
-            consumed_sig = sig.model_copy(update={"consumed": True})
-            await self._events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, sig.id, consumed_sig)
+        await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
+        await self._consume_signals(ctx["signals"])
 
     async def run_once(self) -> None:
         ctx = await self.poll()
@@ -68,7 +59,5 @@ class Author:
 def build_author_runner(settings):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(
-        settings.author_model, settings.llm_base_url, settings.llm_api_key, settings.author_temperature
-    )
+    model = build_chat_model(settings.author_model, settings.llm_base_url, settings.llm_api_key, settings.author_temperature)
     return create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)

@@ -20,3 +20,13 @@ def test_seed_then_chapters_roundtrip():
         assert "No chapters" in r2.output  # none authored yet
     finally:
         os.unlink(path)
+
+
+def test_retcons_command_empty():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        r = CliRunner().invoke(cli, ["retcons"], env=_env(path))
+        assert r.exit_code == 0, r.output
+        assert "No open retcon" in r.output
+    finally:
+        os.unlink(path)

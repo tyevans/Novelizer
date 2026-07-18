@@ -9,6 +9,8 @@ _LABELS = {
     EventType.WORLD_ENTRY_CREATED: "Architect",
     EventType.CHARACTER_CREATED: "Keeper",
     EventType.DIRECTOR_SIGNAL_CREATED: "Director",
+    EventType.RETCON_REQUEST_CREATED: "Continuity",
+    EventType.CHAPTER_STATUS_CHANGED: "Editor",
 }
 
 
@@ -21,6 +23,10 @@ def format_event(ev: StoredEvent) -> str:
         detail = f"lore: {p.get('title', '')}"
     elif ev.event_type == EventType.DIRECTOR_SIGNAL_CREATED:
         detail = f"signal: {p.get('body', '')}"
+    elif ev.event_type == EventType.RETCON_REQUEST_CREATED:
+        detail = f"retcon: {p.get('description', '')}"
+    elif ev.event_type == EventType.CHAPTER_STATUS_CHANGED:
+        detail = f"chapter reviewed: {p.get('title', '')}"
     else:
         detail = ev.event_type
     return f"◆ {who} — {detail}"
@@ -42,7 +48,7 @@ class NovelizerApp(App):
 
     async def on_mount(self) -> None:
         self.run_worker(self._projector_loop(), exclusive=False)
-        self.run_worker(self._author_loop(), exclusive=False)
+        self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
@@ -62,13 +68,13 @@ class NovelizerApp(App):
                 self._report_worker_error("projector", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
-    async def _author_loop(self) -> None:
+    async def _scheduler_loop(self) -> None:
         while True:
             try:
-                await self.runtime.author.run_once()
+                await self.runtime.scheduler.tick()
             except Exception as e:
-                self._report_worker_error("author", e)
-            await asyncio.sleep(self.runtime.author.interval)
+                self._report_worker_error("scheduler", e)
+            await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _feed_loop(self) -> None:
         log = self.query_one("#feed", RichLog)

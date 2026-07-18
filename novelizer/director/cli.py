@@ -94,5 +94,24 @@ def read(ctx, chapter_id: str):
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+@cli.command()
+@click.pass_context
+def retcons(ctx):
+    """List open retcon requests."""
+    async def _run(rt: Runtime):
+        reqs = await rt.read.list_retcon_requests(status="open")
+        if not reqs:
+            console.print("No open retcon requests.")
+            return
+        table = Table(title="Open Retcon Requests")
+        table.add_column("ID", style="dim", no_wrap=True)
+        table.add_column("Description")
+        table.add_column("Proposed Resolution")
+        for r in reqs:
+            table.add_row(r.id[:8], r.description, r.proposed_resolution)
+        console.print(table)
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
 def main():
     cli()

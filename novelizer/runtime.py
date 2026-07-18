@@ -4,25 +4,58 @@ from novelizer.config import Settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
+from novelizer.canon.committer import Committer
+from novelizer.scheduler import Scheduler
 from novelizer.agents.author import Author, build_author_runner
+from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
+from novelizer.agents.character_keeper import CharacterKeeper, build_character_keeper_runner
+from novelizer.agents.editor import Editor, build_editor_runner
+from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
+from novelizer.agents.retconner import Retconner, build_retconner_runner
 
 
 class Runtime:
-    def __init__(self, settings: Settings, runner=None) -> None:
+    def __init__(self, settings: Settings, runner=None, runners: Optional[dict] = None) -> None:
         self.settings = settings
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
         self.read = ReadStore(settings.db_path)
-        self._runner = runner
-        self.author: Optional[Author] = None
+        self.committer = Committer(self.events)
+        self._runner = runner          # back-compat: author-only single runner
+        self._runners = runners        # full per-agent override
+        self.agents: list = []
+        self.author = None
+        self.world_architect = None
+        self.character_keeper = None
+        self.editor = None
+        self.continuity_checker = None
+        self.retconner = None
+        self.scheduler: Optional[Scheduler] = None
+
+    def _runner_for(self, name: str, builder):
+        if self._runners is not None:
+            return self._runners[name]
+        if name == "author" and self._runner is not None:
+            return self._runner
+        return builder(self.settings)
 
     async def start(self) -> None:
         await self.events.init()
         await self.projector.init()
         await self.read.init()
         await self.projector.catch_up()
-        runner = self._runner or build_author_runner(self.settings)
-        self.author = Author(runner, self.read, self.events, interval=self.settings.author_interval)
+        s = self.settings
+        self.author = Author(self._runner_for("author", build_author_runner), self.read, self.committer, interval=s.author_interval)
+        self.world_architect = WorldArchitect(self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.character_keeper = CharacterKeeper(self._runner_for("character_keeper", build_character_keeper_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.editor = Editor(self._runner_for("editor", build_editor_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.continuity_checker = ContinuityChecker(self._runner_for("continuity_checker", build_continuity_checker_runner), self.read, self.committer, interval=s.continuity_interval)
+        self.retconner = Retconner(self._runner_for("retconner", build_retconner_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.agents = [
+            self.world_architect, self.character_keeper, self.author,
+            self.editor, self.continuity_checker, self.retconner,
+        ]
+        self.scheduler = Scheduler(self.agents, self.read)
 
     async def close(self) -> None:
         await self.read.close()

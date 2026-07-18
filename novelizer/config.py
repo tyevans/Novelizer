@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     llm_api_key: str = "not-needed"
     author_model: str = "local-model"
     author_temperature: float = 0.8
+    agent_model: str = "local-model"
+    agent_temperature: float = 0.7
 
     # Cadence (seconds)
     author_interval: int = 300
+    default_agent_interval: int = 120
+    continuity_interval: int = 900
     projector_interval: float = 0.5

@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS characters (
 CREATE TABLE IF NOT EXISTS director_signals (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS retcon_requests (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projector_state (
     id TEXT PRIMARY KEY, last_sequence INTEGER NOT NULL
 );
@@ -57,7 +60,7 @@ class Projector:
 
     async def _reset_state(self) -> None:
         """Testing/rebuild helper: forget position and clear projections."""
-        for table in ("chapters", "world_entries", "characters", "director_signals"):
+        for table in ("chapters", "world_entries", "characters", "director_signals", "retcon_requests"):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
 
@@ -115,5 +118,15 @@ class Projector:
         elif t == EventType.DIRECTOR_SIGNAL_CONSUMED:
             await self._conn.execute(
                 "UPDATE director_signals SET consumed=1 WHERE id=?", (ev.aggregate_id,)
+            )
+        elif t == EventType.RETCON_REQUEST_CREATED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO retcon_requests (id, data, status) VALUES (?,?,?)",
+                (p["id"], data, p.get("status", "open")),
+            )
+        elif t == EventType.RETCON_REQUEST_RESOLVED or t == EventType.RETCON_REQUEST_REJECTED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO retcon_requests (id, data, status) VALUES (?,?,?)",
+                (p["id"], data, p.get("status", "resolved" if t == EventType.RETCON_REQUEST_RESOLVED else "rejected")),
             )
         await self._conn.commit()
