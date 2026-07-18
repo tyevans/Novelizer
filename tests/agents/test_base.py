@@ -261,3 +261,53 @@ async def test_commit_knowledge_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_knowledge_intents([], active_secret_ids=set())
     assert await events.events_since(0) == []
+
+
+from novelizer.agents.schemas import CausalIntent
+
+
+async def test_commit_causal_intents_commits_when_both_chapters_valid(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="c3", note="fire forces the move")],
+        valid_chapter_ids={"c1", "c3"},
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.CAUSAL_EDGE_DECLARED
+    assert log[0].payload == {"cause_chapter_id": "c1", "effect_chapter_id": "c3", "note": "fire forces the move"}
+
+
+async def test_commit_causal_intents_drops_self_edge(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="c1")], valid_chapter_ids={"c1"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_causal_intents_drops_unknown_chapter_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="ghost")], valid_chapter_ids={"c1"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_causal_intents_does_not_dedup_repeated_identical_edges(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    intent = CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2")
+    await agent._commit_causal_intents([intent, intent], valid_chapter_ids={"c1", "c2"})
+    log = await events.events_since(0)
+    assert len(log) == 2
+
+
+async def test_commit_causal_intents_noop_on_empty_list(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents([], valid_chapter_ids=set())
+    assert await events.events_since(0) == []

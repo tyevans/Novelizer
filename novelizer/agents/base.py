@@ -212,3 +212,40 @@ class BaseAgent:
                     id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note
                 )
             await self._committer.commit(self.name, event_type, intent.id, payload)
+
+    async def _commit_causal_intents(self, intents: list[CausalIntent], valid_chapter_ids: set[str]) -> None:
+        """Turn agent-declared CausalIntent entries into
+        causal_edge.declared commits.
+
+        Both `cause_chapter_id` and `effect_chapter_id` must be present in
+        `valid_chapter_ids`, or the intent is dropped with a logged warning;
+        a self-edge (cause == effect) is dropped with a logged warning
+        first, since Locked decision #4's ordering-violation check (M4.2)
+        needs two distinct chapters to be meaningful. No deduplication: an
+        edge has no minted identity and no lifecycle (Locked decision #4),
+        so every valid declared edge is committed as its own fact even if
+        identical to a prior commit -- the property test in this plan
+        (Task 8) asserts replay never drops OR duplicates a declared edge,
+        which requires a strict 1:1 event-to-row mapping, not a deduped one.
+        No-op on an empty list.
+        """
+        for intent in intents:
+            if intent.cause_chapter_id == intent.effect_chapter_id:
+                logger.warning(
+                    "%s: dropped self-edge causal intent for chapter %r", self.name, intent.cause_chapter_id
+                )
+                continue
+            if intent.cause_chapter_id not in valid_chapter_ids or intent.effect_chapter_id not in valid_chapter_ids:
+                logger.warning(
+                    "%s: dropped causal intent citing unknown chapter id(s) %r -> %r",
+                    self.name, intent.cause_chapter_id, intent.effect_chapter_id,
+                )
+                continue
+            await self._committer.commit(
+                self.name, EventType.CAUSAL_EDGE_DECLARED, intent.effect_chapter_id,
+                CausalEdgeDeclared(
+                    cause_chapter_id=intent.cause_chapter_id,
+                    effect_chapter_id=intent.effect_chapter_id,
+                    note=intent.note,
+                ),
+            )
