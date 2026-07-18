@@ -19,8 +19,9 @@ class Editor(BaseAgent):
         committer: Committer,
         interval: int = 120,
         casting_note: str = "",
+        personality: str = "",
     ) -> None:
-        super().__init__(runner, read_store, committer, interval, name="editor")
+        super().__init__(runner, read_store, committer, interval, name="editor", personality=personality)
         self._casting_note = casting_note
 
     async def readiness(self) -> float:
@@ -40,7 +41,8 @@ class Editor(BaseAgent):
             if self._casting_note
             else ""
         )
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}"
+        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -54,6 +56,7 @@ class Editor(BaseAgent):
         else:
             sig = DirectorSignal(kind=SignalKind.note, body=f"[Editor on '{ch.title}'] {verdict.notes}", target_agent="author")
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
+        await self._remark(verdict.feed_note)
 
     async def run_once(self) -> None:
         ctx = await self.poll()
