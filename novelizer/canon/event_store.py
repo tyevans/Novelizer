@@ -62,6 +62,21 @@ class EventStore:
             aggregate_id=aggregate_id, payload=json.loads(payload_json), created_at=created_at,
         )
 
+    async def append_raw(self, event_type: str, aggregate_id: str, payload: dict) -> StoredEvent:
+        """Append a payload that is already a plain dict (e.g. rescued from a Proposal)."""
+        eid = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc).isoformat()
+        payload_json = json.dumps(payload)
+        cur = await self._conn.execute(
+            "INSERT INTO events (id, event_type, aggregate_id, payload, created_at) VALUES (?,?,?,?,?)",
+            (eid, event_type, aggregate_id, payload_json, created_at),
+        )
+        await self._conn.commit()
+        return StoredEvent(
+            sequence=cur.lastrowid, id=eid, event_type=event_type,
+            aggregate_id=aggregate_id, payload=json.loads(payload_json), created_at=created_at,
+        )
+
     async def events_since(self, sequence: int, event_types: Optional[list[str]] = None) -> list[StoredEvent]:
         if event_types:
             placeholders = ",".join("?" for _ in event_types)
