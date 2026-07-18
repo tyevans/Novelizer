@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored
+from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict, ThreadIntent
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent
 from novelizer.store.models import Chapter, EditorialStatus, Character
 
 
@@ -244,10 +244,6 @@ async def test_editor_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert sent == "Chapter title: One\n\nProse:\np"
-
-
-from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
-from novelizer.canon.events import SecretCreated
 
 
 async def test_editor_commit_uses_a_known_active_secret(stack):

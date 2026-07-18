@@ -6,6 +6,7 @@ from novelizer.store.models import (
     Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
     StructureScore,
     CanonStatus, EditorialStatus, RetconStatus, SignalKind, Domain,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord,
 )
 
 
@@ -75,9 +76,6 @@ def test_structure_score_roundtrips_through_json():
 def test_structure_score_tension_is_bounded():
     with pytest.raises(ValidationError):
         StructureScore(chapter_id="c1", tension=2.0)
-
-
-from novelizer.store.models import SecretRecord, CausalEdgeRecord, SecretReferenceRecord
 
 
 def test_secret_record_defaults():

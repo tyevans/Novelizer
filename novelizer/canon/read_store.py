@@ -147,15 +147,13 @@ class ReadStore:
         ]
 
     async def list_secret_references(self, secret_id: Optional[str] = None) -> list[SecretReferenceRecord]:
+        query = "SELECT secret_id, character_id, chapter_id, note FROM secret_references"
+        params: tuple = ()
         if secret_id is not None:
-            cur = await self._conn.execute(
-                "SELECT secret_id, character_id, chapter_id, note FROM secret_references "
-                "WHERE secret_id=? ORDER BY rowid", (secret_id,),
-            )
-        else:
-            cur = await self._conn.execute(
-                "SELECT secret_id, character_id, chapter_id, note FROM secret_references ORDER BY rowid"
-            )
+            query += " WHERE secret_id=?"
+            params = (secret_id,)
+        query += " ORDER BY rowid"
+        cur = await self._conn.execute(query, params)
         return [
             SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
             for r in await cur.fetchall()

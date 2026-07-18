@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, AgentRemark, ThreadPlanted
 from novelizer.agents.base import BaseAgent
-from novelizer.agents.schemas import ThreadIntent
+from novelizer.agents.schemas import ThreadIntent, CausalIntent
 from novelizer.store.models import DirectorSignal, SignalKind
 
 
@@ -261,9 +261,6 @@ async def test_commit_knowledge_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_knowledge_intents([], active_secret_ids=set())
     assert await events.events_since(0) == []
-
-
-from novelizer.agents.schemas import CausalIntent
 
 
 async def test_commit_causal_intents_commits_when_both_chapters_valid(stack):
