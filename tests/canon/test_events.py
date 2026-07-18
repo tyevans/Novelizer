@@ -77,3 +77,32 @@ def test_annotation_structure_scored_tension_is_bounded():
         AnnotationStructureScored(chapter_id="c1", tension=1.5, pacing_label="off the charts")
     with pytest.raises(ValidationError):
         AnnotationStructureScored(chapter_id="c1", tension=-0.1, pacing_label="negative")
+
+
+def test_secret_and_causal_edge_event_types_exist():
+    from novelizer.canon.events import EventType
+    assert EventType.SECRET_CREATED == "secret.created"
+    assert EventType.SECRET_LEARNED == "secret.learned"
+    assert EventType.SECRET_REFERENCED == "secret.referenced"
+    assert EventType.SECRET_REVEALED == "secret.revealed"
+    assert EventType.CAUSAL_EDGE_DECLARED == "causal_edge.declared"
+
+
+def test_secret_payload_models_roundtrip():
+    from novelizer.canon.events import (
+        SecretCreated, SecretLearned, SecretReferenced, SecretRevealed,
+    )
+    created = SecretCreated(id="the-heir-lives", title="The Heir Lives", chapter_id="c1", note="planted")
+    assert SecretCreated.model_validate_json(created.model_dump_json()) == created
+    learned = SecretLearned(id="the-heir-lives", character_id="mara", chapter_id="c2", note="found the letter")
+    assert SecretLearned.model_validate_json(learned.model_dump_json()) == learned
+    referenced = SecretReferenced(id="the-heir-lives", character_id="mara", chapter_id="c3")
+    assert SecretReferenced.model_validate_json(referenced.model_dump_json()) == referenced
+    revealed = SecretRevealed(id="the-heir-lives", chapter_id="c4", note="public now")
+    assert SecretRevealed.model_validate_json(revealed.model_dump_json()) == revealed
+
+
+def test_causal_edge_declared_payload_roundtrips():
+    from novelizer.canon.events import CausalEdgeDeclared
+    edge = CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c3", note="the fire forces the move")
+    assert CausalEdgeDeclared.model_validate_json(edge.model_dump_json()) == edge
