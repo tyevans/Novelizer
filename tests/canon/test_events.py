@@ -26,3 +26,15 @@ def test_autonomy_and_proposal_event_types_exist():
     assert EventType.PROPOSAL_APPROVED == "proposal.approved"
     assert EventType.PROPOSAL_REJECTED == "proposal.rejected"
     assert EventType.AUTONOMY_CHANGED == "autonomy.changed"
+
+
+def test_agent_remarked_event_type_exists():
+    from novelizer.canon.events import EventType
+    assert EventType.AGENT_REMARKED == "agent.remarked"
+
+
+def test_agent_remark_payload_model_roundtrips():
+    from novelizer.canon.events import AgentRemark
+    remark = AgentRemark(agent_name="author", note="Another storm, another chapter.")
+    again = AgentRemark.model_validate_json(remark.model_dump_json())
+    assert again == remark

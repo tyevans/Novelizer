@@ -19,6 +19,7 @@ class EventType:
     PROPOSAL_APPROVED = "proposal.approved"
     PROPOSAL_REJECTED = "proposal.rejected"
     AUTONOMY_CHANGED = "autonomy.changed"
+    AGENT_REMARKED = "agent.remarked"
 
 
 class StoredEvent(BaseModel):
@@ -28,3 +29,14 @@ class StoredEvent(BaseModel):
     aggregate_id: str
     payload: dict[str, Any]
     created_at: str
+
+
+class AgentRemark(BaseModel):
+    """Payload for agent.remarked — a short in-personality feed line.
+
+    Feed-flavor only: never gated (see AutonomyPolicy._NEVER_GATED), never
+    projected (the Projector has no _apply branch for it, by design).
+    """
+
+    agent_name: str
+    note: str
