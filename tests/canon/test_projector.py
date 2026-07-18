@@ -30,7 +30,7 @@ async def _chapter_rows(proj):
 async def _all_table_rows(proj):
     """Get all projection tables' data rows as dicts."""
     tables = {}
-    for table in ("chapters", "world_entries", "characters", "director_signals"):
+    for table in ("chapters", "world_entries", "characters", "director_signals", "proposals", "autonomy_state"):
         cur = await proj._conn.execute(f"SELECT data FROM {table} ORDER BY rowid")
         tables[table] = [json.loads(r[0]) for r in await cur.fetchall()]
     return tables
@@ -66,12 +66,20 @@ async def test_catch_up_advances_and_is_idempotent(wired):
 
 
 async def test_reprojecting_same_events_is_equivalent(wired):
+    from novelizer.canon.autonomy import Proposal, AutonomyState, AutonomyLevel
     events, proj, path = wired
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
     await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="W", body="b"))
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira"))
     # Append a world_entry.superseded event that supersedes the first world entry.
     await events.append(EventType.WORLD_ENTRY_SUPERSEDED, "w2", WorldEntry(id="w2", title="W2", body="b2", supersedes_id="w1"))
+    # Append a proposal.created event to test proposals table projection.
+    prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
+                     target_aggregate_id="c1", payload={"title": "One", "prose": "p"})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    # Append an autonomy.changed event to test autonomy_state table projection.
+    au = AutonomyState(global_level=AutonomyLevel.gated_canon)
+    await events.append(EventType.AUTONOMY_CHANGED, "singleton", au)
     await proj.catch_up()
     incremental = await _all_table_rows(proj)
     # Fresh projector over the same log, projecting from zero, yields the same rows.
@@ -81,8 +89,8 @@ async def test_reprojecting_same_events_is_equivalent(wired):
     await proj2.catch_up()
     from_scratch = await _all_table_rows(proj2)
     await proj2.close()
-    # Assert all four projection tables have identical rows.
-    for table in ("chapters", "world_entries", "characters", "director_signals"):
+    # Assert all six projection tables have identical rows.
+    for table in ("chapters", "world_entries", "characters", "director_signals", "proposals", "autonomy_state"):
         assert incremental[table] == from_scratch[table], f"Table {table} mismatch between incremental and from-scratch"
 
 
