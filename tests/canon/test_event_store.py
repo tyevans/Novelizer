@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType
 from novelizer.store.models import Chapter, WorldEntry
@@ -40,6 +40,7 @@ async def test_events_since_type_filter(store):
     assert [e.event_type for e in only] == [EventType.WORLD_ENTRY_CREATED]
 
 
+@settings(deadline=None)  # SQLite I/O under load trips the 200ms default; wall-clock is not the invariant here
 @given(n=st.integers(min_value=1, max_value=25))
 async def test_sequences_are_strictly_increasing(n):
     fd, path = tempfile.mkstemp(suffix=".db")
