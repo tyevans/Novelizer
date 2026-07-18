@@ -101,6 +101,44 @@ class ThreadRecord(BaseModel):
     last_chapter_id: str = ""
 
 
+class SecretRecord(BaseModel):
+    """Read-side row for a secret, built and rebuilt by the Projector from
+    the secret.* event log (see novelizer/canon/projector.py). `revealed`
+    is secret-level, set-once state (Locked decision #2 in M4's spec) — it
+    is never written per character; ReadStore.knowledge_matrix() and
+    novelizer.canon.secrets.knowledge_cell_state derive the per-character
+    cell from this flag plus the secret_knowledge join table.
+    """
+
+    id: str
+    title: str
+    revealed: bool = False
+
+
+class CausalEdgeRecord(BaseModel):
+    """Read-side row for one declared causal edge, built by the Projector
+    from causal_edge.declared events. No minted identity and no
+    deduplication (Locked decision #4) — every declared edge, including an
+    exact repeat, is its own row.
+    """
+
+    cause_chapter_id: str
+    effect_chapter_id: str
+    note: str = ""
+
+
+class SecretReferenceRecord(BaseModel):
+    """Read-side row for one secret.referenced event — the durable,
+    replayable 'uses' record M4.2's LeakDetector reads (Locked decision #3).
+    Never deduped: every reference is committed and projected as its own row.
+    """
+
+    secret_id: str
+    character_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
 class StructureScore(BaseModel):
     """Read-side row for one chapter's narrative-structure score, built by
     the Projector from annotation.structure_scored events (see
