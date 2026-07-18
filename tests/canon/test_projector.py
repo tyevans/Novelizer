@@ -437,3 +437,57 @@ async def test_reset_state_clears_secret_tables(wired):
     for table in ("secrets", "secret_knowledge", "secret_references"):
         cur = await proj._conn.execute(f"SELECT COUNT(*) FROM {table}")
         assert (await cur.fetchone())[0] == 0
+
+
+async def _causal_edge_rows(proj):
+    cur = await proj._conn.execute(
+        "SELECT cause_chapter_id, effect_chapter_id, note FROM causal_edges ORDER BY rowid"
+    )
+    return await cur.fetchall()
+
+
+async def test_causal_edge_declared_is_projected(wired):
+    from novelizer.canon.events import CausalEdgeDeclared
+    events, proj, _ = wired
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c3",
+                        CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c3", note="fire forces the move"))
+    await proj.catch_up()
+    rows = await _causal_edge_rows(proj)
+    assert rows == [("c1", "c3", "fire forces the move")]
+
+
+async def test_causal_edge_declared_is_never_deduped(wired):
+    from novelizer.canon.events import CausalEdgeDeclared
+    events, proj, _ = wired
+    edge = CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c3")
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c3", edge)
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c3", edge)
+    await proj.catch_up()
+    rows = await _causal_edge_rows(proj)
+    assert len(rows) == 2
+
+
+async def test_reprojecting_causal_edges_is_equivalent(wired):
+    from novelizer.canon.events import CausalEdgeDeclared
+    events, proj, path = wired
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c2", CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c2"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c3", CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c3"))
+    await proj.catch_up()
+    incremental = await _causal_edge_rows(proj)
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()
+    await proj2.catch_up()
+    from_scratch = await _causal_edge_rows(proj2)
+    await proj2.close()
+    assert incremental == from_scratch
+
+
+async def test_reset_state_clears_causal_edges(wired):
+    from novelizer.canon.events import CausalEdgeDeclared
+    events, proj, _ = wired
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c2", CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c2"))
+    await proj.catch_up()
+    await proj._reset_state()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM causal_edges")
+    assert (await cur.fetchone())[0] == 0

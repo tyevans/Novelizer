@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS secret_knowledge (
 CREATE TABLE IF NOT EXISTS secret_references (
     secret_id TEXT NOT NULL, character_id TEXT NOT NULL, chapter_id TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS causal_edges (
+    cause_chapter_id TEXT NOT NULL, effect_chapter_id TEXT NOT NULL, note TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS structure_scores (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
@@ -88,6 +91,7 @@ class Projector:
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
+            "causal_edges",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -249,6 +253,11 @@ class Projector:
                 # log but the projection does not change (Locked decision #2).
             # else: no row for this id yet (shouldn't happen under correct
             # agent behavior) — nothing to project, no error raised.
+        elif t == EventType.CAUSAL_EDGE_DECLARED:
+            await self._conn.execute(
+                "INSERT INTO causal_edges (cause_chapter_id, effect_chapter_id, note) VALUES (?,?,?)",
+                (p["cause_chapter_id"], p["effect_chapter_id"], p.get("note", "")),
+            )
         elif t == EventType.ANNOTATION_STRUCTURE_SCORED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
