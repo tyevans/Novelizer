@@ -14,6 +14,10 @@ _NEVER_GATED = {
     EventType.DIRECTOR_SIGNAL_CREATED,
     EventType.DIRECTOR_SIGNAL_CONSUMED,
     EventType.AGENT_REMARKED,
+    EventType.THREAD_PLANTED,
+    EventType.THREAD_TOUCHED,
+    EventType.THREAD_PAID_OFF,
+    EventType.THREAD_ABANDONED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

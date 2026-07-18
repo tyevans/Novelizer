@@ -55,3 +55,14 @@ async def test_per_agent_override_takes_precedence():
 async def test_agent_remarked_is_never_gated(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("any_agent", EventType.AGENT_REMARKED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED,
+    EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED,
+])
+async def test_thread_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("author", event_type) is False
+    assert await policy.is_gated("editor", event_type) is False
