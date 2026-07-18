@@ -1,7 +1,10 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
-from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore
+from novelizer.store.models import (
+    Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord,
+)
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
 
@@ -109,3 +112,51 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM structure_scores WHERE id=?", (chapter_id,))
         row = await cur.fetchone()
         return StructureScore.model_validate_json(row[0]) if row else None
+
+    async def list_secrets(self) -> list[SecretRecord]:
+        cur = await self._conn.execute("SELECT data FROM secrets ORDER BY rowid")
+        return [SecretRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_secret(self, secret_id: str) -> Optional[SecretRecord]:
+        cur = await self._conn.execute("SELECT data FROM secrets WHERE id=?", (secret_id,))
+        row = await cur.fetchone()
+        return SecretRecord.model_validate_json(row[0]) if row else None
+
+    async def knowledge_matrix(self) -> dict[str, dict]:
+        """Return {secret_id: {"revealed": bool, "known_by": set[character_id]}}
+        for every secret. `revealed` is read directly off each secret's own
+        record (Locked decision #2) -- callers derive a specific cell's
+        state with novelizer.canon.secrets.knowledge_cell_state.
+        """
+        matrix: dict[str, dict] = {}
+        for secret in await self.list_secrets():
+            cur = await self._conn.execute(
+                "SELECT character_id FROM secret_knowledge WHERE secret_id=?", (secret.id,)
+            )
+            known_by = {r[0] for r in await cur.fetchall()}
+            matrix[secret.id] = {"revealed": secret.revealed, "known_by": known_by}
+        return matrix
+
+    async def list_causal_edges(self) -> list[CausalEdgeRecord]:
+        cur = await self._conn.execute(
+            "SELECT cause_chapter_id, effect_chapter_id, note FROM causal_edges ORDER BY rowid"
+        )
+        return [
+            CausalEdgeRecord(cause_chapter_id=r[0], effect_chapter_id=r[1], note=r[2])
+            for r in await cur.fetchall()
+        ]
+
+    async def list_secret_references(self, secret_id: Optional[str] = None) -> list[SecretReferenceRecord]:
+        if secret_id is not None:
+            cur = await self._conn.execute(
+                "SELECT secret_id, character_id, chapter_id, note FROM secret_references "
+                "WHERE secret_id=? ORDER BY rowid", (secret_id,),
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT secret_id, character_id, chapter_id, note FROM secret_references ORDER BY rowid"
+            )
+        return [
+            SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
+            for r in await cur.fetchall()
+        ]
