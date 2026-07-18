@@ -2,8 +2,9 @@ from __future__ import annotations
 import asyncio
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Header, Footer, RichLog, Static, Tree
+from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
+from novelizer.director import commands
 from novelizer.tui.widgets.roster import AgentRoster
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
@@ -40,6 +41,14 @@ class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
     CSS_PATH = "app.tcss"
 
+    # Note: Textual 5.3.0 does not accept "colon" as a key name for BINDINGS,
+    # so "ctrl+k" is used to focus the command input instead.
+    BINDINGS = [
+        ("ctrl+k", "focus_command", "Command"),
+        ("r", "toggle_room", "Room"),
+        ("q", "quit", "Quit"),
+    ]
+
     def __init__(self, runtime) -> None:
         super().__init__()
         self.runtime = runtime
@@ -56,9 +65,20 @@ class NovelizerApp(App):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: full-auto   ·   :seed <text> · :focus <x> · :pause <agent>", id="statusbar")
+        yield Input(id="command", placeholder="command… (seed/focus/pause/resume)")
         yield Footer()
 
     async def on_mount(self) -> None:
+        # Drain the initial scheduler "freebie" run (agents with a fresh
+        # last-run of 0 are immediately eligible) synchronously at mount so
+        # that startup agent activity doesn't race with the first director
+        # command/signal issued right after the app becomes interactive.
+        try:
+            await self.runtime.projector.catch_up()
+            while await self.runtime.scheduler.tick() is not None:
+                await self.runtime.projector.catch_up()
+        except Exception as e:
+            self._report_worker_error("startup", e)
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
@@ -119,6 +139,24 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("browser", e)
             await asyncio.sleep(1.0)
+
+    def action_focus_command(self) -> None:
+        self.set_focus(self.query_one("#command", Input))
+
+    def action_toggle_room(self) -> None:
+        self.query_one("#body").toggle_class("room")
+
+    async def _run_command(self, line: str) -> None:
+        result = await commands.dispatch(self.runtime, line)
+        log = self.query_one("#feed", RichLog)
+        log.write(f"» {result}")
+        self.messages.append(f"» {result}")
+
+    async def on_input_submitted(self, event) -> None:
+        if event.input.id == "command":
+            await self._run_command(event.value)
+            event.input.value = ""
+            self.set_focus(None)
 
     async def on_tree_node_selected(self, event) -> None:
         data = event.node.data

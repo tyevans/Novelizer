@@ -6,3 +6,5 @@
 #browser { height: 2fr; border: round $primary; }
 #detail { height: 1fr; border: round $secondary; padding: 0 1; }
 #statusbar { height: 1; background: $panel; color: $text; }
+#command { height: 1; }
+#body.room #right { display: none; }

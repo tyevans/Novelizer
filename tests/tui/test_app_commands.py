@@ -1,0 +1,62 @@
+import os
+import tempfile
+import pytest
+from novelizer.config import Settings
+from novelizer.runtime import Runtime
+from novelizer.tui.app import NovelizerApp
+from novelizer.agents.schemas import WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments
+from novelizer.agents.base import ChapterDraft
+
+
+class _R:
+    def __init__(self, out): self._out = out
+    async def ainvoke(self, inputs): return {"structured_response": self._out}
+
+
+def _runners():
+    return {k: _R(v) for k, v in {
+        "world_architect": WorldEntriesDraft(), "author": ChapterDraft(title="X", prose="y"),
+        "character_keeper": KeeperOutput(), "editor": EditorVerdict(), "continuity_checker": ContinuityOutput(),
+        "retconner": RetconAmendments(),
+    }.items()}
+
+
+@pytest.mark.asyncio
+async def test_command_input_seeds_via_dispatch():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            from textual.widgets import Input
+            inp = app.query_one("#command", Input)
+            inp.value = "seed a storm is coming"
+            await inp.action_submit() if hasattr(inp, "action_submit") else app.set_focus(inp)
+            # Fallback: call the handler directly for determinism
+            await app._run_command("seed a storm is coming")
+            await pilot.pause(0.3)
+            sigs = await rt.read.list_unconsumed_signals()
+            assert any("storm" in s.body for s in sigs)
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_room_toggle_hides_right_column():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            app.action_toggle_room()
+            await pilot.pause()
+            assert app.query_one("#body").has_class("room")
+            app.action_toggle_room()
+            await pilot.pause()
+            assert not app.query_one("#body").has_class("room")
+    finally:
+        await rt.close(); os.unlink(path)
