@@ -1,6 +1,7 @@
 import os
 import tempfile
 import pytest
+from novelizer.canon.events import EventType
 from novelizer.config import Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
@@ -37,8 +38,13 @@ async def test_command_input_seeds_via_dispatch():
             # Fallback: call the handler directly for determinism
             await app._run_command("seed a storm is coming")
             await pilot.pause(0.3)
-            sigs = await rt.read.list_unconsumed_signals()
-            assert any("storm" in s.body for s in sigs)
+            log = await rt.events.events_since(0)
+            created = [
+                e for e in log
+                if e.event_type == EventType.DIRECTOR_SIGNAL_CREATED
+                and "storm" in e.payload.get("body", "")
+            ]
+            assert created, "seed command should append a director_signal.created event"
     finally:
         await rt.close(); os.unlink(path)
 

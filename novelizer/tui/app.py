@@ -69,16 +69,6 @@ class NovelizerApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
-        # Drain the initial scheduler "freebie" run (agents with a fresh
-        # last-run of 0 are immediately eligible) synchronously at mount so
-        # that startup agent activity doesn't race with the first director
-        # command/signal issued right after the app becomes interactive.
-        try:
-            await self.runtime.projector.catch_up()
-            while await self.runtime.scheduler.tick() is not None:
-                await self.runtime.projector.catch_up()
-        except Exception as e:
-            self._report_worker_error("startup", e)
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
