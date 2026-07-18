@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from novelizer.config import Settings
+from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.canon.events import EventType

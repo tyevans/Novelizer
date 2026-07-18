@@ -4,7 +4,7 @@ that a real LLM will act on what flows through it. This test seeds the same
 stale-thread fixture as the mechanical chain (tests/agents/test_author.py's
 test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stale) and
 runs the *real* Author -- via build_author_runner against a live
-OpenAI-compatible endpoint (novelizer.config.Settings' llm_base_url,
+OpenAI-compatible endpoint (novelizer.settings.EffectiveSettings' llm_base_url,
 author_model) -- with no director signal and no manual prompt beyond what
 the room already injects, and asserts it reacts to the injected stale-thread
 note by declaring a matching thread_intents entry, unprompted.
@@ -17,7 +17,7 @@ uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
 import os
 import tempfile
 import pytest
-from novelizer.config import Settings
+from novelizer.settings import EffectiveSettings as Settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore

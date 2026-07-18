@@ -1,9 +1,17 @@
 from __future__ import annotations
 import asyncio
+from pathlib import Path
 import click
 from rich.console import Console
 from rich.table import Table
-from novelizer.config import Settings
+from novelizer.settings import (
+    EffectiveSettings,
+    StoryDirectory,
+    create_story,
+    is_story_dir,
+    load_effective_settings,
+    migrate_flat_layout,
+)
 from novelizer.runtime import Runtime
 from novelizer.director import commands
 from novelizer.voices.loader import load_voice_pack
@@ -26,16 +34,41 @@ async def _with_runtime(settings, fn):
         await rt.close()
 
 
+def _resolve_story(
+    story_path: str | None,
+    stories_root: Path = Path("stories"),
+    confirm=click.confirm,
+) -> StoryDirectory:
+    """Pick the story directory: explicit --story wins; else migrate/reuse/create
+    the default story under stories_root."""
+    if story_path:
+        return StoryDirectory(root=Path(story_path))
+    if (stories_root / "world.db").exists():
+        if confirm(
+            f"Found legacy flat story at {stories_root}/world.db. "
+            f"Migrate it into {stories_root}/default/?",
+            default=True,
+        ):
+            return migrate_flat_layout(stories_root)
+        return StoryDirectory(root=stories_root)  # legacy paths keep working
+    default = stories_root / "default"
+    if is_story_dir(default):
+        return StoryDirectory(root=default)
+    return create_story(default, title="default")
+
+
 @click.group(invoke_without_command=True)
+@click.option("--story", "story_path", default=None, type=click.Path(), help="Path to a story directory.")
 @click.pass_context
-def cli(ctx):
+def cli(ctx, story_path: str | None):
     ctx.ensure_object(dict)
-    ctx.obj["settings"] = Settings()
+    story = _resolve_story(story_path)
+    ctx.obj["settings"] = load_effective_settings(story_dir=story)
     if ctx.invoked_subcommand is None:
         _launch_tui(ctx.obj["settings"])
 
 
-def _launch_tui(settings: Settings) -> None:
+def _launch_tui(settings: EffectiveSettings) -> None:
     from novelizer.tui.app import NovelizerApp
 
     async def _boot():
