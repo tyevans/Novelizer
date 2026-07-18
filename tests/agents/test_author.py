@@ -225,3 +225,17 @@ async def test_author_prompt_omits_stale_threads_note_when_nothing_stale(stack):
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Stale threads" not in sent
+
+
+async def test_author_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    expected = (
+        "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+    )
+    assert sent == expected

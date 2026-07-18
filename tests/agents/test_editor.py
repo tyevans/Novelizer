@@ -232,3 +232,15 @@ async def test_editor_prompt_omits_pacing_flags_note_when_none_flagged(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Pacing flags" not in sent
     assert sent == f"Chapter title: One\n\nProse:\np"
+
+
+async def test_editor_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert sent == "Chapter title: One\n\nProse:\np"
