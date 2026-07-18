@@ -111,5 +111,74 @@ def retcons(ctx):
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+@cli.command()
+@click.argument("level")
+@click.argument("agent", required=False)
+@click.pass_context
+def autonomy(ctx, level: str, agent: str | None):
+    """Set the global autonomy level, or a per-agent override."""
+    from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+
+    async def _run(rt: Runtime):
+        try:
+            lvl = AutonomyLevel(level)
+        except ValueError:
+            console.print(f"[red]Unknown autonomy level:[/red] {level}")
+            return
+        current = await rt.read.get_autonomy_state()
+        if agent:
+            overrides = dict(current.overrides)
+            overrides[agent] = lvl
+            next_state = AutonomyState(global_level=current.global_level, overrides=overrides)
+            await commands.autonomy(rt.events, next_state)
+            console.print(f"[green]Autonomy for {agent} set to {lvl.value}[/green]")
+        else:
+            next_state = AutonomyState(global_level=lvl, overrides=current.overrides)
+            await commands.autonomy(rt.events, next_state)
+            console.print(f"[green]Global autonomy set to {lvl.value}[/green]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command()
+@click.pass_context
+def proposals(ctx):
+    """List pending (open) proposals."""
+    async def _run(rt: Runtime):
+        props = await rt.read.list_proposals(status="open")
+        if not props:
+            console.print("No pending proposals.")
+            return
+        table = Table(title="Pending Proposals")
+        table.add_column("ID", style="dim", no_wrap=True)
+        table.add_column("Agent")
+        table.add_column("Target Event")
+        for p in props:
+            table.add_row(p.id[:8], p.proposing_agent, p.target_event_type)
+        console.print(table)
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command()
+@click.argument("proposal_id")
+@click.pass_context
+def approve(ctx, proposal_id: str):
+    """Approve a pending proposal — appends its target event + proposal.approved."""
+    async def _run(rt: Runtime):
+        result = await commands.approve(rt.events, rt.read, proposal_id)
+        console.print(f"[green]{result}[/green]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command()
+@click.argument("proposal_id")
+@click.pass_context
+def reject(ctx, proposal_id: str):
+    """Reject a pending proposal — appends proposal.rejected."""
+    async def _run(rt: Runtime):
+        result = await commands.reject(rt.events, rt.read, proposal_id)
+        console.print(f"[yellow]{result}[/yellow]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
 def main():
     cli()
