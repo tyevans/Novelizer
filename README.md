@@ -223,6 +223,28 @@ a known-active id, the intent is downgraded to a touch. Story Brain
 surfaces (staleness detection, the Story Shape/Thread Board TUI views, and
 prompt injection of stale threads back to the Author) are M3.2/M3.3.
 
+### Staleness & pacing analysis (Story Brain, Phase 1 continued)
+
+Two deterministic functions in `novelizer/brain/` derive narrative signal from
+canon with no LLM call: `staleness.is_thread_stale`/`stale_threads` (a thread
+is stale once 3 chapters have passed since its last plant/touch, with no
+pay-off/abandon in between) and `sag_spike.detect_sag_spike` (flags a chapter
+whose tension score deviates sharply from the surrounding average). Both are
+pure functions over `ReadStore` data, computed live rather than persisted, so
+every consumer — agent prompts and TUI views alike, from M3.3 onward — shares
+one answer.
+
+A 7th scheduled agent, the **Structure Analyst**, produces the tension/pacing
+scores those functions consume: it reads recently-drafted, not-yet-scored
+chapters and asks the LLM for a `tension` (0.0–1.0) and `pacing_label` per
+chapter, committing `annotation.structure_scored` events — never gated by
+autonomy level, same as thread bookkeeping. It participates in the same
+readiness-scored scheduler tick as the other six agents, with its own
+interval (`NOVELIZER_STRUCTURE_ANALYST_INTERVAL`, default 180s).
+
+Story Shape/Thread Board TUI views and prompt injection of stale threads and
+pacing flags back to the Author/Editor are M3.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole
