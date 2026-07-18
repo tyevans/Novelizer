@@ -65,3 +65,23 @@ async def test_room_toggle_hides_right_column():
             assert not app.query_one("#body").has_class("room")
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_command_input_has_visible_content_row():
+    """The command Input must render at least one content row, or typed text is invisible."""
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            from textual.widgets import Input
+            box = app.query_one("#command", Input)
+            assert box.content_size.height >= 1, (
+                f"command input content height is {box.content_size.height}; "
+                "borders/padding are eating the only row, so typed text never renders"
+            )
+    finally:
+        await rt.close(); os.unlink(path)

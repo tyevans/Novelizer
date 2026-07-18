@@ -62,6 +62,17 @@ async def test_dispatch_routes_and_reports(stack):
     assert "unknown" in (await commands.dispatch(rt, "frobnicate x")).lower()
 
 
+async def test_dispatch_accepts_colon_prefixed_commands(stack):
+    events, proj, read = stack
+    rt = FakeRuntime(events, FakeScheduler())
+    assert "seed injected" in (await commands.dispatch(rt, ":seed a storm")).lower()
+    assert "focus set" in (await commands.dispatch(rt, ":focus Mira")).lower()
+    await proj.catch_up()
+    assert len(await read.list_unconsumed_signals()) == 2
+    await commands.dispatch(rt, ":pause editor")
+    assert "editor" in rt.scheduler.paused
+
+
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, Proposal
 from novelizer.store.models import Chapter
 

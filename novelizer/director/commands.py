@@ -66,7 +66,9 @@ async def dispatch(runtime, line: str) -> str:
     parts = line.strip().split(maxsplit=2)
     if not parts:
         return "Empty command."
-    cmd = parts[0].lower()
+    # The status bar advertises colon-prefixed commands (":seed", ":focus"),
+    # so accept the prefix as well as the bare form.
+    cmd = parts[0].lower().removeprefix(":")
     rest = parts[1:]
     if cmd == "seed" and rest:
         text = line.strip().split(maxsplit=1)[1]

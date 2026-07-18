@@ -100,7 +100,9 @@ class NovelizerApp(App):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: loading…", id="statusbar")
-        yield Input(id="command", placeholder="command… (seed/focus/pause/resume)")
+        # compact=True drops Input's default tall border, which would consume
+        # both edges of the single row #command gets and leave 0 content lines.
+        yield Input(id="command", placeholder="command… (seed/focus/pause/resume)", compact=True)
         yield Footer()
 
     async def on_mount(self) -> None:
