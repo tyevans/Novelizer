@@ -13,8 +13,15 @@ set to the id of the entry it replaces. Only include entries that need to change
 
 
 class Retconner(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 120) -> None:
-        super().__init__(runner, read_store, committer, interval, name="retconner")
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 120,
+        personality: str = "",
+    ) -> None:
+        super().__init__(runner, read_store, committer, interval, name="retconner", personality=personality)
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
@@ -30,7 +37,8 @@ class Retconner(BaseAgent):
             return None
         conflicting = [e for e in ctx["world"] if e.id in req.conflicting_entry_ids]
         text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
-        msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}"
+        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -43,6 +51,7 @@ class Retconner(BaseAgent):
             await self._committer.commit(self.name, EventType.WORLD_ENTRY_SUPERSEDED, entry.id, entry)
         resolved = req.model_copy(update={"status": RetconStatus.resolved, "resolved_by": self.name})
         await self._committer.commit(self.name, EventType.RETCON_REQUEST_RESOLVED, req.id, resolved)
+        await self._remark(out.feed_note)
 
     async def run_once(self) -> None:
         ctx = await self.poll()

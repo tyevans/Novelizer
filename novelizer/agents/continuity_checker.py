@@ -13,8 +13,15 @@ of the conflicting records), and a proposed_resolution. Return an empty list if 
 
 
 class ContinuityChecker(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 900) -> None:
-        super().__init__(runner, read_store, committer, interval, name="continuity_checker")
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 900,
+        personality: str = "",
+    ) -> None:
+        super().__init__(runner, read_store, committer, interval, name="continuity_checker", personality=personality)
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
@@ -32,7 +39,8 @@ class ContinuityChecker(BaseAgent):
         world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
         chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
         chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}"
+        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -43,6 +51,7 @@ class ContinuityChecker(BaseAgent):
             req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
                                 proposed_resolution=r.proposed_resolution)
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        await self._remark(out.feed_note)
 
     async def run_once(self) -> None:
         ctx = await self.poll()

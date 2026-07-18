@@ -12,8 +12,13 @@ from novelizer.store.models import WorldEntry, RetconRequest, RetconStatus
 
 
 class FakeRunner:
-    def __init__(self, out): self._out = out
-    async def ainvoke(self, inputs): return {"structured_response": self._out}
+    def __init__(self, out):
+        self._out = out
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        return {"structured_response": self._out}
 
 
 @pytest.fixture
@@ -53,3 +58,32 @@ async def test_noop_when_no_open_retcons(stack):
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_retcon_requests() == []
+
+
+async def test_work_prompt_includes_personality_when_set(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import RetconRequest
+    req = RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="")
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1", req)
+    await proj.catch_up()
+    runner = FakeRunner(RetconAmendments())
+    agent = Retconner(runner, read, committer, personality="A calm, surgical fixer.")
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A calm, surgical fixer." in sent
+    assert "In character:" in sent
+
+
+async def test_commit_emits_remark_when_feed_note_present(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import RetconRequest
+    req = RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="")
+    out = RetconAmendments(feed_note="Tidied up. No drama needed.")
+    agent = Retconner(FakeRunner(out), read, committer)
+    await agent.commit(out, {"target": req, "world": []})
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["note"] == "Tidied up. No drama needed."
