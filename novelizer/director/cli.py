@@ -5,8 +5,7 @@ from rich.console import Console
 from rich.table import Table
 from novelizer.config import Settings
 from novelizer.runtime import Runtime
-from novelizer.canon.events import EventType
-from novelizer.store.models import DirectorSignal, SignalKind
+from novelizer.director import commands
 
 console = Console()
 
@@ -54,8 +53,7 @@ def _launch_tui(settings: Settings) -> None:
 def seed(ctx, text: str):
     """Inject a narrative seed as a director_signal.created event."""
     async def _run(rt: Runtime):
-        sig = DirectorSignal(kind=SignalKind.seed, body=text)
-        await rt.events.append(EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
+        await commands.seed(rt.events, text)
         console.print(f"[green]Seed injected:[/green] {text}")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
