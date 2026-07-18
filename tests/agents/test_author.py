@@ -78,11 +78,13 @@ async def test_work_prompt_includes_casting_note_when_set(stack):
 
 async def test_work_prompt_omits_casting_note_when_unset(stack):
     events, proj, read, committer = stack
-    author = Author(FakeRunner(ChapterDraft(title="T", prose="P")), read, committer)
+    draft = ChapterDraft(title="T", prose="P")
+    runner = FakeRunner(draft)
+    author = Author(runner, read, committer)
     ctx = await author.poll()
     await author.work(ctx)
-    sent = author._casting_note
-    assert sent == ""
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Write in this prose voice:" not in sent
 
 
 async def test_two_profiles_yield_different_prompts(stack):

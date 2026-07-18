@@ -135,11 +135,9 @@ novelizer voices                       # list the active pack's profiles
 novelizer voices --pack my-pack.toml   # inspect another pack
 ```
 
-Switching `NOVELIZER_PROSE_PROFILE` changes the casting note handed to the
-Author's next chapter and the Editor's next review — no code changes, no
-agent rebuild. Live in-TUI switching of the active profile, and per-agent
-personality casting (also carried in the pack format today), land in later
-sub-milestones.
+The active prose profile is chosen per run via `NOVELIZER_PROSE_PROFILE` — restart the
+process to switch. Live in-TUI switching of the active profile, and per-agent
+personality casting (also carried in the pack format today), arrive in M2.3.
 
 ## Architecture
 
