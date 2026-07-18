@@ -1,8 +1,12 @@
 from __future__ import annotations
 import asyncio
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, RichLog
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Header, Footer, RichLog, Static, Tree
 from novelizer.canon.events import StoredEvent, EventType
+from novelizer.tui.widgets.roster import AgentRoster
+from novelizer.tui.widgets.browser import StoryBrowser
+from novelizer.tui.widgets.browser_model import detail_text
 
 _LABELS = {
     EventType.CHAPTER_CREATED: "Author",
@@ -34,6 +38,7 @@ def format_event(ev: StoredEvent) -> str:
 
 class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
+    CSS_PATH = "app.tcss"
 
     def __init__(self, runtime) -> None:
         super().__init__()
@@ -43,13 +48,22 @@ class NovelizerApp(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield RichLog(highlight=False, markup=False, id="feed")
+        with Horizontal(id="body"):
+            with Vertical(id="left"):
+                yield RichLog(highlight=False, markup=False, id="feed")
+                yield AgentRoster(id="roster")
+            with Vertical(id="right"):
+                yield StoryBrowser("Story", id="browser")
+                yield Static("Select an item to view details.", id="detail")
+        yield Static("AUTONOMY: full-auto   ·   :seed <text> · :focus <x> · :pause <agent>", id="statusbar")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
+        self.run_worker(self._roster_loop(), exclusive=False)
+        self.run_worker(self._browser_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -89,3 +103,26 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)
+
+    async def _roster_loop(self) -> None:
+        while True:
+            try:
+                self.query_one("#roster", AgentRoster).update_from(self.runtime.scheduler.status())
+            except Exception as e:
+                self._report_worker_error("roster", e)
+            await asyncio.sleep(0.5)
+
+    async def _browser_loop(self) -> None:
+        while True:
+            try:
+                await self.query_one("#browser", StoryBrowser).refresh_sections(self.runtime.read)
+            except Exception as e:
+                self._report_worker_error("browser", e)
+            await asyncio.sleep(1.0)
+
+    async def on_tree_node_selected(self, event) -> None:
+        data = event.node.data
+        if not data or not data.get("id"):
+            return
+        text = await detail_text(self.runtime.read, data["section"], data["id"])
+        self.query_one("#detail", Static).update(text or "(no detail)")

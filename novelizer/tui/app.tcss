@@ -1,0 +1,8 @@
+#body { height: 1fr; }
+#left { width: 3fr; }
+#right { width: 2fr; }
+#feed { height: 3fr; border: round $primary; }
+#roster { height: 1fr; border: round $secondary; }
+#browser { height: 2fr; border: round $primary; }
+#detail { height: 1fr; border: round $secondary; padding: 0 1; }
+#statusbar { height: 1; background: $panel; color: $text; }
