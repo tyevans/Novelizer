@@ -47,6 +47,9 @@ class Runtime:
         if self._runners is not None:
             if name in self._runners:
                 return self._runners[name]
+            # Any name absent from an injected runners dict falls back to the real
+            # builder (not just "continuity_checker_mining", which motivated this) —
+            # builders construct lazily and never touch the network before ainvoke().
             return builder(self.settings)
         if name == "author" and self._runner is not None:
             return self._runner
