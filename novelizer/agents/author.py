@@ -1,0 +1,73 @@
+from __future__ import annotations
+from novelizer.agents.base import ChapterDraft, Runner
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.read_store import ReadStore
+from novelizer.canon.events import EventType
+from novelizer.store.models import Chapter
+
+AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write the next prose chapter.
+You receive world lore, active characters, previous chapter summaries, and director notes.
+Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
+Return a title, the full prose, and the ids of characters who appear."""
+
+
+def _summarize(ctx: dict) -> str:
+    world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
+    chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
+    prev = "\n".join(f"- '{c.title}': {c.prose[:200]}" for c in ctx["previous"]) or "None yet."
+    notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
+    return (
+        f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}\n\nWrite the next chapter."
+    )
+
+
+class Author:
+    name = "author"
+
+    def __init__(self, runner: Runner, read_store: ReadStore, event_store: EventStore, interval: int = 300) -> None:
+        self._runner = runner
+        self._read = read_store
+        self._events = event_store
+        self.interval = interval
+
+    async def readiness(self) -> float:
+        drafts = len(await self._read.list_chapters(status="draft"))
+        return max(0.0, 1.0 - drafts / 3)
+
+    async def poll(self) -> dict:
+        chapters = await self._read.list_chapters()
+        return {
+            "world": await self._read.list_world_entries(),
+            "characters": await self._read.list_characters(),
+            "previous": chapters[-3:],
+            "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
+        }
+
+    async def work(self, ctx: dict) -> ChapterDraft | None:
+        result = await self._runner.ainvoke(
+            {"messages": [{"role": "user", "content": _summarize(ctx)}]}
+        )
+        return result.get("structured_response")
+
+    async def commit(self, draft: ChapterDraft | None, ctx: dict) -> None:
+        if draft is None:
+            return
+        chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
+        await self._events.append(EventType.CHAPTER_CREATED, chapter.id, chapter)
+        for sig in ctx["signals"]:
+            await self._events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, sig.id, sig)
+
+    async def run_once(self) -> None:
+        ctx = await self.poll()
+        draft = await self.work(ctx)
+        await self.commit(draft, ctx)
+
+
+def build_author_runner(settings):
+    from deepagents import create_deep_agent
+    from novelizer.agents.llm import build_chat_model
+    model = build_chat_model(
+        settings.author_model, settings.llm_base_url, settings.llm_api_key, settings.author_temperature
+    )
+    return create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)
