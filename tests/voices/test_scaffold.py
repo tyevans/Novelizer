@@ -54,3 +54,31 @@ def test_scaffold_escapes_quotes_and_backslashes_in_description():
         scaffold_prose_profile(pack_path, "quirky", 'She said "hello" and meant it \\ truly.')
         pack = load_voice_pack(pack_path)
         assert pack.profile("quirky").casting_note == 'She said "hello" and meant it \\ truly.'
+
+
+def test_scaffold_rejects_invalid_profile_name():
+    """Validate that invalid profile names (spaces, dots, brackets, etc.) are rejected
+    and do not corrupt the pack file."""
+    with tempfile.TemporaryDirectory() as d:
+        pack_path = os.path.join(d, "user_pack.toml")
+        # First, scaffold a valid profile.
+        scaffold_prose_profile(pack_path, "valid", "A valid profile.")
+
+        # Attempt to scaffold with an invalid name (space).
+        with pytest.raises(ValueError, match="Invalid profile name.*use only letters, digits"):
+            scaffold_prose_profile(pack_path, "bad name", "Description.")
+
+        # Verify the pack is still loadable and has only the valid profile.
+        pack = load_voice_pack(pack_path)
+        assert pack.profile("valid") is not None
+        assert pack.profile("valid").casting_note == "A valid profile."
+        assert pack.profile("bad name") is None
+
+        # Attempt to scaffold with another invalid name (dot).
+        with pytest.raises(ValueError, match="Invalid profile name.*use only letters, digits"):
+            scaffold_prose_profile(pack_path, "bad.name", "Another bad name.")
+
+        # Verify the pack is still valid.
+        pack = load_voice_pack(pack_path)
+        assert pack.profile("valid") is not None
+        assert pack.profile("bad.name") is None

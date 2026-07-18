@@ -1,8 +1,7 @@
 from __future__ import annotations
-import os
+import re
 from pathlib import Path
 import tomllib
-from novelizer.voices.models import VoicePack
 
 DEFAULT_PACK_GUARD_MESSAGE = (
     "Refusing to scaffold into the shipped default voice pack; "
@@ -33,6 +32,11 @@ def scaffold_prose_profile(pack_path: str, profile_name: str, description: str) 
     shipped_default = Path(__file__).parent / "default.toml"
     if Path(pack_path).resolve() == shipped_default.resolve():
         raise ValueError(DEFAULT_PACK_GUARD_MESSAGE)
+
+    if not re.match(r"^[A-Za-z0-9_-]+$", profile_name):
+        raise ValueError(
+            f"Invalid profile name {profile_name!r}: use only letters, digits, hyphens, and underscores."
+        )
 
     p = Path(pack_path)
     if p.is_file():
