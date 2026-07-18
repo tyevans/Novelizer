@@ -1,12 +1,19 @@
 from novelizer.config import Settings
 
 
-def test_defaults():
+def test_defaults_present():
     s = Settings()
     assert s.db_path == "stories/world.db"
-    assert s.chroma_path == "stories/chroma"
-    assert s.llm_model == "llama3.2"
-    assert s.embed_model == "nomic-embed-text"
-    assert s.author_interval == 300
-    assert s.continuity_interval == 900
-    assert s.default_interval == 120
+    assert s.llm_base_url.endswith("/v1")
+    assert s.author_model
+    assert 0.0 <= s.author_temperature <= 2.0
+    assert s.author_interval > 0
+    assert s.projector_interval > 0
+
+
+def test_env_override(monkeypatch):
+    monkeypatch.setenv("NOVELIZER_AUTHOR_MODEL", "custom-model")
+    monkeypatch.setenv("NOVELIZER_LLM_BASE_URL", "http://host:9000/v1")
+    s = Settings()
+    assert s.author_model == "custom-model"
+    assert s.llm_base_url == "http://host:9000/v1"

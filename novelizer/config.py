@@ -4,12 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOVELIZER_", env_file=".env", extra="ignore")
 
+    # Storage
     db_path: str = "stories/world.db"
-    chroma_path: str = "stories/chroma"
-    llm_model: str = "llama3.2"
-    embed_model: str = "nomic-embed-text"
+    chroma_path: str = "stories/chroma"   # reserved for M1 embeddings
+    embed_model: str = "nomic-embed-text"  # reserved for M1 embeddings
 
-    # Agent minimum intervals in seconds
+    # OpenAI-compatible LLM endpoint
+    llm_base_url: str = "http://localhost:8080/v1"
+    llm_api_key: str = "not-needed"
+    author_model: str = "local-model"
+    author_temperature: float = 0.8
+
+    # Cadence (seconds)
     author_interval: int = 300
-    continuity_interval: int = 900
-    default_interval: int = 120
+    projector_interval: float = 0.5

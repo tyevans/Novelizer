@@ -11,3 +11,13 @@ wheels/
 
 # Brainstorm companion sessions
 .superpowers/
+
+# Local environment & secrets (use .env.example as the template)
+.env
+
+# Claude Code local state and session artifacts
+.claude/
+memory/
+
+# Runtime story data / generated stores
+stories/

@@ -7,7 +7,7 @@ gets its own spec → plan → red/green TDD → code review cycle before the ne
 
 | # | Name | Delivers | Done when | Status |
 |---|------|----------|-----------|--------|
-| M0 | **Heartbeat** | Event-sourced store (EventStore/Projector/ReadStore), Author on deepagents via OpenAI-compat endpoint, skeletal TUI feed tailing the log | Run `novelizer`, watch chapters appear live | ⬜ not started |
+| M0 | **Heartbeat** | Event-sourced store (EventStore/Projector/ReadStore), Author on deepagents via OpenAI-compat endpoint, skeletal TUI feed tailing the log | Run `novelizer`, watch chapters appear live | ✅ complete |
 | M1 | **The Room Assembles** | All six agents on deepagents, readiness scheduler, autonomy dial + approval queue, full Mission Control layout | Room runs unattended; gate/approve/seed/browse from TUI | ⬜ not started |
 | M2 | **Voices** | TOML voice packs (prose profiles + agent personalities), The Room drill-in view, character voice cards v1 | Recasting an agent visibly changes the feed; switching prose profile changes the next chapter | ⬜ not started |
 | M3 | **Shape & Threads** | Story brain phase 1: structure + thread faculties, Story Shape + Thread Board views, brain context in agent prompts | A stale thread surfaces and the Author picks it back up unprompted | ⬜ not started |

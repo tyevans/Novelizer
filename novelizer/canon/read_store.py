@@ -1,0 +1,59 @@
+from __future__ import annotations
+from typing import Optional
+import aiosqlite
+from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal
+
+
+class ReadStore:
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._conn: Optional[aiosqlite.Connection] = None
+
+    async def init(self) -> None:
+        self._conn = await aiosqlite.connect(self._path)
+        await self._conn.execute("PRAGMA journal_mode=WAL")
+
+    async def close(self) -> None:
+        if self._conn:
+            await self._conn.close()
+
+    async def list_chapters(self, status: Optional[str] = None) -> list[Chapter]:
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM chapters WHERE editorial_status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM chapters ORDER BY rowid")
+        return [Chapter.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_chapter(self, chapter_id: str) -> Optional[Chapter]:
+        cur = await self._conn.execute("SELECT data FROM chapters WHERE id=?", (chapter_id,))
+        row = await cur.fetchone()
+        return Chapter.model_validate_json(row[0]) if row else None
+
+    async def list_world_entries(self, domain: Optional[str] = None) -> list[WorldEntry]:
+        if domain:
+            cur = await self._conn.execute(
+                "SELECT data FROM world_entries WHERE canon_status='active' "
+                "AND json_extract(data,'$.domain')=? ORDER BY rowid", (domain,)
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT data FROM world_entries WHERE canon_status='active' ORDER BY rowid"
+            )
+        return [WorldEntry.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_characters(self) -> list[Character]:
+        cur = await self._conn.execute(
+            "SELECT data FROM characters WHERE canon_status='active' ORDER BY rowid"
+        )
+        return [Character.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_unconsumed_signals(self, target_agent: Optional[str] = None) -> list[DirectorSignal]:
+        cur = await self._conn.execute(
+            "SELECT data FROM director_signals WHERE consumed=0 ORDER BY rowid"
+        )
+        sigs = [DirectorSignal.model_validate_json(r[0]) for r in await cur.fetchall()]
+        if target_agent is not None:
+            sigs = [s for s in sigs if s.target_agent is None or s.target_agent == target_agent]
+        return sigs
