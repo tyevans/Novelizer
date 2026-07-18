@@ -37,6 +37,21 @@ narrative choices) -- a single failing run does not necessarily mean the
 plumbing is broken; re-run, and if it fails consistently across several
 runs, treat that as a real signal the injected note text needs
 strengthening (see known_secrets_note() in novelizer/brain/context.py).
+
+Troubleshooting a red run -- the test asserts in two stages so a failure
+tells you *which* half broke:
+
+1. Staged assertion (right after the Author's run_once(), before the
+   Continuity Checker runs at all): checks the event log directly for a
+   secret.referenced row naming character "kestrel" and secret
+   "the-heir-lives". If this fails, the real Author simply did not declare
+   a leaking `uses` knowledge intent this run -- a model/prompt signal,
+   not a plumbing failure. Re-run, or strengthen known_secrets_note().
+2. Final assertion (after the Continuity Checker's run_once()): checks
+   that an open LEAK_SOURCE_TAG retcon request exists. If stage 1 passed
+   but this fails, the leak provably landed in the event log and the
+   Continuity Checker failed to catch or file it -- treat this as a real
+   regression in LeakDetector or the checker's wiring, not model noise.
 """
 import os
 import tempfile
@@ -86,6 +101,18 @@ async def test_real_author_and_continuity_checker_catch_an_unprompted_leak(stack
     await author.run_once()
     await proj.catch_up()
 
+    references = await read.list_secret_references(secret_id="the-heir-lives")
+    kestrel_leaked = [r for r in references if r.character_id == "kestrel"]
+    assert kestrel_leaked, (
+        "STAGE 1 (Author): the real Author, given only the injected "
+        "known_secrets_note (Mara knows 'the-heir-lives', no one else does) and "
+        "no other prompting, did NOT declare a leaking `uses` knowledge intent "
+        "for Kestrel this run -- LIVE AUTHOR DID NOT LEAK. This is a "
+        "model/prompt signal, not a plumbing failure: re-run, or strengthen "
+        "known_secrets_note() in novelizer/brain/context.py. See this file's "
+        "module docstring for the fixture design and troubleshooting note."
+    )
+
     checker = ContinuityChecker(build_continuity_checker_runner(settings), read, committer)
     await checker.run_once()
     await proj.catch_up()
@@ -93,9 +120,11 @@ async def test_real_author_and_continuity_checker_catch_an_unprompted_leak(stack
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
     assert leak_reqs, (
-        "The real Author, given only the injected known_secrets_note (Mara knows "
-        "'the-heir-lives', no one else does) and no other prompting, did not "
-        "produce a chapter whose declared knowledge_intents caused a leak the "
-        "real Continuity Checker then caught. See this file's module docstring "
-        "for the fixture design and troubleshooting note."
+        "STAGE 2 (Continuity Checker): the Author's leak provably landed as a "
+        "secret.referenced event for Kestrel/'the-heir-lives' (stage 1 above "
+        "passed), but no LEAK_SOURCE_TAG retcon request reached the open queue "
+        "-- THE CHECKER MISSED A LEAK THAT DEFINITELY LANDED. Treat this as a "
+        "real regression in LeakDetector or ContinuityChecker wiring, not model "
+        "noise. See this file's module docstring for the fixture design and "
+        "troubleshooting note."
     )
