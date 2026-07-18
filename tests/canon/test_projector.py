@@ -332,3 +332,108 @@ async def test_reset_state_clears_structure_scores(wired):
     await proj._reset_state()
     cur = await proj._conn.execute("SELECT COUNT(*) FROM structure_scores")
     assert (await cur.fetchone())[0] == 0
+
+
+async def _secret_rows(proj):
+    cur = await proj._conn.execute("SELECT data FROM secrets ORDER BY rowid")
+    return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def test_secret_created_is_projected(wired):
+    from novelizer.canon.events import SecretCreated
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    rows = await _secret_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "the-heir-lives" and rows[0]["revealed"] is False
+
+
+async def test_secret_created_is_first_creation_wins(wired):
+    from novelizer.canon.events import SecretCreated
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="A Different Title"))
+    await proj.catch_up()
+    rows = await _secret_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "The Heir Lives"
+
+
+async def test_secret_learned_inserts_knowledge_row(wired):
+    from novelizer.canon.events import SecretCreated, SecretLearned
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives",
+                        SecretLearned(id="the-heir-lives", character_id="mara", chapter_id="c2"))
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT character_id FROM secret_knowledge WHERE secret_id=?", ("the-heir-lives",))
+    assert [r[0] for r in await cur.fetchall()] == ["mara"]
+
+
+async def test_secret_learned_twice_by_same_character_is_idempotent(wired):
+    from novelizer.canon.events import SecretCreated, SecretLearned
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT character_id FROM secret_knowledge WHERE secret_id=?", ("the-heir-lives",))
+    assert [r[0] for r in await cur.fetchall()] == ["mara"]
+
+
+async def test_secret_referenced_is_never_deduped(wired):
+    from novelizer.canon.events import SecretCreated, SecretReferenced
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives",
+                        SecretReferenced(id="the-heir-lives", character_id="mara", chapter_id="c3"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives",
+                        SecretReferenced(id="the-heir-lives", character_id="mara", chapter_id="c3"))
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM secret_references WHERE secret_id=?", ("the-heir-lives",))
+    assert (await cur.fetchone())[0] == 2
+
+
+async def test_secret_revealed_sets_flag_once(wired):
+    from novelizer.canon.events import SecretCreated, SecretRevealed
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_REVEALED, "the-heir-lives", SecretRevealed(id="the-heir-lives", note="told the crowd"))
+    await events.append(EventType.SECRET_REVEALED, "the-heir-lives", SecretRevealed(id="the-heir-lives", note="told again"))
+    await proj.catch_up()
+    rows = await _secret_rows(proj)
+    assert rows[0]["revealed"] is True
+
+
+async def test_reprojecting_secret_events_is_equivalent(wired):
+    from novelizer.canon.events import SecretCreated, SecretLearned, SecretRevealed
+    events, proj, path = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await events.append(EventType.SECRET_REVEALED, "the-heir-lives", SecretRevealed(id="the-heir-lives"))
+    await proj.catch_up()
+    incremental = await _secret_rows(proj)
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()
+    await proj2.catch_up()
+    from_scratch = await _secret_rows(proj2)
+    await proj2.close()
+    assert incremental == from_scratch
+
+
+async def test_reset_state_clears_secret_tables(wired):
+    from novelizer.canon.events import SecretCreated, SecretLearned, SecretReferenced
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives", SecretReferenced(id="the-heir-lives", character_id="mara"))
+    await proj.catch_up()
+    await proj._reset_state()
+    for table in ("secrets", "secret_knowledge", "secret_references"):
+        cur = await proj._conn.execute(f"SELECT COUNT(*) FROM {table}")
+        assert (await cur.fetchone())[0] == 0

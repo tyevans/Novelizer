@@ -5,7 +5,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import ThreadRecord, ThreadState
+from novelizer.store.models import ThreadRecord, ThreadState, SecretRecord
 from novelizer.canon.threads import TERMINAL_STATES
 
 _CREATE = """
@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS projector_state (
 );
 CREATE TABLE IF NOT EXISTS threads (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS secrets (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS secret_knowledge (
+    secret_id TEXT NOT NULL, character_id TEXT NOT NULL, chapter_id TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '', PRIMARY KEY (secret_id, character_id)
+);
+CREATE TABLE IF NOT EXISTS secret_references (
+    secret_id TEXT NOT NULL, character_id TEXT NOT NULL, chapter_id TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS structure_scores (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
@@ -77,7 +87,7 @@ class Projector:
         for table in (
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
-            "structure_scores",
+            "structure_scores", "secrets", "secret_knowledge", "secret_references",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -201,6 +211,44 @@ class Projector:
             # else: no row for this id yet (shouldn't happen under correct agent
             # behavior, since agents validate intents against known ids before
             # committing) — nothing to project, no error raised.
+        elif t == EventType.SECRET_CREATED:
+            cur = await self._conn.execute("SELECT id FROM secrets WHERE id=?", (p["id"],))
+            existing = await cur.fetchone()
+            if existing is None:
+                record = SecretRecord(id=p["id"], title=p["title"], revealed=False)
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                    (record.id, record.model_dump_json()),
+                )
+            # else: a secret id is minted exactly once. A second secret.created
+            # for an id that already has a row is a projection no-op — same
+            # first-plant-wins rule as thread.planted.
+        elif t == EventType.SECRET_LEARNED:
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO secret_knowledge (secret_id, character_id, chapter_id, note) "
+                "VALUES (?,?,?,?)",
+                (p["id"], p["character_id"], p.get("chapter_id", ""), p.get("note", "")),
+            )
+        elif t == EventType.SECRET_REFERENCED:
+            await self._conn.execute(
+                "INSERT INTO secret_references (secret_id, character_id, chapter_id, note) VALUES (?,?,?,?)",
+                (p["id"], p["character_id"], p.get("chapter_id", ""), p.get("note", "")),
+            )
+        elif t == EventType.SECRET_REVEALED:
+            cur = await self._conn.execute("SELECT data FROM secrets WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = SecretRecord.model_validate_json(row[0])
+                if not record.revealed:
+                    updated = record.model_copy(update={"revealed": True})
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                        (updated.id, updated.model_dump_json()),
+                    )
+                # else: set-once — already revealed, event is a fact in the
+                # log but the projection does not change (Locked decision #2).
+            # else: no row for this id yet (shouldn't happen under correct
+            # agent behavior) — nothing to project, no error raised.
         elif t == EventType.ANNOTATION_STRUCTURE_SCORED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
