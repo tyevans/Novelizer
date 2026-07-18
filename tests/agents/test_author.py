@@ -5,8 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, ThreadPlanted
 from novelizer.agents.author import Author, ChapterDraft
+from novelizer.agents.schemas import ThreadIntent
 from novelizer.store.models import Chapter, DirectorSignal, SignalKind
 
 
@@ -148,10 +149,6 @@ async def test_commit_emits_no_remark_when_feed_note_empty(stack):
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.AGENT_REMARKED] == []
-
-
-from novelizer.agents.schemas import ThreadIntent
-from novelizer.canon.events import ThreadPlanted
 
 
 async def test_author_commit_plants_a_thread_from_structured_output(stack):

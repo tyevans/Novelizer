@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timezone
 from novelizer.store.models import (
     WorldEntry, Character, CharacterRelationship, Event,
-    Chapter, RetconRequest, DirectorSignal,
+    Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
     CanonStatus, EditorialStatus, RetconStatus, SignalKind, Domain,
 )
 
@@ -48,9 +48,6 @@ def test_character_voice_roundtrips_through_json():
     dumped = c.model_dump_json()
     restored = Character.model_validate_json(dumped)
     assert restored.voice == "Clipped sentences, never says 'I love you' outright."
-
-
-from novelizer.store.models import ThreadState, ThreadRecord
 
 
 def test_thread_record_defaults():

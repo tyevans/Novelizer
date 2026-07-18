@@ -8,9 +8,10 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.events import (
     EventType, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
 )
+from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import ThreadState
 
-TERMINAL = {ThreadState.paid_off, ThreadState.abandoned}
+TERMINAL = {ts for ts in ThreadState if ts.value in TERMINAL_STATES}
 
 _ACTION_EVENTS = {
     "touch": (EventType.THREAD_TOUCHED, ThreadTouched, ThreadState.touched),

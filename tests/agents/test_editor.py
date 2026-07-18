@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, ThreadPlanted
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent
 from novelizer.store.models import Chapter, EditorialStatus, Character
 
 
@@ -159,10 +159,6 @@ async def test_editor_prompt_omits_voices_section_when_none_set(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Character voices:" not in sent
     assert sent == f"Chapter title: One\n\nProse:\np"
-
-
-from novelizer.agents.schemas import ThreadIntent
-from novelizer.canon.events import ThreadPlanted
 
 
 async def test_editor_commit_touches_a_known_active_thread(stack):

@@ -4,7 +4,8 @@ from novelizer.agents.schemas import EditorVerdict
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, ThreadState
+from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
@@ -71,7 +72,7 @@ class Editor(BaseAgent):
             sig = DirectorSignal(kind=SignalKind.note, body=f"[Editor on '{ch.title}'] {verdict.notes}", target_agent="author")
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
         active_thread_ids = {
-            t.id for t in ctx["threads"] if t.state not in (ThreadState.paid_off, ThreadState.abandoned)
+            t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
         await self._remark(verdict.feed_note)
