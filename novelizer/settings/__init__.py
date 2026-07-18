@@ -1,3 +1,9 @@
+from novelizer.settings.discovery import (
+    StoryMeta,
+    list_stories,
+    order_stories,
+    slugify,
+)
 from novelizer.settings.global_store import (
     update_global_config,
     write_global_config,
@@ -45,13 +51,17 @@ __all__ = [
     "EnvOverrides",
     "FORBIDDEN_STORY_KEYS",
     "GlobalConfig",
+    "list_stories",
     "load_effective_settings",
+    "order_stories",
     "probe_endpoint",
     "ProbeResult",
+    "slugify",
     "STORY_OVERRIDABLE_KEYS",
     "StoryConfig",
     "StoryConfigError",
     "StoryDirectory",
+    "StoryMeta",
     "TOMLFileError",
     "global_config_path",
     "is_story_dir",
