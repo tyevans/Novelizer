@@ -245,6 +245,46 @@ interval (`NOVELIZER_STRUCTURE_ANALYST_INTERVAL`, default 180s).
 Story Shape/Thread Board TUI views and prompt injection of stale threads and
 pacing flags back to the Author/Editor are M3.3.
 
+### Story Shape & Thread Board, and brain context in prompts
+
+Mission Control's left column gains two more live panes: **Thread Board**
+(every thread, its state, and a `STALE` marker once 3 chapters have passed
+with no touch/pay-off/abandonment) and **Story Shape** (every scored
+chapter's tension and pacing label, with `SAG`/`SPIKE` markers). Both read
+straight from canon and call the exact same pure functions
+(`novelizer.brain.staleness.is_thread_stale`, `novelizer.brain.sag_spike.detect_sag_spike`)
+that build the notes injected into the Author's and Editor's prompts — so
+the room's two views of "what's stale" or "what's sagging" can never
+disagree.
+
+The Author sees a **stale threads** note naming each stale thread and the
+id it must cite to touch it back (per the thread identity rule — ids are
+minted only at plant time, never invented); the Editor sees a **pacing
+flags** note naming sagging/spiking chapters. Both notes are empty, and the
+prompt is byte-identical to a story with no Story Brain signal, whenever
+there's nothing to report — following the exact conditional-injection
+pattern `casting_note`/`personality` (M2) and character voices (M2.3)
+already established.
+
+The **brain context note builders** live in `novelizer/brain/context.py` as
+pure functions (`stale_threads_note` and `pacing_flags_note`) that take
+already-fetched domain objects (threads, chapters, structure scores) and
+return a formatted string. These same functions power both the notes
+injected into agent prompts and the raw data fed to the TUI widgets, ensuring
+the two views are always in sync. Author and Editor `poll()` methods fetch
+the necessary `ReadStore` data and build the context string at work-time,
+appending it conditionally to the prompt (only when non-empty), mirroring the
+M2 injection pattern for casting notes and personalities.
+
+**M3 done-when observation:** The live-LLM smoke test (`tests/agents/test_author_live_llm.py`,
+marked `@pytest.mark.live_llm` and excluded from default CI runs) was executed
+live with a real Author agent against a local inference endpoint. Result: **PASSED**.
+The test seeded a fixture with a thread that `StalenessAnalyzer` flagged stale,
+ran the real Author with the injected brain-context note, and confirmed it
+declared a matching thread-touch intent unprompted — demonstrating the end-to-end
+flow from staleness detection through prompt injection to live-LLM reaction.
+Test timing: ~9m15s on local inference (model: as configured in `NOVELIZER_AUTHOR_MODEL`).
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole

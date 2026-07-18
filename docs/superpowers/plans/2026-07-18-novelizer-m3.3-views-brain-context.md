@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the M3 loop. Author and Editor prompts gain a live "brain context" note — stale threads (Author) and pacing flags (Editor) — computed from the exact same pure functions (`novelizer.brain.staleness`, `novelizer.brain.sag_spike`) that two new Mission Control panes, Thread Board and Story Shape, render at display time, so the two views of "what's stale/sagging" can never disagree. This lands the M3 milestone done-when: (a) a CI-verifiable mechanical chain proving the plumbing (seed a stale thread → Author's prompt names it → a scripted Author response touches it → the event lands → the Thread Board no longer calls it stale), and (b) an `ollama`-marked live-LLM smoke test proving the actual causal claim — an unprompted real Author reacts to the injected note.
+**Goal:** Close the M3 loop. Author and Editor prompts gain a live "brain context" note — stale threads (Author) and pacing flags (Editor) — computed from the exact same pure functions (`novelizer.brain.staleness`, `novelizer.brain.sag_spike`) that two new Mission Control panes, Thread Board and Story Shape, render at display time, so the two views of "what's stale/sagging" can never disagree. This lands the M3 milestone done-when: (a) a CI-verifiable mechanical chain proving the plumbing (seed a stale thread → Author's prompt names it → a scripted Author response touches it → the event lands → the Thread Board no longer calls it stale), and (b) an `live_llm`-marked live-LLM smoke test proving the actual causal claim — an unprompted real Author reacts to the injected note.
 
 **Architecture:** (1) **Brain context is computed live, in `poll()`, not frozen at construction.** The M3 decomposition doc describes `BrainContext` "analogous to the M2 voice provider... handed to Author/Editor as an additional optional constructor param." Read literally, that would freeze the note at `Runtime.start()` — correct for `casting_note`/`personality` (static per-story voice-pack values) but wrong for stale-thread/pacing signals, which change every time a new chapter lands. This plan resolves that tension explicitly in favor of liveness: Author/Editor's existing `poll()` (which already fetches `ctx["threads"]` per M3.1) is extended to also fetch the chapter list and, for the Editor, structure scores; `work()` builds the brain-context string from `ctx` each call, via new pure functions in `novelizer/brain/context.py`, and appends it to the prompt exactly like `casting_note`/`personality` — conditional, empty when the brain has nothing to report, byte-identical output in that case. The *mechanism* (conditional string, appended once, empty-safe) is the M2 pattern verbatim; only *where the string is computed* differs from a literal reading of the doc, and that's stated here rather than silently changed. (2) **The note-builder functions are pure**, living in `novelizer/brain/context.py` alongside M3.2's `staleness.py`/`sag_spike.py` — `stale_threads_note(threads, chapters) -> str` and `pacing_flags_note(scores) -> str` take already-fetched domain objects, not a `ReadStore`, keeping every function in `novelizer/brain/` I/O-free and unit-testable without a database. Only agents' `poll()` methods touch `ReadStore`. (3) **The two new TUI widgets follow `AgentRoster`'s pattern, not `StoryBrowser`'s** — `ThreadBoard`/`StoryShape` are flat-list `Static` widgets with a pure `*_line(...)` formatter function (importing the same `is_thread_stale`/`detect_sag_spike` functions the agents use) plus an async `refresh_from(read)` method that fetches `ReadStore` data and renders it, mirroring `AgentRoster.update_from`/`roster_line` exactly. `StoryBrowser`'s `Tree`-based, section/drill-in pattern doesn't fit a flat scored/state list. (4) **Both panes land in Mission Control's persistent dashboard**, as two more `Static` panes in the left column (below `AgentRoster`/the proposals pane), each with its own refresh worker loop — matching the vision spec's "Mission Control (persistent dashboard)" framing. M3.3's stated done-when only requires the views "wired into `NovelizerApp.compose()`"; a dedicated full-screen drill-in view and its own keybinding (like `r` for the Room) are not required by the doc and are left as a natural follow-up, noted explicitly rather than silently added or dropped. (5) **The carry-over regression item is test-only.** Reading `novelizer/scheduler.py` and `novelizer/tui/app.py` confirms neither `Scheduler.tick()` nor `Scheduler._run()` catches exceptions by design (existing `tests/test_scheduler.py` already relies on `tick()` propagating `StubAgent` behavior straight through) — the two catch-alls that actually exist are `Scheduler.run()`'s loop (for headless use) and `NovelizerApp._scheduler_loop()` (used by the TUI, and already covered by `tests/tui/test_app_resilience.py`'s `BoomRunner` pattern for a plain `RuntimeError`). This plan's Task 1 adds the missing case for a `pydantic.ValidationError` surfaced from inside `StructureAnalyst.commit()`, correcting "Scheduler.tick's catch-all" to name the two real catch points.
 
-**Tech Stack:** Python 3.13, `pydantic` v2, `textual`, `pytest`+`pytest-asyncio` (`asyncio_mode=auto`), `hypothesis>=6.156.6`; the `ollama` pytest marker (already registered in `pyproject.toml`, excluded by default via `addopts = "-m 'not ollama'"`) for the live-LLM smoke test, following `tests/store/test_embeddings.py`'s existing precedent.
+**Tech Stack:** Python 3.13, `pydantic` v2, `textual`, `pytest`+`pytest-asyncio` (`asyncio_mode=auto`), `hypothesis>=6.156.6`; the `live_llm` pytest marker (registered in `pyproject.toml`, excluded by default via `addopts = "-m 'not ollama and not live_llm'"`) for the live-LLM smoke test, split out from the `ollama` marker used by `tests/store/test_embeddings.py`'s existing precedent.
 
 ## Global Constraints
 
@@ -15,7 +15,7 @@
 - `_commit_thread_intents`'s signature is unchanged from M3.1 (`intents, active_thread_ids, chapter_id=""`) — brain context injection only affects what agents are *told*, never how declared thread intents are *validated or committed*.
 - M2 injection mechanics apply verbatim: the brain-context string is appended in `work()`/`_summarize()` only when non-empty; when empty, the prompt is byte-identical to pre-M3.3 output. Every pre-existing `Author`/`Editor` test stays green untouched.
 - TDD, black-box-first; property tests only where warranted (this milestone is mostly integration/wiring, so most tasks are example-based, matching M1–M3.2's own mix).
-- The M3 done-when has two parts and both are explicit, separately-graded tasks in this plan (Tasks 9 and 10) — the CI-verifiable chain is necessary but not sufficient; the `ollama`-marked test is the milestone's true observation, per the doc's own framing.
+- The M3 done-when has two parts and both are explicit, separately-graded tasks in this plan (Tasks 9 and 10) — the CI-verifiable chain is necessary but not sufficient; the `live_llm`-marked test is the milestone's true observation, per the doc's own framing.
 - Backward compatibility: the existing test suite (286 tests after M3.2) stays green throughout; `StructureAnalyst`, `Scheduler`, `Committer`/`GatingCommitter` are untouched by this plan except where Task 1 adds tests (no production code change in Task 1).
 
 ---
@@ -889,16 +889,16 @@ git commit -m "test: M3 done-when part (a) — CI-verifiable stale-thread-to-tou
 
 ---
 
-### Task 10: M3 done-when, part (b) — the `ollama`-marked live-LLM smoke test
+### Task 10: M3 done-when, part (b) — the `live_llm`-marked live-LLM smoke test
 
 **Files:**
-- Create: `tests/agents/test_author_ollama.py`
+- Create: `tests/agents/test_author_live_llm.py`
 
-**Interfaces:** none produced — a new `ollama`-marked test file, excluded from the default run (`addopts = "-m 'not ollama'"` in `pyproject.toml`) and run manually or in an environment with a live Ollama-compatible endpoint, following `tests/store/test_embeddings.py`'s existing precedent for this milestone-boundary marker.
+**Interfaces:** none produced — a new `live_llm`-marked test file, excluded from the default run (`addopts = "-m 'not ollama and not live_llm'"` in `pyproject.toml`) and run manually or in an environment with a live Ollama-compatible endpoint, following `tests/store/test_embeddings.py`'s existing precedent for this milestone-boundary marker.
 
 - [ ] **Step 1: Write the test**
 
-Create `tests/agents/test_author_ollama.py`:
+Create `tests/agents/test_author_live_llm.py`:
 
 ```python
 """M3 done-when, part (b): the true observation for M3, per the doc's own
@@ -912,10 +912,10 @@ author_model) -- with no director signal and no manual prompt beyond what
 the room already injects, and asserts it reacts to the injected stale-thread
 note by declaring a matching thread_intents entry, unprompted.
 
-Requires a running Ollama (or other OpenAI-compatible) server serving the
-model named by NOVELIZER_AUTHOR_MODEL (see .env.example / README's
-Configuration table). Run explicitly with: uv run pytest -m ollama
-tests/agents/test_author_ollama.py -v
+Requires the configured OpenAI-compatible LLM endpoint (`Settings().llm_base_url`)
+to be reachable and serving the model named by NOVELIZER_AUTHOR_MODEL (see
+.env.example / README's Configuration table). Run explicitly with:
+uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
 """
 import os
 import tempfile
@@ -947,7 +947,7 @@ async def stack():
     os.unlink(path)
 
 
-@pytest.mark.ollama
+@pytest.mark.live_llm
 async def test_real_author_reacts_to_a_stale_thread_unprompted(stack):
     events, proj, read, committer = stack
     await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
@@ -975,14 +975,14 @@ async def test_real_author_reacts_to_a_stale_thread_unprompted(stack):
 - [ ] **Step 2: Confirm it's excluded from the default run**
 
 Run: `uv run pytest tests/ -v`
-Expected: all tests green, and `tests/agents/test_author_ollama.py::test_real_author_reacts_to_a_stale_thread_unprompted` does not appear in the run (excluded by `addopts = "-m 'not ollama'"`).
+Expected: all tests green, and `tests/agents/test_author_live_llm.py::test_real_author_reacts_to_a_stale_thread_unprompted` does not appear in the run (excluded by `addopts = "-m 'not ollama and not live_llm'"`).
 
 - [ ] **Step 3: Manually verify against a live endpoint (documented, not CI-run)**
 
 With a local Ollama (or other OpenAI-compatible endpoint) serving `NOVELIZER_AUTHOR_MODEL`:
 
 ```bash
-uv run pytest -m ollama tests/agents/test_author_ollama.py -v
+uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
 ```
 
 Expected: PASS, confirming the real Author reacts to the injected stale-thread note. Record the result (pass/fail, model used) in the M3.3 plan's completion notes when this task is executed — this is the milestone's true done-when observation and, per the doc, CI cannot prove it; a documented manual run stands in for CI here exactly as M1/M2's own live-LLM checks did.
@@ -990,8 +990,8 @@ Expected: PASS, confirming the real Author reacts to the injected stale-thread n
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/agents/test_author_ollama.py
-git commit -m "test: M3 done-when part (b) — ollama-marked live-LLM stale-thread reaction smoke test"
+git add tests/agents/test_author_live_llm.py
+git commit -m "test: M3 done-when part (b) — live_llm-marked live-LLM stale-thread reaction smoke test"
 ```
 
 ---
@@ -1060,7 +1060,7 @@ git commit -m "docs: mark M3.3 and M3 complete; document Story Shape/Thread Boar
 - "Author sees a 'stale threads' note (including the thread ids it's allowed to reference per M3.1's identity rule)" — Task 3 (`stale_threads_note` names both the freeform `name` and the citable `id`).
 - "Editor sees pacing flags" — Task 4.
 - Done-when (a), the CI-verifiable mechanical chain, described clause-by-clause in the doc — Task 9 implements every clause in the stated order: seed thread+chapters → `StalenessAnalyzer` flags it (asserted via `thread_board_line`) → `BrainContext` string contains the thread's name/id (asserted on literal prompt text) → `FakeRunner`-driven Author declares a matching `thread_intents` touch → `thread.touched` lands via the `Committer` → the Thread Board's render-time helper no longer reports it stale.
-- Done-when (b), the `ollama`-marked live-LLM smoke test, "the true done-when observation for M3" — Task 10, following `tests/store/test_embeddings.py`'s existing `@pytest.mark.ollama` precedent exactly, with a documented-manual-run step since CI excludes it by default (`addopts = "-m 'not ollama'"`).
+- Done-when (b), the `live_llm`-marked live-LLM smoke test, "the true done-when observation for M3" — Task 10, following the pattern of `tests/store/test_embeddings.py`'s existing `@pytest.mark.ollama` precedent (split into its own `live_llm` marker since this test hits the OpenAI-compatible chat endpoint, not Ollama specifically), with a documented-manual-run step since CI excludes it by default (`addopts = "-m 'not ollama and not live_llm'"`).
 - The carry-over regression item from M3.2's review — Task 1, test-only, confirming (not changing) `Scheduler`/`NovelizerApp` exception-isolation behavior.
 
 **Design decisions the M3.3 row left open or worded ambiguously, resolved here (flagged per the dispatch instructions):**
@@ -1070,7 +1070,7 @@ git commit -m "docs: mark M3.3 and M3 complete; document Story Shape/Thread Boar
 4. **Placement: two more persistent `Static` panes in Mission Control's left column**, not a dedicated full-screen drill-in view with its own keybinding. The vision spec lists Story Shape/Thread Board among the *drill-in views* long-term, but M3.3's stated done-when only requires panes "wired into `NovelizerApp.compose()`" — this plan satisfies that literally and notes the drill-in/keybinding upgrade as a natural, explicitly-flagged follow-up rather than silently expanding or narrowing scope.
 5. **The carry-over regression item targets two real catch-alls (`Scheduler.run()`, `NovelizerApp._scheduler_loop()`), not "`Scheduler.tick`'s catch-all"** — reading `scheduler.py` shows `tick()` has no try/except by design (confirmed by `tests/test_scheduler.py`'s existing behavior), so Task 1 corrects the assignment's framing to the two places where exception-swallowing actually happens, and adds the missing `pydantic.ValidationError`-from-a-malformed-score case alongside the existing `RuntimeError` case already covered by `tests/tui/test_app_resilience.py`.
 
-**Placeholder scan:** every task's Step 3 shows complete code — full new files (`brain/context.py`, `thread_board.py`, `story_shape.py`, `test_author_ollama.py`) or exact before/after snippets anchored to current file contents (re-read from the post-M3.2-merge `master` branch immediately before writing this plan: `scheduler.py`, `app.py`, `app.tcss`, `author.py`, `editor.py`, `roster.py`, `browser.py`, `browser_model.py`, and the full `tests/tui/` directory including `test_app_layout.py`/`test_app_resilience.py`/`test_app_smoke.py`/`test_roster.py`). No "similar to Task N", no `...` elisions, no TODOs.
+**Placeholder scan:** every task's Step 3 shows complete code — full new files (`brain/context.py`, `thread_board.py`, `story_shape.py`, `test_author_live_llm.py`) or exact before/after snippets anchored to current file contents (re-read from the post-M3.2-merge `master` branch immediately before writing this plan: `scheduler.py`, `app.py`, `app.tcss`, `author.py`, `editor.py`, `roster.py`, `browser.py`, `browser_model.py`, and the full `tests/tui/` directory including `test_app_layout.py`/`test_app_resilience.py`/`test_app_smoke.py`/`test_roster.py`). No "similar to Task N", no `...` elisions, no TODOs.
 
 **Type consistency:** `stale_threads_note(threads: list[ThreadRecord], chapters: list[Chapter]) -> str` (Task 2) matches `Author.poll()`'s `ctx["threads"]`/`ctx["chapters"]` types (Task 3) and `thread_board_line`'s parameters (Task 5) exactly — all three call the identical `novelizer.brain.staleness.is_thread_stale`/`stale_threads` functions with identical argument shapes, so there is exactly one staleness computation path in the codebase. `pacing_flags_note(scores: list[StructureScore]) -> str` (Task 2) matches `Editor.poll()`'s `ctx["scores"]` (Task 4) and `story_shape_line`'s `flags.get(...)` lookup (Task 6) exactly, all sourced from `ReadStore.list_structure_scores()`.
 
