@@ -42,10 +42,20 @@ from novelizer.settings.toml_io import (
     load_toml_file,
     write_toml_file,
 )
+from novelizer.settings.view_model import (
+    RESTART_REQUIRED_KEYS,
+    SettingsRow,
+    apply_edit,
+    build_settings_rows,
+    load_layer_configs,
+    parse_value,
+)
 
 __all__ = [
+    "apply_edit",
     "build_effective",
     "build_global_config_data",
+    "build_settings_rows",
     "create_story",
     "EffectiveSettings",
     "EnvOverrides",
@@ -53,9 +63,13 @@ __all__ = [
     "GlobalConfig",
     "list_stories",
     "load_effective_settings",
+    "load_layer_configs",
     "order_stories",
+    "parse_value",
     "probe_endpoint",
     "ProbeResult",
+    "RESTART_REQUIRED_KEYS",
+    "SettingsRow",
     "slugify",
     "STORY_OVERRIDABLE_KEYS",
     "StoryConfig",
