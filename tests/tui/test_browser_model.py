@@ -65,3 +65,23 @@ async def test_retcon_section_only_open(stack):
     retcons_section = [s for s in secs if s["key"] == "retcons"][0]
     assert len(retcons_section["items"]) == 1
     assert retcons_section["items"][0]["id"] == "r1"
+
+
+async def test_detail_text_for_character_includes_voice_card_when_present(stack):
+    events, proj, read = stack
+    await events.append(
+        EventType.CHARACTER_CREATED, "ch1",
+        Character(id="ch1", name="Mira", traits="stoic", arc_status="wary",
+                  voice="Speaks in short, clipped sentences."),
+    )
+    await proj.catch_up()
+    d = await detail_text(read, "characters", "ch1")
+    assert "Voice: Speaks in short, clipped sentences." in d
+
+
+async def test_detail_text_for_character_omits_voice_line_when_absent(stack):
+    events, proj, read = stack
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="stoic"))
+    await proj.catch_up()
+    d = await detail_text(read, "characters", "ch1")
+    assert "Voice:" not in d
