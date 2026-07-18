@@ -34,7 +34,11 @@ class CharacterKeeper(BaseAgent):
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
-        return {"characters": await self._read.list_characters(), "recent": chapters[-5:]}
+        return {
+            "characters": await self._read.list_characters(),
+            "recent": chapters[-5:],
+            "secrets": await self._read.list_secrets(),
+        }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
         if not ctx["characters"]:
@@ -64,6 +68,10 @@ class CharacterKeeper(BaseAgent):
             req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
                                 proposed_resolution=r.proposed_resolution)
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        active_secret_ids = {s.id for s in ctx.get("secrets", [])}
+        await self._commit_knowledge_intents(
+            out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})
+        )
         await self._remark(out.feed_note)
 
     async def run_once(self) -> None:
