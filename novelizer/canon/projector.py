@@ -1,6 +1,6 @@
 from __future__ import annotations
 import asyncio
-import os
+import json
 from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
@@ -80,7 +80,6 @@ class Projector:
         self._running = False
 
     async def _apply(self, ev: StoredEvent) -> None:
-        import json
         data = json.dumps(ev.payload)
         p = ev.payload
         t = ev.event_type

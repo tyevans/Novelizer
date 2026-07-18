@@ -27,6 +27,15 @@ async def _chapter_rows(proj):
     return [json.loads(r[0]) for r in await cur.fetchall()]
 
 
+async def _all_table_rows(proj):
+    """Get all projection tables' data rows as dicts."""
+    tables = {}
+    for table in ("chapters", "world_entries", "characters", "director_signals"):
+        cur = await proj._conn.execute(f"SELECT data FROM {table} ORDER BY rowid")
+        tables[table] = [json.loads(r[0]) for r in await cur.fetchall()]
+    return tables
+
+
 async def test_chapter_created_is_projected(wired):
     events, proj, _ = wired
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
@@ -61,14 +70,17 @@ async def test_reprojecting_same_events_is_equivalent(wired):
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
     await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="W", body="b"))
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira"))
+    # Append a world_entry.superseded event that supersedes the first world entry.
+    await events.append(EventType.WORLD_ENTRY_SUPERSEDED, "w2", WorldEntry(id="w2", title="W2", body="b2", supersedes_id="w1"))
     await proj.catch_up()
-    incremental = await _chapter_rows(proj)
+    incremental = await _all_table_rows(proj)
     # Fresh projector over the same log, projecting from zero, yields the same rows.
     proj2 = Projector(events, path)
     await proj2.init()
     await proj2._reset_state()  # force last_sequence=0
     await proj2.catch_up()
-    cur = await proj2._conn.execute("SELECT data FROM chapters ORDER BY rowid")
-    from_scratch = [json.loads(r[0]) for r in await cur.fetchall()]
+    from_scratch = await _all_table_rows(proj2)
     await proj2.close()
-    assert incremental == from_scratch
+    # Assert all four projection tables have identical rows.
+    for table in ("chapters", "world_entries", "characters", "director_signals"):
+        assert incremental[table] == from_scratch[table], f"Table {table} mismatch between incremental and from-scratch"
