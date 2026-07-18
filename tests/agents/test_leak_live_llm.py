@@ -54,7 +54,9 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, SecretCreated, SecretLearned
 from novelizer.agents.editor import Editor, build_editor_runner
-from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
+from novelizer.agents.continuity_checker import (
+    ContinuityChecker, build_continuity_checker_runner, build_continuity_mining_runner,
+)
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
 from novelizer.store.models import Chapter, Character, RetconStatus
 
@@ -128,7 +130,10 @@ async def test_planted_prose_leak_is_annotated_by_the_real_editor_and_reaches_th
         "structured output."
     )
 
-    checker = ContinuityChecker(build_continuity_checker_runner(settings), read, committer)
+    checker = ContinuityChecker(
+        build_continuity_checker_runner(settings), build_continuity_mining_runner(settings),
+        read, committer, events,
+    )
     await checker.run_once()
     await proj.catch_up()
 
