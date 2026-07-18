@@ -68,3 +68,14 @@ class ContinuityOutput(BaseModel):
 class RetconAmendments(BaseModel):
     amended_entries: list[WorldEntryDraft] = Field(default_factory=list)
     feed_note: str = ""
+
+
+class ChapterScore(BaseModel):
+    chapter_id: str
+    tension: float = Field(ge=0.0, le=1.0)
+    pacing_label: str = ""
+
+
+class StructureAnalystOutput(BaseModel):
+    scores: list[ChapterScore] = Field(default_factory=list)
+    feed_note: str = ""
