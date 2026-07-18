@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from novelizer.settings import EffectiveSettings
+from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
@@ -101,6 +101,65 @@ class Runtime:
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
         self.scheduler = Scheduler(self.agents, self.read)
+
+    def apply_settings(self, new: EffectiveSettings) -> dict:
+        """Apply a freshly loaded EffectiveSettings to the running system.
+
+        Cadence, voice, and temperatures apply live; endpoint/model changes are
+        reported as restart-required and left un-applied so self.settings always
+        reflects what is actually running.
+        """
+        old = self.settings
+        changed = [k for k in EffectiveSettings.model_fields if getattr(old, k) != getattr(new, k)]
+        applied: list[str] = []
+        restart: list[str] = []
+        interval_map = {
+            "author_interval": [self.author],
+            "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
+            "continuity_interval": [self.continuity_checker],
+            "structure_analyst_interval": [self.structure_analyst],
+        }
+        for key in changed:
+            if key in RESTART_REQUIRED_KEYS:
+                restart.append(key)
+            elif key in interval_map:
+                for agent in interval_map[key]:
+                    agent.interval = getattr(new, key)
+                applied.append(key)
+            else:
+                applied.append(key)
+
+        if "voice_pack" in changed or "prose_profile" in changed:
+            self.voice_pack = load_voice_pack(new.voice_pack)
+            self.active_prose_profile = self.voice_pack.profile(new.prose_profile)
+            casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
+            personalities = self.voice_pack.agent_personalities
+            self.author._casting_note = casting_note
+            self.editor._casting_note = casting_note
+            for agent in self.agents:
+                agent.personality = personalities.get(agent.name, "")
+
+        rebuild = self._runners is None and self._runner is None
+        if "author_temperature" in changed and rebuild:
+            self.author._runner = build_author_runner(new)
+        if "agent_temperature" in changed and rebuild:
+            self.world_architect._runner = build_world_architect_runner(new)
+            self.character_keeper._runner = build_character_keeper_runner(new)
+            self.editor._runner = build_editor_runner(new)
+            self.continuity_checker._runner = build_continuity_checker_runner(new)
+            self.retconner._runner = build_retconner_runner(new)
+            self.structure_analyst._runner = build_structure_analyst_runner(new)
+
+        if self.author is not None and self.author.provenance is not None:
+            self.author.provenance = {
+                "model": old.author_model,  # restart-required: old model still runs
+                "temperature": new.author_temperature,
+                "voice_pack": self.voice_pack.name,
+                "prose_profile": new.prose_profile,
+            }
+
+        self.settings = new.model_copy(update={k: getattr(old, k) for k in restart}) if restart else new
+        return {"applied": applied, "restart_required": restart}
 
     async def close(self) -> None:
         await self.read.close()
