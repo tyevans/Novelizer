@@ -53,3 +53,4 @@ class EffectiveSettings(BaseModel):
     story_title: str | None = None
     default_stories_dir: str = "stories"
     last_opened_story: str | None = None
+    suppress_flat_migration_prompt: bool = False

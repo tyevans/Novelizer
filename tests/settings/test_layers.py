@@ -68,8 +68,15 @@ def test_story_config_fields_match_overridable_keys():
 def test_global_config_fields_match_overridable_plus_global_only_keys():
     assert set(GlobalConfig.model_fields) == STORY_OVERRIDABLE_KEYS | {
         "llm_base_url", "llm_api_key", "default_stories_dir", "last_opened_story",
+        "suppress_flat_migration_prompt",
     }
 
 
 def test_env_overrides_fields_match_global_config_fields():
     assert set(EnvOverrides.model_fields) == set(GlobalConfig.model_fields)
+
+
+def test_suppress_flat_migration_prompt_defaults_false():
+    from novelizer.settings import EffectiveSettings
+
+    assert EffectiveSettings().suppress_flat_migration_prompt is False

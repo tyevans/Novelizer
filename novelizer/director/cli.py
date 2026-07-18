@@ -6,13 +6,17 @@ from rich.console import Console
 from rich.table import Table
 from novelizer.settings import (
     EffectiveSettings,
-    StoryConfigError,
     StoryDirectory,
+    StoryConfigError,
     TOMLFileError,
     create_story,
+    global_config_path,
     is_story_dir,
+    list_stories,
     load_effective_settings,
     migrate_flat_layout,
+    update_global_config,
+    write_global_config,
 )
 from novelizer.runtime import Runtime
 from novelizer.director import commands
@@ -36,27 +40,91 @@ async def _with_runtime(settings, fn):
         await rt.close()
 
 
+def _validated_story(story_path: str) -> StoryDirectory:
+    root = Path(story_path).expanduser()
+    if not is_story_dir(root):
+        raise click.ClickException(
+            f"{root} is not a story directory (no story.toml or world.db). "
+            "Check the path, or run `novelizer` without --story to pick or create one."
+        )
+    return StoryDirectory(root=root)
+
+
 def _resolve_story(
     story_path: str | None,
-    stories_root: Path = Path("stories"),
+    stories_root: Path,
+    base: EffectiveSettings,
     confirm=click.confirm,
+    global_path: Path | None = None,
 ) -> StoryDirectory:
-    """Pick the story directory: explicit --story wins; else migrate/reuse/create
-    the default story under stories_root."""
+    """Headless story resolution: --story -> last-opened -> legacy migration -> default."""
     if story_path:
-        return StoryDirectory(root=Path(story_path))
+        return _validated_story(story_path)
+    if base.last_opened_story and is_story_dir(Path(base.last_opened_story)):
+        return StoryDirectory(root=Path(base.last_opened_story))
     if (stories_root / "world.db").exists():
+        if base.suppress_flat_migration_prompt:
+            return StoryDirectory(root=stories_root)
         if confirm(
             f"Found legacy flat story at {stories_root}/world.db. "
             f"Migrate it into {stories_root}/default/?",
             default=True,
         ):
             return migrate_flat_layout(stories_root)
+        update_global_config(path=global_path, suppress_flat_migration_prompt=True)
         return StoryDirectory(root=stories_root)  # legacy paths keep working
     default = stories_root / "default"
     if is_story_dir(default):
         return StoryDirectory(root=default)
     return create_story(default, title="default")
+
+
+def _run_wizard_app() -> dict | None:
+    from novelizer.tui.setup_wizard import SetupWizardApp
+
+    return SetupWizardApp().run()
+
+
+def _run_picker_app(stories, stories_dir: Path, last_opened: str | None):
+    from novelizer.tui.story_picker import StoryPickerApp
+
+    return StoryPickerApp(stories, stories_dir=stories_dir, last_opened=last_opened).run()
+
+
+def _interactive_startup(
+    story_path: str | None,
+    run_wizard=None,
+    run_picker=None,
+) -> EffectiveSettings | None:
+    """TUI boot: wizard when unconfigured, then story pick. None = user quit."""
+    run_wizard = run_wizard or _run_wizard_app
+    run_picker = run_picker or _run_picker_app
+    if not global_config_path().exists():
+        wizard_data = run_wizard()
+        if wizard_data is None:
+            return None
+        write_global_config(wizard_data)
+    base = load_effective_settings()
+    stories_root = Path(base.default_stories_dir).expanduser()
+    if story_path:
+        story = _validated_story(story_path)
+    else:
+        if (stories_root / "world.db").exists() and not base.suppress_flat_migration_prompt:
+            if click.confirm(
+                f"Found legacy flat story at {stories_root}/world.db. "
+                f"Migrate it into {stories_root}/default/?",
+                default=True,
+            ):
+                migrate_flat_layout(stories_root)
+            else:
+                update_global_config(suppress_flat_migration_prompt=True)
+            base = load_effective_settings()
+        chosen = run_picker(list_stories(stories_root), stories_root, base.last_opened_story)
+        if chosen is None:
+            return None
+        story = StoryDirectory(root=Path(chosen))
+    update_global_config(last_opened_story=str(story.root))
+    return load_effective_settings(story_dir=story)
 
 
 @click.group(invoke_without_command=True)
@@ -65,12 +133,20 @@ def _resolve_story(
 def cli(ctx, story_path: str | None):
     ctx.ensure_object(dict)
     try:
-        story = _resolve_story(story_path)
+        if ctx.invoked_subcommand is None:
+            settings = _interactive_startup(story_path)
+            if settings is None:
+                return  # user quit the wizard or picker
+            _launch_tui(settings)
+            return
+        base = load_effective_settings()
+        stories_root = Path(base.default_stories_dir).expanduser()
+        story = _resolve_story(story_path, stories_root, base)
+        if global_config_path().exists():
+            update_global_config(last_opened_story=str(story.root))
         ctx.obj["settings"] = load_effective_settings(story_dir=story)
     except (TOMLFileError, StoryConfigError, FileExistsError) as e:
         raise click.ClickException(str(e)) from e
-    if ctx.invoked_subcommand is None:
-        _launch_tui(ctx.obj["settings"])
 
 
 def _launch_tui(settings: EffectiveSettings) -> None:

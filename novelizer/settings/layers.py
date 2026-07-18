@@ -23,6 +23,7 @@ class GlobalConfig(BaseModel):
     llm_api_key: str | None = None
     default_stories_dir: str | None = None
     last_opened_story: str | None = None
+    suppress_flat_migration_prompt: bool | None = None
 
     voice_pack: str | None = None
     prose_profile: str | None = None

@@ -35,9 +35,14 @@ story config ← `NOVELIZER_*` environment variables.
   in `story.toml`.
 - **Env:** any setting, e.g. `NOVELIZER_AUTHOR_MODEL=qwen3`.
 
-Open a specific story with `novelizer --story path/to/story/`. With no
-`--story`, novelizer uses `stories/default/` (offering a one-time migration
-if it finds a legacy flat `stories/world.db`).
+On first launch (no global config yet), novelizer opens a setup wizard: point
+it at your OpenAI-compatible endpoint, test the connection, and pick models
+from the endpoint's live model list. After setup — and on every later
+launch — a story picker lists the stories in `default_stories_dir`
+(most recent first, last-opened preselected) and can create new ones.
+`novelizer --story path/to/story/` skips the picker. A legacy flat
+`stories/world.db` triggers a one-time migration offer; declining is
+remembered.
 
 ## Usage
 
