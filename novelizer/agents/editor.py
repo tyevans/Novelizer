@@ -32,6 +32,16 @@ class Editor(BaseAgent):
         drafts = await self._read.list_chapters(status=EditorialStatus.draft)
         return {"target": drafts[0] if drafts else None}
 
+    async def _character_voices_block(self, character_ids: list[str]) -> str:
+        lines = []
+        for cid in character_ids:
+            c = await self._read.get_character(cid)
+            if c is not None and c.voice:
+                lines.append(f"- {c.name}: {c.voice}")
+        if not lines:
+            return ""
+        return "\n\nCharacter voices:\n" + "\n".join(lines)
+
     async def work(self, ctx: dict) -> EditorVerdict | None:
         ch = ctx["target"]
         if ch is None:
@@ -42,7 +52,8 @@ class Editor(BaseAgent):
             else ""
         )
         cast = f"\n\nIn character: {self.personality}" if self.personality else ""
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}"
+        voices = await self._character_voices_block(ch.character_ids)
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
