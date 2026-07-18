@@ -15,8 +15,15 @@ and retcon_requests (description, conflicting_entry_ids, proposed_resolution).""
 
 
 class CharacterKeeper(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 120) -> None:
-        super().__init__(runner, read_store, committer, interval, name="character_keeper")
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 120,
+        personality: str = "",
+    ) -> None:
+        super().__init__(runner, read_store, committer, interval, name="character_keeper", personality=personality)
 
     async def readiness(self) -> float:
         chars = await self._read.list_characters()
@@ -32,7 +39,8 @@ class CharacterKeeper(BaseAgent):
             return None
         chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"])
         chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}"
+        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -54,6 +62,7 @@ class CharacterKeeper(BaseAgent):
             req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
                                 proposed_resolution=r.proposed_resolution)
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        await self._remark(out.feed_note)
 
     async def run_once(self) -> None:
         ctx = await self.poll()

@@ -12,8 +12,13 @@ from novelizer.store.models import Character, Chapter, RetconStatus
 
 
 class FakeRunner:
-    def __init__(self, out): self._out = out
-    async def ainvoke(self, inputs): return {"structured_response": self._out}
+    def __init__(self, out):
+        self._out = out
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        return {"structured_response": self._out}
 
 
 @pytest.fixture
@@ -49,3 +54,28 @@ async def test_noop_when_no_characters(stack):
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_characters() == []
+
+
+async def test_work_prompt_includes_personality_when_set(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mara", traits="wary"))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer, personality="A protective, watchful presence.")
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A protective, watchful presence." in sent
+    assert "In character:" in sent
+
+
+async def test_commit_emits_remark_when_feed_note_present(stack):
+    events, proj, read, committer = stack
+    out = KeeperOutput(feed_note="Mara's arc is bending toward trust.")
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.commit(out, {"characters": [], "recent": []})
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["note"] == "Mara's arc is bending toward trust."

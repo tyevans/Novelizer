@@ -5,13 +5,19 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
+from novelizer.canon.events import EventType
 from novelizer.agents.world_architect import WorldArchitect
 from novelizer.agents.schemas import WorldEntriesDraft, WorldEntryDraft
 
 
 class FakeRunner:
-    def __init__(self, out): self._out = out
-    async def ainvoke(self, inputs): return {"structured_response": self._out}
+    def __init__(self, out):
+        self._out = out
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        return {"structured_response": self._out}
 
 
 @pytest.fixture
@@ -41,3 +47,37 @@ async def test_run_once_creates_world_entries(stack):
     await proj.catch_up()
     titles = {e.title for e in await read.list_world_entries()}
     assert {"The Brinemarsh", "Salt Guild"} <= titles
+
+
+async def test_work_prompt_includes_personality_when_set(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(WorldEntriesDraft())
+    agent = WorldArchitect(runner, read, committer, personality="A quietly obsessive worldbuilder.")
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A quietly obsessive worldbuilder." in sent
+    assert "In character:" in sent
+
+
+async def test_work_prompt_omits_personality_line_when_unset(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(WorldEntriesDraft())
+    agent = WorldArchitect(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "In character:" not in sent
+
+
+async def test_commit_emits_remark_when_feed_note_present(stack):
+    events, proj, read, committer = stack
+    draft = WorldEntriesDraft(feed_note="Another corner of the map, filled in.")
+    agent = WorldArchitect(FakeRunner(draft), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["agent_name"] == "world_architect"
+    assert remarks[0].payload["note"] == "Another corner of the map, filled in."
