@@ -139,6 +139,28 @@ The active prose profile is chosen per run via `NOVELIZER_PROSE_PROFILE` — res
 process to switch. Live in-TUI switching of the active profile, and per-agent
 personality casting (also carried in the pack format today), arrive in M2.3.
 
+### Personalities & the living feed
+
+Each roster member also has a **personality** — a short casting note from the
+active pack's `[agent_personalities]` table (e.g. the Editor's "precise,
+unsentimental line editor" vs. the Author's "restless, romantic chronicler").
+The personality is injected into that agent's work-time prompt the same way
+the prose profile is, and agents may emit a short in-personality remark as
+part of their structured output. Remarks are appended to canon as
+`agent.remarked` events — feed flavor only, never gated, never projected —
+and rendered in the activity feed (and the full-screen Room view, toggled
+with `r`) as personality-voiced lines:
+
+```
+💬 Editor: "Finally, a clean draft."
+💬 Author: "Another storm, another chapter."
+```
+
+Recasting an agent (editing its entry in `[agent_personalities]` in the
+active voice pack) changes both what it says in the feed and how it
+approaches its next turn of work — on the next process start, per M2.2's
+scope; live in-TUI recasting lands with the voice browser in M2.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole
