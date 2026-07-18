@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
-from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord
+from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
 
@@ -100,3 +100,12 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (thread_id,))
         row = await cur.fetchone()
         return ThreadRecord.model_validate_json(row[0]) if row else None
+
+    async def list_structure_scores(self) -> list[StructureScore]:
+        cur = await self._conn.execute("SELECT data FROM structure_scores ORDER BY rowid")
+        return [StructureScore.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_structure_score(self, chapter_id: str) -> Optional[StructureScore]:
+        cur = await self._conn.execute("SELECT data FROM structure_scores WHERE id=?", (chapter_id,))
+        row = await cur.fetchone()
+        return StructureScore.model_validate_json(row[0]) if row else None
