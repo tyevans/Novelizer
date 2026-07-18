@@ -61,9 +61,16 @@ class Runtime:
         casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
         personalities = self.voice_pack.agent_personalities
         s = self.settings
+        provenance = {
+            "model": s.author_model,
+            "temperature": s.author_temperature,
+            "voice_pack": self.voice_pack.name,
+            "prose_profile": s.prose_profile,
+        }
         self.author = Author(
             self._runner_for("author", build_author_runner), self.read, self.committer,
             interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
+            provenance=provenance,
         )
         self.world_architect = WorldArchitect(
             self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
