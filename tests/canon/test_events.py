@@ -38,3 +38,20 @@ def test_agent_remark_payload_model_roundtrips():
     remark = AgentRemark(agent_name="author", note="Another storm, another chapter.")
     again = AgentRemark.model_validate_json(remark.model_dump_json())
     assert again == remark
+
+
+def test_thread_event_types_exist():
+    from novelizer.canon.events import EventType
+    assert EventType.THREAD_PLANTED == "thread.planted"
+    assert EventType.THREAD_TOUCHED == "thread.touched"
+    assert EventType.THREAD_PAID_OFF == "thread.paid_off"
+    assert EventType.THREAD_ABANDONED == "thread.abandoned"
+
+
+def test_thread_payload_models_roundtrip():
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned
+    planted = ThreadPlanted(id="the-locket", name="The Locket", chapter_id="c1", note="introduced")
+    assert ThreadPlanted.model_validate_json(planted.model_dump_json()) == planted
+    for cls in (ThreadTouched, ThreadPaidOff, ThreadAbandoned):
+        inst = cls(id="the-locket", chapter_id="c2", note="advanced")
+        assert cls.model_validate_json(inst.model_dump_json()) == inst

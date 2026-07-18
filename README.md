@@ -200,6 +200,29 @@ and `NOVELIZER_PROSE_PROFILE` in `.env`, per the Configuration table above).
 A dedicated in-TUI voice-editing/scaffolding pane, live in-run profile
 switching, and LLM-expanded scaffolded profiles are deferred past M2.3.
 
+### The thread ledger (Story Brain, Phase 1)
+
+The Author and Editor can declare plot-thread bookkeeping alongside their
+normal output: `plant` a new thread from a freeform name (the system slugs
+it into a stable id — e.g. "The Locket's Secret" becomes `the-locket-s-secret`),
+or `touch`/`pay_off`/`abandon` an existing thread by citing its id. Thread
+events are never gated by autonomy level — they're narrative bookkeeping,
+not proposals — and flow straight into a `threads` read table via the same
+event-sourced Projector/ReadStore machinery as chapters and characters.
+
+```bash
+novelizer proposals   # thread.* never appears here, at any autonomy level
+```
+
+A thread's state machine is `planted → touched* → paid_off|abandoned`, with
+`paid_off`/`abandoned` absorbing: once a thread is closed, further events
+citing its id are recorded in the log but don't reopen it. Thread identity
+follows a first-plant-wins rule: re-planting an existing thread id is a
+no-op that doesn't change its state, and if an agent's plant collides with
+a known-active id, the intent is downgraded to a touch. Story Brain
+surfaces (staleness detection, the Story Shape/Thread Board TUI views, and
+prompt injection of stale threads back to the Author) are M3.2/M3.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole

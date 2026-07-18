@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, ThreadPlanted
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent
 from novelizer.store.models import Chapter, EditorialStatus, Character
 
 
@@ -159,3 +159,44 @@ async def test_editor_prompt_omits_voices_section_when_none_set(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Character voices:" not in sent
     assert sent == f"Chapter title: One\n\nProse:\np"
+
+
+async def test_editor_commit_touches_a_known_active_thread(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        thread_intents=[ThreadIntent(action="touch", id="the-locket", note="resurfaces")],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    thread = await read.get_thread("the-locket")
+    assert thread.touch_count == 1
+    assert thread.last_chapter_id == "c1"
+
+
+async def test_editor_commit_drops_pay_off_for_unknown_thread_id(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean", thread_intents=[ThreadIntent(action="pay_off", id="ghost")])
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_editor_commit_with_no_thread_intents_emits_no_thread_events(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean")
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []

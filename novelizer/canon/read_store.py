@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
-from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest
+from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
 
@@ -91,3 +91,12 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM autonomy_state WHERE id='singleton'")
         row = await cur.fetchone()
         return AutonomyState.model_validate_json(row[0]) if row else AutonomyState()
+
+    async def list_threads(self) -> list[ThreadRecord]:
+        cur = await self._conn.execute("SELECT data FROM threads ORDER BY rowid")
+        return [ThreadRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_thread(self, thread_id: str) -> Optional[ThreadRecord]:
+        cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (thread_id,))
+        row = await cur.fetchone()
+        return ThreadRecord.model_validate_json(row[0]) if row else None

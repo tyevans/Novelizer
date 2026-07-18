@@ -20,6 +20,10 @@ class EventType:
     PROPOSAL_REJECTED = "proposal.rejected"
     AUTONOMY_CHANGED = "autonomy.changed"
     AGENT_REMARKED = "agent.remarked"
+    THREAD_PLANTED = "thread.planted"
+    THREAD_TOUCHED = "thread.touched"
+    THREAD_PAID_OFF = "thread.paid_off"
+    THREAD_ABANDONED = "thread.abandoned"
 
 
 class StoredEvent(BaseModel):
@@ -40,3 +44,47 @@ class AgentRemark(BaseModel):
 
     agent_name: str
     note: str
+
+
+class ThreadPlanted(BaseModel):
+    """Payload for thread.planted — mints a new thread's identity.
+
+    `id` is the slug minted from `name` (see
+    novelizer.canon.threads.slugify_thread_name) at plant time; every later
+    thread.* event for this thread must cite this id, never re-derive it.
+    """
+
+    id: str
+    name: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class ThreadTouched(BaseModel):
+    """Payload for thread.touched — an existing thread advances, cited by id."""
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class ThreadPaidOff(BaseModel):
+    """Payload for thread.paid_off — an existing thread resolves, cited by id.
+
+    Terminal: the ThreadsProjection treats this id as absorbing thereafter.
+    """
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class ThreadAbandoned(BaseModel):
+    """Payload for thread.abandoned — an existing thread is dropped, cited by id.
+
+    Terminal: the ThreadsProjection treats this id as absorbing thereafter.
+    """
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""

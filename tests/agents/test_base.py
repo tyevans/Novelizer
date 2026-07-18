@@ -5,8 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, AgentRemark
+from novelizer.canon.events import EventType, AgentRemark, ThreadPlanted
 from novelizer.agents.base import BaseAgent
+from novelizer.agents.schemas import ThreadIntent
 from novelizer.store.models import DirectorSignal, SignalKind
 
 
@@ -73,3 +74,82 @@ async def test_remark_is_a_noop_when_note_is_empty(stack):
     await agent._remark("")
     log = await events.events_since(0)
     assert log == []
+
+
+async def test_commit_thread_intents_plant_mints_slugged_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents([ThreadIntent(action="plant", name="The Locket's Secret")], active_thread_ids=set())
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.THREAD_PLANTED
+    assert log[0].payload["id"] == "the-locket-s-secret"
+    assert log[0].payload["name"] == "The Locket's Secret"
+
+
+async def test_commit_thread_intents_plant_dropped_when_name_blank(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents([ThreadIntent(action="plant", name="   ")], active_thread_ids=set())
+    assert await events.events_since(0) == []
+
+
+async def test_commit_thread_intents_touch_commits_when_id_known(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="touch", id="the-locket", note="reappears")],
+        active_thread_ids={"the-locket"}, chapter_id="c1",
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.THREAD_TOUCHED
+    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "reappears"}
+
+
+async def test_commit_thread_intents_drops_unknown_id_with_no_event(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="pay_off", id="not-a-real-thread")], active_thread_ids={"the-locket"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_thread_intents_handles_all_action_kinds(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    active = {"the-locket", "mira-revenge"}
+    await agent._commit_thread_intents(
+        [
+            ThreadIntent(action="plant", name="New Thread"),
+            ThreadIntent(action="touch", id="the-locket"),
+            ThreadIntent(action="pay_off", id="mira-revenge"),
+        ],
+        active_thread_ids=active,
+    )
+    log = await events.events_since(0)
+    assert [e.event_type for e in log] == [
+        EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED, EventType.THREAD_PAID_OFF,
+    ]
+
+
+async def test_commit_thread_intents_noop_on_empty_list(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents([], active_thread_ids=set())
+    assert await events.events_since(0) == []
+
+
+async def test_commit_thread_intents_plant_colliding_with_active_id_downgrades_to_touch(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="plant", name="The Locket", note="still going")],
+        active_thread_ids={"the-locket"}, chapter_id="c1",
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1
+    assert log[0].event_type == EventType.THREAD_TOUCHED
+    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going"}

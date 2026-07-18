@@ -160,3 +160,115 @@ async def test_reset_state_clears_proposals_and_autonomy(wired):
     assert (await cur.fetchone())[0] == 0
     cur = await proj._conn.execute("SELECT COUNT(*) FROM autonomy_state")
     assert (await cur.fetchone())[0] == 0
+
+
+async def _thread_rows(proj):
+    cur = await proj._conn.execute("SELECT data FROM threads ORDER BY rowid")
+    return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def test_thread_planted_is_projected(wired):
+    from novelizer.canon.events import ThreadPlanted
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket",
+                        ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "the-locket" and rows[0]["state"] == "planted"
+
+
+async def test_thread_touched_increments_count_and_updates_state(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_TOUCHED, "the-locket", ThreadTouched(id="the-locket", note="reappears"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["state"] == "touched"
+    assert rows[0]["touch_count"] == 1
+    assert rows[0]["last_note"] == "reappears"
+
+
+async def test_thread_paid_off_is_terminal_and_absorbs_later_events(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched, ThreadPaidOff
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_PAID_OFF, "the-locket", ThreadPaidOff(id="the-locket", note="resolved"))
+    # A late touch after pay-off must be a no-op: the event lands in the log but the projection is unchanged.
+    await events.append(EventType.THREAD_TOUCHED, "the-locket", ThreadTouched(id="the-locket", note="should not apply"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["state"] == "paid_off"
+    assert rows[0]["touch_count"] == 0
+    assert rows[0]["last_note"] == "resolved"
+    log = await events.events_since(0)
+    assert len(log) == 3  # the late touch is still a fact in the log
+
+
+async def test_thread_abandoned_is_terminal(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadAbandoned
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_ABANDONED, "the-locket", ThreadAbandoned(id="the-locket"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["state"] == "abandoned"
+
+
+async def test_reprojecting_thread_events_is_equivalent(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched, ThreadPaidOff
+    events, proj, path = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_TOUCHED, "the-locket", ThreadTouched(id="the-locket"))
+    await events.append(EventType.THREAD_PAID_OFF, "the-locket", ThreadPaidOff(id="the-locket"))
+    await proj.catch_up()
+    incremental = await _thread_rows(proj)
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()
+    await proj2.catch_up()
+    from_scratch = await _thread_rows(proj2)
+    await proj2.close()
+    assert incremental == from_scratch
+
+
+async def test_reset_state_clears_threads(wired):
+    from novelizer.canon.events import ThreadPlanted
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    await proj._reset_state()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM threads")
+    assert (await cur.fetchone())[0] == 0
+
+
+async def test_thread_replant_of_active_thread_does_not_reset_state(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_TOUCHED, "the-locket", ThreadTouched(id="the-locket", note="reappears"))
+    # A re-plant of the same id must be a projection no-op: state/touch_count untouched.
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["state"] == "touched"
+    assert rows[0]["touch_count"] == 1
+    assert rows[0]["last_note"] == "reappears"
+    log = await events.events_since(0)
+    assert len(log) == 3  # the re-plant is still a fact in the log
+
+
+async def test_thread_replant_of_paid_off_thread_does_not_resurrect(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadPaidOff
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await events.append(EventType.THREAD_PAID_OFF, "the-locket", ThreadPaidOff(id="the-locket", note="resolved"))
+    # Re-planting a paid-off thread must not resurrect it.
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["state"] == "paid_off"
+    assert rows[0]["last_note"] == "resolved"

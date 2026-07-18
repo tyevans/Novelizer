@@ -47,6 +47,13 @@ class SignalKind(StrEnum):
     note = "note"
 
 
+class ThreadState(StrEnum):
+    planted = "planted"
+    touched = "touched"
+    paid_off = "paid_off"
+    abandoned = "abandoned"
+
+
 class WorldEntry(BaseModel):
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)
@@ -76,6 +83,22 @@ class Character(BaseModel):
     voice: str = ""
     relationships: list[CharacterRelationship] = Field(default_factory=list)
     canon_status: CanonStatus = CanonStatus.active
+
+
+class ThreadRecord(BaseModel):
+    """Read-side row for a plot thread, built and rebuilt by the Projector
+    from the thread.* event log (see novelizer/canon/projector.py). Unlike
+    Character/Chapter, thread.* events after the first carry only deltas
+    (id + note), so this model's fields accumulate state across events
+    rather than being replaced wholesale by each event's payload.
+    """
+
+    id: str
+    name: str
+    state: ThreadState = ThreadState.planted
+    touch_count: int = 0
+    last_note: str = ""
+    last_chapter_id: str = ""
 
 
 class Event(BaseModel):

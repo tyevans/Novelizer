@@ -25,6 +25,22 @@ class CharacterUpdate(BaseModel):
     voice: Optional[str] = None
 
 
+class ThreadIntent(BaseModel):
+    """One agent-declared plot-thread action from structured output.
+
+    `plant` mints a new thread from a freeform `name` (the system slugs it
+    into an id — see novelizer.canon.threads.slugify_thread_name); `touch`,
+    `pay_off`, and `abandon` must cite an existing thread's `id` rather than
+    inventing one. `BaseAgent._commit_thread_intents` turns validated
+    intents into thread.* commits (see novelizer/agents/base.py).
+    """
+
+    action: Literal["plant", "touch", "pay_off", "abandon"]
+    name: str = ""
+    id: str = ""
+    note: str = ""
+
+
 class RetconDraft(BaseModel):
     description: str
     conflicting_entry_ids: list[str] = Field(default_factory=list)
@@ -41,6 +57,7 @@ class EditorVerdict(BaseModel):
     verdict: Literal["approve", "revise"] = "approve"
     notes: str = ""
     feed_note: str = ""
+    thread_intents: list[ThreadIntent] = Field(default_factory=list)
 
 
 class ContinuityOutput(BaseModel):
