@@ -84,3 +84,71 @@ async def test_reprojecting_same_events_is_equivalent(wired):
     # Assert all four projection tables have identical rows.
     for table in ("chapters", "world_entries", "characters", "director_signals"):
         assert incremental[table] == from_scratch[table], f"Table {table} mismatch between incremental and from-scratch"
+
+
+async def test_proposal_created_is_projected_open(wired):
+    from novelizer.canon.autonomy import Proposal
+    events, proj, _ = wired
+    prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
+                     target_aggregate_id="c1", payload={"title": "One", "prose": "p"})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT status, proposing_agent FROM proposals WHERE id=?", (prop.id,))
+    row = await cur.fetchone()
+    assert row == ("open", "author")
+
+
+async def test_proposal_approved_flips_status(wired):
+    from novelizer.canon.autonomy import Proposal
+    events, proj, _ = wired
+    prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
+                     target_aggregate_id="c1", payload={"title": "One", "prose": "p"})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    await proj.catch_up()
+    approved = prop.model_copy(update={"status": "approved"})
+    await events.append(EventType.PROPOSAL_APPROVED, prop.id, approved)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT status FROM proposals WHERE id=?", (prop.id,))
+    assert (await cur.fetchone())[0] == "approved"
+
+
+async def test_proposal_rejected_flips_status(wired):
+    from novelizer.canon.autonomy import Proposal
+    events, proj, _ = wired
+    prop = Proposal(proposing_agent="editor", target_event_type="chapter.status_changed",
+                     target_aggregate_id="c1", payload={})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    await proj.catch_up()
+    rejected = prop.model_copy(update={"status": "rejected"})
+    await events.append(EventType.PROPOSAL_REJECTED, prop.id, rejected)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT status FROM proposals WHERE id=?", (prop.id,))
+    assert (await cur.fetchone())[0] == "rejected"
+
+
+async def test_autonomy_changed_is_projected_singleton(wired):
+    from novelizer.canon.autonomy import AutonomyState, AutonomyLevel
+    events, proj, _ = wired
+    st = AutonomyState(global_level=AutonomyLevel.gated_canon, overrides={"retconner": AutonomyLevel.gated_all})
+    await events.append(EventType.AUTONOMY_CHANGED, "singleton", st)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT data FROM autonomy_state WHERE id='singleton'")
+    row = await cur.fetchone()
+    loaded = AutonomyState.model_validate_json(row[0])
+    assert loaded.global_level == AutonomyLevel.gated_canon
+    assert loaded.overrides["retconner"] == AutonomyLevel.gated_all
+
+
+async def test_reset_state_clears_proposals_and_autonomy(wired):
+    from novelizer.canon.autonomy import Proposal, AutonomyState, AutonomyLevel
+    events, proj, _ = wired
+    prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
+                     target_aggregate_id="c1", payload={})
+    await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
+    await events.append(EventType.AUTONOMY_CHANGED, "singleton", AutonomyState(global_level=AutonomyLevel.gated_all))
+    await proj.catch_up()
+    await proj._reset_state()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM proposals")
+    assert (await cur.fetchone())[0] == 0
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM autonomy_state")
+    assert (await cur.fetchone())[0] == 0
