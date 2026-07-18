@@ -41,3 +41,51 @@ def test_pacing_flags_note_lists_flagged_chapter_and_direction():
     note = pacing_flags_note(scores)
     assert "c2" in note and "sag" in note
     assert note.startswith("\n\n")
+
+
+from novelizer.brain.context import known_secrets_note, causal_flags_note
+from novelizer.store.models import Character, SecretRecord, CausalEdgeRecord
+
+
+def _character(id_, name):
+    return Character(id=id_, name=name)
+
+
+def test_known_secrets_note_empty_when_no_secrets():
+    assert known_secrets_note([], [], {}) == ""
+
+
+def test_known_secrets_note_omits_revealed_secrets():
+    secret = SecretRecord(id="the-map", title="The Map Is Forged", revealed=True)
+    assert known_secrets_note([secret], [], {"the-map": {"revealed": True, "known_by": set()}}) == ""
+
+
+def test_known_secrets_note_lists_secret_id_and_known_characters():
+    mara = _character("mara", "Mara")
+    kestrel = _character("kestrel", "Kestrel")
+    secret = SecretRecord(id="the-heir-lives", title="The Heir Lives")
+    matrix = {"the-heir-lives": {"revealed": False, "known_by": {"mara"}}}
+    note = known_secrets_note([secret], [mara, kestrel], matrix)
+    assert note.startswith("\n\n")
+    assert "the-heir-lives" in note
+    assert "Mara" in note
+    assert "Kestrel" not in note
+
+
+def test_known_secrets_note_flags_secret_known_to_no_one():
+    secret = SecretRecord(id="the-map", title="The Map Is Forged")
+    matrix = {"the-map": {"revealed": False, "known_by": set()}}
+    note = known_secrets_note([secret], [], matrix)
+    assert "known to no one" in note
+
+
+def test_causal_flags_note_empty_when_no_paradoxes():
+    edges = [CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2")]
+    assert causal_flags_note(edges, ["c1", "c2"]) == ""
+
+
+def test_causal_flags_note_lists_ordering_paradox():
+    edges = [CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c1")]
+    note = causal_flags_note(edges, ["c1", "c2"])
+    assert note.startswith("\n\n")
+    assert "c2" in note and "c1" in note and "ordering" in note
