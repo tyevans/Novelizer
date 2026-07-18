@@ -15,6 +15,7 @@ class Scheduler:
         self._tick_sleep = tick_sleep
         self._clock = clock
         self._running = False
+        self._last_ran: Optional[str] = None
 
     def pause_agent(self, name: str) -> None:
         for a in self._agents:
@@ -25,6 +26,12 @@ class Scheduler:
         for a in self._agents:
             if a.name == name:
                 a.resume()
+
+    def status(self) -> list:
+        return [
+            {"name": a.name, "paused": a.paused, "running": a.name == self._last_ran}
+            for a in self._agents
+        ]
 
     async def tick(self) -> Optional[str]:
         now = self._clock()
@@ -51,6 +58,7 @@ class Scheduler:
         logger.info("scheduler: running %s", agent.name)
         await agent.run_once()
         agent.mark_ran(now)
+        self._last_ran = agent.name
 
     async def run(self) -> None:
         self._running = True

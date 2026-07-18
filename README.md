@@ -44,6 +44,22 @@ Launch the Mission Control TUI (live event feed of the world as it's authored):
 novelizer
 ```
 
+### Mission Control
+
+The dashboard displays four synchronized panes:
+- **Activity Feed** (`#feed`, left pane) — real-time event log of agent actions (chapters drafted, retcons filed, etc.)
+- **Story Browser** (`#browser`, right pane) — organized chapters, characters, world entries, and retcons; click to inspect
+- **Agent Roster** (`#roster`, bottom-left) — agents' names, autonomy status, and current task
+- **Detail Pane** (`#detail`, bottom-right) — full text of the selected item from the browser
+
+Command palette (focus with `Ctrl+K` or `:`, then type):
+- `seed <text>` — inject a narrative seed
+- `focus <agent>` — inject a focus/steer signal that agents pick up as context on their next run
+- `pause <agent>` — pause an agent
+- `resume <agent>` — resume a paused agent
+
+Toggle Room drill-in view with `r`.
+
 Inject a narrative seed — a director signal the Author will pick up on its next pass:
 
 ```bash

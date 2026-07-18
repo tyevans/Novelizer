@@ -15,13 +15,13 @@ def test_format_director_signal_created_mentions_body():
     assert "a storm is coming" in format_event(ev)
 
 
-def test_format_retcon_created_labels_continuity():
+def test_format_retcon_created_labels_retcon():
     from novelizer.tui.app import format_event
     from novelizer.canon.events import StoredEvent, EventType
     ev = StoredEvent(sequence=1, id="e", event_type=EventType.RETCON_REQUEST_CREATED,
                      aggregate_id="r1", payload={"description": "scar mismatch"}, created_at="t")
     line = format_event(ev)
-    assert "scar mismatch" in line
+    assert "scar mismatch" in line and "Retcon" in line
 
 
 def test_format_chapter_status_changed_labels_editor():
@@ -29,4 +29,5 @@ def test_format_chapter_status_changed_labels_editor():
     from novelizer.canon.events import StoredEvent, EventType
     ev = StoredEvent(sequence=2, id="e", event_type=EventType.CHAPTER_STATUS_CHANGED,
                      aggregate_id="c1", payload={"title": "One", "editorial_status": "reviewed"}, created_at="t")
-    assert "One" in format_event(ev)
+    line = format_event(ev)
+    assert "One" in line and "Editor" in line
