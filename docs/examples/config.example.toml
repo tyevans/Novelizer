@@ -8,8 +8,8 @@
 
 # --- LLM endpoint (OpenAI-compatible) ---
 llm_base_url = "http://localhost:8080/v1"
-# llm_api_key = "sk-..."        # only if your endpoint needs one; keep this file
-                                 # chmod 0600 (the setup wizard will write it that way)
+# llm_api_key = "sk-..."        # only if your endpoint needs one; the setup wizard
+                                 # writes this file with mode 0600
 
 # --- Models ---
 author_model = "local-model"
@@ -32,6 +32,8 @@ projector_interval = 0.5
 prose_profile = "plain"
 
 # --- App ---
-# default_stories_dir: read by the upcoming story picker; not yet used to
-# locate the default story.
 default_stories_dir = "stories"
+
+# Managed by novelizer itself — no need to hand-edit:
+# last_opened_story = "/path/to/last/story"        # picker preselection
+# suppress_flat_migration_prompt = true            # set when you decline legacy migration
