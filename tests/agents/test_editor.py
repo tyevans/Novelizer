@@ -12,8 +12,10 @@ from novelizer.store.models import Chapter, EditorialStatus
 
 
 class FakeRunner:
-    def __init__(self, out): self._out = out
-    async def ainvoke(self, inputs): return {"structured_response": self._out}
+    def __init__(self, out): self._out = out; self.calls = []
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        return {"structured_response": self._out}
 
 
 @pytest.fixture
@@ -55,3 +57,26 @@ async def test_revise_keeps_draft_and_notes_author(stack):
     assert (await read.get_chapter("c1")).editorial_status == EditorialStatus.draft
     notes = await read.list_unconsumed_signals(target_agent="author")
     assert any("middle sags" in s.body for s in notes)
+
+
+async def test_editor_prompt_includes_active_prose_profile(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    class RecordingRunner:
+        def __init__(self, out):
+            self._out = out
+            self.calls = []
+
+        async def ainvoke(self, inputs):
+            self.calls.append(inputs)
+            return {"structured_response": self._out}
+
+    runner = RecordingRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer, casting_note="Spare, concrete, unadorned.")
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Spare, concrete, unadorned." in sent
+    assert "Enforce this prose voice:" in sent

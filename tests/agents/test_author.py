@@ -62,3 +62,41 @@ async def test_work_returns_none_is_noop(stack):
     await author.run_once()
     await proj.catch_up()
     assert await read.list_chapters() == []
+
+
+async def test_work_prompt_includes_casting_note_when_set(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    runner = FakeRunner(draft)
+    author = Author(runner, read, committer, casting_note="Spare, concrete, unadorned.")
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Spare, concrete, unadorned." in sent
+    assert "Write in this prose voice:" in sent
+
+
+async def test_work_prompt_omits_casting_note_when_unset(stack):
+    events, proj, read, committer = stack
+    author = Author(FakeRunner(ChapterDraft(title="T", prose="P")), read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = author._casting_note
+    assert sent == ""
+
+
+async def test_two_profiles_yield_different_prompts(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    sparse_runner = FakeRunner(draft)
+    lush_runner = FakeRunner(draft)
+    sparse_author = Author(sparse_runner, read, committer, casting_note="Spare, concrete, unadorned.")
+    lush_author = Author(lush_runner, read, committer, casting_note="Ornate, sensory, gothic.")
+    ctx = await sparse_author.poll()
+    await sparse_author.work(ctx)
+    await lush_author.work(ctx)
+    sparse_prompt = sparse_runner.calls[-1]["messages"][0]["content"]
+    lush_prompt = lush_runner.calls[-1]["messages"][0]["content"]
+    assert sparse_prompt != lush_prompt
+    assert "Spare, concrete, unadorned." in sparse_prompt
+    assert "Ornate, sensory, gothic." in lush_prompt

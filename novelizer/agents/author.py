@@ -11,20 +11,29 @@ Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear."""
 
 
-def _summarize(ctx: dict) -> str:
+def _summarize(ctx: dict, casting_note: str = "") -> str:
     world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
     chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
     prev = "\n".join(f"- '{c.title}': {c.prose[:200]}" for c in ctx["previous"]) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
+    voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}\n\nWrite the next chapter."
     )
 
 
 class Author(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 300) -> None:
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 300,
+        casting_note: str = "",
+    ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author")
+        self._casting_note = casting_note
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status="draft"))
@@ -40,7 +49,8 @@ class Author(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
-        result = await self._runner.ainvoke({"messages": [{"role": "user", "content": _summarize(ctx)}]})
+        content = _summarize(ctx, self._casting_note)
+        result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
 
     async def commit(self, draft: ChapterDraft | None, ctx: dict) -> None:
