@@ -47,3 +47,46 @@ def test_status_line_summarizes_overrides():
     line = _status_line(AutonomyState(global_level=AutonomyLevel.full_auto,
                                        overrides={"retconner": AutonomyLevel.gated_all}))
     assert "retconner=gated_all" in line
+
+
+def test_format_agent_remarked_renders_personality_voiced_line():
+    from novelizer.tui.app import format_event
+    from novelizer.canon.events import StoredEvent, EventType
+    ev = StoredEvent(sequence=1, id="e1", event_type=EventType.AGENT_REMARKED,
+                     aggregate_id="author", payload={"agent_name": "author", "note": "Another storm, another chapter."},
+                     created_at="t")
+    line = format_event(ev)
+    assert "Another storm, another chapter." in line
+    assert "Author" in line
+    assert "💬" in line
+
+
+def test_format_agent_remarked_labels_each_agent_distinctly():
+    from novelizer.tui.app import format_event
+    from novelizer.canon.events import StoredEvent, EventType
+    for agent_name, expected_label in [
+        ("author", "Author"), ("editor", "Editor"), ("world_architect", "Architect"),
+        ("character_keeper", "Keeper"), ("continuity_checker", "Continuity"), ("retconner", "Retconner"),
+    ]:
+        ev = StoredEvent(sequence=1, id="e1", event_type=EventType.AGENT_REMARKED,
+                         aggregate_id=agent_name, payload={"agent_name": agent_name, "note": "hm."},
+                         created_at="t")
+        assert expected_label in format_event(ev)
+
+
+def test_format_agent_remarked_falls_back_for_unknown_agent_name():
+    from novelizer.tui.app import format_event
+    from novelizer.canon.events import StoredEvent, EventType
+    ev = StoredEvent(sequence=1, id="e1", event_type=EventType.AGENT_REMARKED,
+                     aggregate_id="mystery_agent", payload={"agent_name": "mystery_agent", "note": "?"},
+                     created_at="t")
+    assert "Mystery Agent" in format_event(ev)
+
+
+def test_room_toggle_still_works_after_agent_remarked_rendering_change():
+    # action_toggle_room is a pure CSS-class toggle on #body; regression guard
+    # that adding the agent.remarked branch to format_event didn't touch it.
+    import inspect
+    from novelizer.tui.app import NovelizerApp
+    src = inspect.getsource(NovelizerApp.action_toggle_room)
+    assert 'toggle_class("room")' in src

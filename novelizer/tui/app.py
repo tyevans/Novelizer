@@ -20,10 +20,27 @@ _LABELS = {
     EventType.CHAPTER_STATUS_CHANGED: "Editor",
 }
 
+_AGENT_LABELS = {
+    "author": "Author",
+    "editor": "Editor",
+    "world_architect": "Architect",
+    "character_keeper": "Keeper",
+    "continuity_checker": "Continuity",
+    "retconner": "Retconner",
+}
+
+
+def _agent_label(agent_name: str) -> str:
+    return _AGENT_LABELS.get(agent_name, agent_name.replace("_", " ").title())
+
 
 def format_event(ev: StoredEvent) -> str:
-    who = _LABELS.get(ev.event_type, "System")
     p = ev.payload
+    if ev.event_type == EventType.AGENT_REMARKED:
+        label = _agent_label(p.get("agent_name", "?"))
+        note = p.get("note", "")
+        return f'💬 {label}: "{note}"'
+    who = _LABELS.get(ev.event_type, "System")
     if ev.event_type == EventType.CHAPTER_CREATED:
         detail = f"new chapter: {p.get('title', '')}"
     elif ev.event_type == EventType.WORLD_ENTRY_CREATED:
