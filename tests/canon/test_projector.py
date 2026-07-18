@@ -1,0 +1,74 @@
+import json
+import os
+import tempfile
+import pytest
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.projector import Projector
+from novelizer.canon.events import EventType
+from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, SignalKind
+
+
+@pytest.fixture
+async def wired():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    events = EventStore(path)
+    await events.init()
+    proj = Projector(events, path)
+    await proj.init()
+    yield events, proj, path
+    await proj.close()
+    await events.close()
+    os.unlink(path)
+
+
+async def _chapter_rows(proj):
+    cur = await proj._conn.execute("SELECT data FROM chapters ORDER BY rowid")
+    return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def test_chapter_created_is_projected(wired):
+    events, proj, _ = wired
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    rows = await _chapter_rows(proj)
+    assert len(rows) == 1 and rows[0]["title"] == "One"
+
+
+async def test_director_signal_consumed_flips_flag(wired):
+    events, proj, _ = wired
+    sig = DirectorSignal(id="s1", kind=SignalKind.seed, body="storm")
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1", sig)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT consumed FROM director_signals WHERE id='s1'")
+    assert (await cur.fetchone())[0] == 0
+    await events.append(EventType.DIRECTOR_SIGNAL_CONSUMED, "s1", sig)
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT consumed FROM director_signals WHERE id='s1'")
+    assert (await cur.fetchone())[0] == 1
+
+
+async def test_catch_up_advances_and_is_idempotent(wired):
+    events, proj, _ = wired
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    assert await proj.catch_up() == 1
+    assert await proj.catch_up() == 1  # no new events, no-op
+    assert len(await _chapter_rows(proj)) == 1
+
+
+async def test_reprojecting_same_events_is_equivalent(wired):
+    events, proj, path = wired
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="W", body="b"))
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira"))
+    await proj.catch_up()
+    incremental = await _chapter_rows(proj)
+    # Fresh projector over the same log, projecting from zero, yields the same rows.
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()  # force last_sequence=0
+    await proj2.catch_up()
+    cur = await proj2._conn.execute("SELECT data FROM chapters ORDER BY rowid")
+    from_scratch = [json.loads(r[0]) for r in await cur.fetchall()]
+    await proj2.close()
+    assert incremental == from_scratch
