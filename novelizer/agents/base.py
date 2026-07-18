@@ -1,13 +1,14 @@
 from __future__ import annotations
 from typing import Protocol
 from pydantic import BaseModel, Field
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, AgentRemark
 
 
 class ChapterDraft(BaseModel):
     title: str
     prose: str
     character_ids: list[str] = Field(default_factory=list)
+    feed_note: str = ""
 
 
 class Runner(Protocol):
@@ -17,13 +18,22 @@ class Runner(Protocol):
 class BaseAgent:
     name: str = "agent"
 
-    def __init__(self, runner, read_store, committer, interval: int, name: str | None = None) -> None:
+    def __init__(
+        self,
+        runner,
+        read_store,
+        committer,
+        interval: int,
+        name: str | None = None,
+        personality: str = "",
+    ) -> None:
         self._runner = runner
         self._read = read_store
         self._committer = committer
         self.interval = interval
         if name is not None:
             self.name = name
+        self.personality = personality
         self.paused = False
         self._last_run = 0.0
 
@@ -49,3 +59,11 @@ class BaseAgent:
         for sig in signals:
             consumed = sig.model_copy(update={"consumed": True})
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CONSUMED, sig.id, consumed)
+
+    async def _remark(self, note: str) -> None:
+        """Emit a short in-personality feed line as agent.remarked. No-op if note is empty."""
+        if not note:
+            return
+        await self._committer.commit(
+            self.name, EventType.AGENT_REMARKED, self.name, AgentRemark(agent_name=self.name, note=note)
+        )

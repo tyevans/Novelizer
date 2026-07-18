@@ -11,15 +11,16 @@ Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear."""
 
 
-def _summarize(ctx: dict, casting_note: str = "") -> str:
+def _summarize(ctx: dict, casting_note: str = "", personality: str = "") -> str:
     world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
     chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
     prev = "\n".join(f"- '{c.title}': {c.prose[:200]}" for c in ctx["previous"]) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
     voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
+    cast = f"\n\nIn character: {personality}" if personality else ""
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}\n\nWrite the next chapter."
     )
 
 
@@ -31,8 +32,9 @@ class Author(BaseAgent):
         committer: Committer,
         interval: int = 300,
         casting_note: str = "",
+        personality: str = "",
     ) -> None:
-        super().__init__(runner, read_store, committer, interval, name="author")
+        super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
 
     async def readiness(self) -> float:
@@ -49,7 +51,7 @@ class Author(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
-        content = _summarize(ctx, self._casting_note)
+        content = _summarize(ctx, self._casting_note, self.personality)
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
 
@@ -58,6 +60,7 @@ class Author(BaseAgent):
             return
         chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
         await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
+        await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 
     async def run_once(self) -> None:

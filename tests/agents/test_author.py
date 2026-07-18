@@ -102,3 +102,49 @@ async def test_two_profiles_yield_different_prompts(stack):
     assert sparse_prompt != lush_prompt
     assert "Spare, concrete, unadorned." in sparse_prompt
     assert "Ornate, sensory, gothic." in lush_prompt
+
+
+async def test_work_prompt_includes_personality_when_set(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    runner = FakeRunner(draft)
+    author = Author(runner, read, committer, personality="A restless, romantic chronicler.")
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A restless, romantic chronicler." in sent
+    assert "In character:" in sent
+
+
+async def test_work_prompt_omits_personality_line_when_unset(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    runner = FakeRunner(draft)
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "In character:" not in sent
+
+
+async def test_commit_emits_agent_remarked_when_feed_note_present(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P", feed_note="Another chapter, another heartbreak.")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["agent_name"] == "author"
+    assert remarks[0].payload["note"] == "Another chapter, another heartbreak."
+
+
+async def test_commit_emits_no_remark_when_feed_note_empty(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.AGENT_REMARKED] == []

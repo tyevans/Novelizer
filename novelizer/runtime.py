@@ -57,13 +57,32 @@ class Runtime:
         self.voice_pack = load_voice_pack(self.settings.voice_pack)
         self.active_prose_profile = self.voice_pack.profile(self.settings.prose_profile)
         casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
+        personalities = self.voice_pack.agent_personalities
         s = self.settings
-        self.author = Author(self._runner_for("author", build_author_runner), self.read, self.committer, interval=s.author_interval, casting_note=casting_note)
-        self.world_architect = WorldArchitect(self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer, interval=s.default_agent_interval)
-        self.character_keeper = CharacterKeeper(self._runner_for("character_keeper", build_character_keeper_runner), self.read, self.committer, interval=s.default_agent_interval)
-        self.editor = Editor(self._runner_for("editor", build_editor_runner), self.read, self.committer, interval=s.default_agent_interval, casting_note=casting_note)
-        self.continuity_checker = ContinuityChecker(self._runner_for("continuity_checker", build_continuity_checker_runner), self.read, self.committer, interval=s.continuity_interval)
-        self.retconner = Retconner(self._runner_for("retconner", build_retconner_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.author = Author(
+            self._runner_for("author", build_author_runner), self.read, self.committer,
+            interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
+        )
+        self.world_architect = WorldArchitect(
+            self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
+            interval=s.default_agent_interval, personality=personalities.get("world_architect", ""),
+        )
+        self.character_keeper = CharacterKeeper(
+            self._runner_for("character_keeper", build_character_keeper_runner), self.read, self.committer,
+            interval=s.default_agent_interval, personality=personalities.get("character_keeper", ""),
+        )
+        self.editor = Editor(
+            self._runner_for("editor", build_editor_runner), self.read, self.committer,
+            interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
+        )
+        self.continuity_checker = ContinuityChecker(
+            self._runner_for("continuity_checker", build_continuity_checker_runner), self.read, self.committer,
+            interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
+        )
+        self.retconner = Retconner(
+            self._runner_for("retconner", build_retconner_runner), self.read, self.committer,
+            interval=s.default_agent_interval, personality=personalities.get("retconner", ""),
+        )
         self.agents = [
             self.world_architect, self.character_keeper, self.author,
             self.editor, self.continuity_checker, self.retconner,

@@ -263,3 +263,40 @@ async def test_runtime_unknown_profile_falls_back_to_empty_casting_note():
         await rt.close()
     finally:
         os.unlink(path)
+
+
+async def test_runtime_wires_each_agents_personality_from_the_pack():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        settings = Settings(db_path=path)
+        rt = Runtime(settings, runners=_all_fake_runners())
+        await rt.start()
+        assert rt.author.personality == rt.voice_pack.agent_personalities["author"]
+        assert rt.editor.personality == rt.voice_pack.agent_personalities["editor"]
+        assert rt.world_architect.personality == rt.voice_pack.agent_personalities["world_architect"]
+        assert rt.character_keeper.personality == rt.voice_pack.agent_personalities["character_keeper"]
+        assert rt.continuity_checker.personality == rt.voice_pack.agent_personalities["continuity_checker"]
+        assert rt.retconner.personality == rt.voice_pack.agent_personalities["retconner"]
+        assert rt.author.personality != rt.editor.personality
+        await rt.close()
+    finally:
+        os.unlink(path)
+
+
+async def test_runtime_missing_personality_falls_back_to_empty_string():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    custom_pack_path = path + ".pack.toml"
+    with open(custom_pack_path, "w") as f:
+        f.write('name = "sparse-pack"\n')
+    try:
+        settings = Settings(db_path=path, voice_pack=custom_pack_path)
+        rt = Runtime(settings, runners=_all_fake_runners())
+        await rt.start()
+        assert rt.author.personality == ""
+        assert rt.retconner.personality == ""
+        await rt.close()
+    finally:
+        os.unlink(path)
+        os.unlink(custom_pack_path)

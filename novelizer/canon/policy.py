@@ -10,7 +10,11 @@ _CANON_EVENTS = _RETCON_EVENTS | {
     EventType.CHAPTER_CREATED,
     EventType.CHAPTER_STATUS_CHANGED,
 }
-_NEVER_GATED = {EventType.DIRECTOR_SIGNAL_CREATED, EventType.DIRECTOR_SIGNAL_CONSUMED}
+_NEVER_GATED = {
+    EventType.DIRECTOR_SIGNAL_CREATED,
+    EventType.DIRECTOR_SIGNAL_CONSUMED,
+    EventType.AGENT_REMARKED,
+}
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {
     AutonomyLevel.full_auto: set(),

@@ -49,3 +49,9 @@ async def test_per_agent_override_takes_precedence():
     policy = AutonomyPolicy(FakeRead(state))
     assert await policy.is_gated("retconner", EventType.RETCON_REQUEST_RESOLVED) is True
     assert await policy.is_gated("author", EventType.CHAPTER_CREATED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+async def test_agent_remarked_is_never_gated(level):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("any_agent", EventType.AGENT_REMARKED) is False

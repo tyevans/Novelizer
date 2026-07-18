@@ -80,3 +80,44 @@ async def test_editor_prompt_includes_active_prose_profile(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Spare, concrete, unadorned." in sent
     assert "Enforce this prose voice:" in sent
+
+
+async def test_editor_prompt_includes_personality_when_set(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer, personality="A precise, unsentimental line editor.")
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A precise, unsentimental line editor." in sent
+    assert "In character:" in sent
+
+
+async def test_editor_commit_emits_remark_on_approval(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean", feed_note="Finally, a clean draft.")
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["note"] == "Finally, a clean draft."
+
+
+async def test_editor_commit_emits_remark_on_revision(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="revise", notes="middle sags", feed_note="This needs more tension.")
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert len(remarks) == 1
+    assert remarks[0].payload["note"] == "This needs more tension."

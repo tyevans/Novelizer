@@ -14,8 +14,15 @@ Return 1-3 new world entries, each with a title, 2-4 paragraphs of rich body lor
 
 
 class WorldArchitect(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 120) -> None:
-        super().__init__(runner, read_store, committer, interval, name="world_architect")
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 120,
+        personality: str = "",
+    ) -> None:
+        super().__init__(runner, read_store, committer, interval, name="world_architect", personality=personality)
 
     async def readiness(self) -> float:
         count = len(await self._read.list_world_entries())
@@ -30,7 +37,8 @@ class WorldArchitect(BaseAgent):
     async def work(self, ctx: dict) -> WorldEntriesDraft | None:
         existing = "\n".join(f"- [{e.domain}] {e.title}: {e.body[:100]}" for e in ctx["entries"][:20]) or "The world is empty."
         seeds = "\n".join(f"Director seed: {s.body}" for s in ctx["signals"]) or "None."
-        msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}\n\nGenerate new world entries."
+        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}{cast}\n\nGenerate new world entries."
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -39,6 +47,7 @@ class WorldArchitect(BaseAgent):
             for e in draft.entries:
                 entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags)
                 await self._committer.commit(self.name, EventType.WORLD_ENTRY_CREATED, entry.id, entry)
+            await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 
     async def run_once(self) -> None:
