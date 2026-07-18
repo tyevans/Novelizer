@@ -1,5 +1,6 @@
 from novelizer.runtime import Runtime
 from novelizer.settings import EffectiveSettings, create_story
+from novelizer.settings.layers import global_config_path
 from novelizer.settings.toml_io import load_toml_file, write_toml_file
 from novelizer.tui.app import NovelizerApp
 from tests.tui.test_app_smoke import _room_runners
@@ -31,6 +32,21 @@ async def test_story_toml_edit_applies_live(tmp_path, monkeypatch):
             write_toml_file(sd.story_toml, data)
             await pilot.pause(0.5)
             assert rt.author.interval == 30
+            assert any("settings applied" in m for m in app.messages)
+    finally:
+        await rt.close()
+
+
+async def test_global_config_edit_applies_live(tmp_path, monkeypatch):
+    app, rt, sd = await _story_app(tmp_path, monkeypatch)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.pause(0.2)
+            gpath = global_config_path()
+            gpath.parent.mkdir(parents=True, exist_ok=True)
+            write_toml_file(gpath, {"author_temperature": 0.11})
+            await pilot.pause(0.5)
+            assert rt.settings.author_temperature == 0.11
             assert any("settings applied" in m for m in app.messages)
     finally:
         await rt.close()

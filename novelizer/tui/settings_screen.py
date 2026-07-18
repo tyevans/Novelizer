@@ -5,6 +5,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Static
 
 from novelizer.settings import apply_edit, build_settings_rows, load_layer_configs
+from novelizer.settings.view_model import _SECRET_KEYS
 from novelizer.settings.setup_core import probe_endpoint
 from novelizer.settings.story_dir import StoryDirectory
 
@@ -18,6 +19,8 @@ class SettingsScreen(Screen):
         ("t", "test_connection", "Test connection"),
     ]
 
+    REFRESH_INTERVAL: float = 1.0
+
     def __init__(self, story_dir: StoryDirectory, effective_getter, probe=probe_endpoint) -> None:
         super().__init__()
         self._story_dir = story_dir
@@ -26,7 +29,11 @@ class SettingsScreen(Screen):
         self._rows = []
 
     def compose(self) -> ComposeResult:
-        yield Static("Settings — edits write config files; safe changes apply live", id="settings_title")
+        yield Static(
+            "Settings — edits write config files; safe changes apply live; "
+            "voice & temperature affect the next draft",
+            id="settings_title",
+        )
         table = DataTable(id="settings_table")
         yield table
         yield Input(id="edit_value", placeholder="new value (empty clears a story override)")
@@ -40,6 +47,7 @@ class SettingsScreen(Screen):
         table.add_columns("Setting", "Value", "Source", "Scope", "Notes")
         self.refresh_rows()
         table.focus()
+        self.set_interval(self.REFRESH_INTERVAL, self.refresh_rows)
 
     def refresh_rows(self) -> None:
         global_cfg, story_cfg, env = load_layer_configs(self._story_dir)
@@ -73,6 +81,7 @@ class SettingsScreen(Screen):
         self._editing_key = row.key
         box = self.query_one("#edit_value", Input)
         box.display = True
+        box.password = row.key in _SECRET_KEYS
         box.value = "" if row.value == "••••••" else row.value
         msg.update(f"editing {row.key} ({row.scope}) — empty clears a story override")
         box.focus()

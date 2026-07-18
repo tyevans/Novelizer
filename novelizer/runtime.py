@@ -129,37 +129,54 @@ class Runtime:
             else:
                 applied.append(key)
 
+        errors: list[str] = []
+        stored = new.model_copy(update={k: getattr(old, k) for k in restart}) if restart else new
+
         if "voice_pack" in changed or "prose_profile" in changed:
-            self.voice_pack = load_voice_pack(new.voice_pack)
-            self.active_prose_profile = self.voice_pack.profile(new.prose_profile)
-            casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
-            personalities = self.voice_pack.agent_personalities
-            self.author._casting_note = casting_note
-            self.editor._casting_note = casting_note
-            for agent in self.agents:
-                agent.personality = personalities.get(agent.name, "")
+            try:
+                new_pack = load_voice_pack(new.voice_pack)
+            except Exception as e:
+                errors.append(f"voice_pack: {e}")
+                # Revert both voice keys — the pack and profile travel together.
+                revert = {}
+                if "voice_pack" in changed:
+                    revert["voice_pack"] = old.voice_pack
+                    applied.remove("voice_pack") if "voice_pack" in applied else None
+                if "prose_profile" in changed:
+                    revert["prose_profile"] = old.prose_profile
+                    applied.remove("prose_profile") if "prose_profile" in applied else None
+                stored = stored.model_copy(update=revert)
+            else:
+                self.voice_pack = new_pack
+                self.active_prose_profile = self.voice_pack.profile(stored.prose_profile)
+                casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
+                personalities = self.voice_pack.agent_personalities
+                self.author._casting_note = casting_note
+                self.editor._casting_note = casting_note
+                for agent in self.agents:
+                    agent.personality = personalities.get(agent.name, "")
 
         rebuild = self._runners is None and self._runner is None
         if "author_temperature" in changed and rebuild:
-            self.author._runner = build_author_runner(new)
+            self.author._runner = build_author_runner(stored)
         if "agent_temperature" in changed and rebuild:
-            self.world_architect._runner = build_world_architect_runner(new)
-            self.character_keeper._runner = build_character_keeper_runner(new)
-            self.editor._runner = build_editor_runner(new)
-            self.continuity_checker._runner = build_continuity_checker_runner(new)
-            self.retconner._runner = build_retconner_runner(new)
-            self.structure_analyst._runner = build_structure_analyst_runner(new)
+            self.world_architect._runner = build_world_architect_runner(stored)
+            self.character_keeper._runner = build_character_keeper_runner(stored)
+            self.editor._runner = build_editor_runner(stored)
+            self.continuity_checker._runner = build_continuity_checker_runner(stored)
+            self.retconner._runner = build_retconner_runner(stored)
+            self.structure_analyst._runner = build_structure_analyst_runner(stored)
 
         if self.author is not None and self.author.provenance is not None:
             self.author.provenance = {
-                "model": old.author_model,  # restart-required: old model still runs
-                "temperature": new.author_temperature,
+                "model": stored.author_model,
+                "temperature": stored.author_temperature,
                 "voice_pack": self.voice_pack.name,
-                "prose_profile": new.prose_profile,
+                "prose_profile": stored.prose_profile,
             }
 
-        self.settings = new.model_copy(update={k: getattr(old, k) for k in restart}) if restart else new
-        return {"applied": applied, "restart_required": restart}
+        self.settings = stored
+        return {"applied": applied, "restart_required": restart, "errors": errors}
 
     async def close(self) -> None:
         await self.read.close()

@@ -154,6 +154,60 @@ async def test_invalid_value_shows_error(tmp_path, monkeypatch):
         await rt.close()
 
 
+async def test_secret_row_edit_uses_password_input(tmp_path, monkeypatch):
+    app, rt, sd = await _app(tmp_path, monkeypatch, llm_api_key="sk-very-secret")
+    try:
+        async with app.run_test() as pilot:
+            await app._run_command(":settings")
+            await pilot.pause()
+            screen = app.screen
+            box = screen.query_one("#edit_value", Input)
+
+            screen._begin_edit(_row_index(screen, "llm_api_key"))
+            assert box.password is True
+
+            # Non-secret row must not be a password field.
+            screen._begin_edit(_row_index(screen, "author_temperature"))
+            assert box.password is False
+    finally:
+        await rt.close()
+
+
+async def test_table_converges_after_external_apply(tmp_path, monkeypatch):
+    """The effective Value column must not go stale after an edit — it should
+    converge to what the watcher actually applied, on its own, without the
+    user re-opening the screen."""
+    from novelizer.settings.toml_io import write_toml_file
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    sd = create_story(tmp_path / "novel", title="N")
+    settings = EffectiveSettings(
+        db_path=str(sd.db_path), chroma_path=str(sd.chroma_path),
+        projector_interval=0.1, author_interval=300,
+    )
+    rt = Runtime(settings, runners=_room_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    app.SETTINGS_POLL_INTERVAL = 0.05
+    SettingsScreen.REFRESH_INTERVAL = 0.05
+    try:
+        async with app.run_test() as pilot:
+            await app._run_command(":settings")
+            await pilot.pause()
+            screen = app.screen
+            table = screen.query_one("#settings_table", DataTable)
+            row = _row_index(screen, "author_interval")
+            assert table.get_row_at(row)[1] == "300"
+
+            write_toml_file(sd.story_toml, {"title": "N", "author_interval": 45})
+            await pilot.pause(0.5)
+
+            assert table.get_row_at(row)[1] == "45"
+    finally:
+        SettingsScreen.REFRESH_INTERVAL = 1.0
+        await rt.close()
+
+
 async def test_probe_action_shows_result(tmp_path, monkeypatch):
     app, rt, sd = await _app(tmp_path, monkeypatch)
 

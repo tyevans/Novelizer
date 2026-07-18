@@ -95,6 +95,15 @@ def test_apply_edit_global_scope(tmp_path):
     assert "llm_base_url" not in (load_toml_file(sd.story_toml))
 
 
+def test_apply_edit_redacts_secret_in_message(tmp_path):
+    sd = create_story(tmp_path / "novel", title="N")
+    gpath = tmp_path / "g.toml"
+    msg = apply_edit("llm_api_key", "sk-very-secret", story_dir=sd, global_path=gpath)
+    assert "sk-very-secret" not in msg
+    assert "llm_api_key" in msg
+    assert load_toml_file(gpath)["llm_api_key"] == "sk-very-secret"  # still written correctly
+
+
 def test_load_layer_configs(tmp_path):
     sd = create_story(tmp_path / "novel", title="N")
     write_toml_file(sd.story_toml, {"title": "N", "prose_profile": "lush"})
@@ -103,3 +112,21 @@ def test_load_layer_configs(tmp_path):
     g, s, e = load_layer_configs(sd, global_path=gpath)
     assert g.author_model == "gm"
     assert s.prose_profile == "lush"
+
+
+def test_layer_model_defaults_are_none_for_source_attribution():
+    """Every non-hidden EffectiveSettings field that a layer model exposes
+    must default to None there — build_settings_rows relies on 'is None'
+    meaning 'unset in this layer' to attribute the winning source."""
+    from novelizer.settings.view_model import _HIDDEN_KEYS
+
+    for layer_cls in (GlobalConfig, StoryConfig, EnvOverrides):
+        for key in EffectiveSettings.model_fields:
+            if key in _HIDDEN_KEYS:
+                continue
+            field = layer_cls.model_fields.get(key)
+            if field is None:
+                continue  # layer doesn't expose this key at all — fine
+            assert field.default is None, (
+                f"{layer_cls.__name__}.{key} must default to None for source attribution"
+            )

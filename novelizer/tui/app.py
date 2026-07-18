@@ -242,6 +242,10 @@ class NovelizerApp(App):
                 line = f"⚙ restart required: {', '.join(result['restart_required'])}"
                 log.write(line)
                 self.messages.append(line)
+            if result.get("errors"):
+                line = f"⚙ settings error: {'; '.join(result['errors'])}"
+                log.write(line)
+                self.messages.append(line)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))

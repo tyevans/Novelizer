@@ -112,7 +112,8 @@ def apply_edit(
     if scope == "global":
         value = parse_value(key, raw)
         update_global_config(path=global_path, **{key: value})
-        return f"{key} = {value} (global)"
+        shown = _REDACTED if key in _SECRET_KEYS else value
+        return f"{key} = {shown} (global)"
     data = load_toml_file(story_dir.story_toml) if story_dir.story_toml.exists() else {}
     if raw.strip() == "":
         data.pop(key, None)
@@ -121,4 +122,5 @@ def apply_edit(
     value = parse_value(key, raw)
     data[key] = value
     write_toml_file(story_dir.story_toml, data)
-    return f"{key} = {value} (this story)"
+    shown = _REDACTED if key in _SECRET_KEYS else value
+    return f"{key} = {shown} (this story)"
