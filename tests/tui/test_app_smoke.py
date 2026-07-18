@@ -6,7 +6,7 @@ from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.agents.schemas import (
     WorldEntriesDraft, WorldEntryDraft, KeeperOutput, EditorVerdict,
-    ContinuityOutput, RetconAmendments,
+    ContinuityOutput, RetconAmendments, StructureAnalystOutput,
 )
 from novelizer.agents.base import ChapterDraft
 
@@ -27,6 +27,7 @@ def _room_runners():
         "editor": _R(EditorVerdict(verdict="approve", notes="ok")),
         "continuity_checker": _R(ContinuityOutput()),
         "retconner": _R(RetconAmendments()),
+        "structure_analyst": _R(StructureAnalystOutput()),
     }
 
 

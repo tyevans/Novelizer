@@ -14,6 +14,7 @@ from novelizer.agents.character_keeper import CharacterKeeper, build_character_k
 from novelizer.agents.editor import Editor, build_editor_runner
 from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
 from novelizer.agents.retconner import Retconner, build_retconner_runner
+from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
 from novelizer.voices.loader import load_voice_pack
 
 
@@ -35,6 +36,7 @@ class Runtime:
         self.editor = None
         self.continuity_checker = None
         self.retconner = None
+        self.structure_analyst = None
         self.scheduler: Optional[Scheduler] = None
         self.voice_pack = None
         self.active_prose_profile = None
@@ -83,9 +85,13 @@ class Runtime:
             self._runner_for("retconner", build_retconner_runner), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("retconner", ""),
         )
+        self.structure_analyst = StructureAnalyst(
+            self._runner_for("structure_analyst", build_structure_analyst_runner), self.read, self.committer,
+            interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
+        )
         self.agents = [
             self.world_architect, self.character_keeper, self.author,
-            self.editor, self.continuity_checker, self.retconner,
+            self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
         self.scheduler = Scheduler(self.agents, self.read)
 

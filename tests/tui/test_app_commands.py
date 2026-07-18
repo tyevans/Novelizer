@@ -5,7 +5,9 @@ from novelizer.canon.events import EventType
 from novelizer.config import Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
-from novelizer.agents.schemas import WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments
+from novelizer.agents.schemas import (
+    WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments, StructureAnalystOutput,
+)
 from novelizer.agents.base import ChapterDraft
 
 
@@ -19,6 +21,7 @@ def _runners():
         "world_architect": WorldEntriesDraft(), "author": ChapterDraft(title="X", prose="y"),
         "character_keeper": KeeperOutput(), "editor": EditorVerdict(), "continuity_checker": ContinuityOutput(),
         "retconner": RetconAmendments(),
+        "structure_analyst": StructureAnalystOutput(),
     }.items()}
 
 

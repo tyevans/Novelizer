@@ -41,3 +41,8 @@ def test_prose_profile_env_override(monkeypatch):
     monkeypatch.setenv("NOVELIZER_PROSE_PROFILE", "lush")
     s = Settings()
     assert s.prose_profile == "lush"
+
+
+def test_structure_analyst_interval_default():
+    s = Settings()
+    assert s.structure_analyst_interval > 0

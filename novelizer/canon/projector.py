@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS projector_state (
 CREATE TABLE IF NOT EXISTS threads (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS structure_scores (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
 """
 
 
@@ -74,6 +77,7 @@ class Projector:
         for table in (
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
+            "structure_scores",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -197,6 +201,11 @@ class Projector:
             # else: no row for this id yet (shouldn't happen under correct agent
             # behavior, since agents validate intents against known ids before
             # committing) — nothing to project, no error raised.
+        elif t == EventType.ANNOTATION_STRUCTURE_SCORED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
+                (p["chapter_id"], data),
+            )
         elif t == EventType.AUTONOMY_CHANGED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)

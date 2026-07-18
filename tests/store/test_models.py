@@ -1,8 +1,10 @@
 import pytest
 from datetime import datetime, timezone
+from pydantic import ValidationError
 from novelizer.store.models import (
     WorldEntry, Character, CharacterRelationship, Event,
     Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
+    StructureScore,
     CanonStatus, EditorialStatus, RetconStatus, SignalKind, Domain,
 )
 
@@ -62,3 +64,14 @@ def test_thread_record_roundtrips_through_json():
     t = ThreadRecord(id="the-locket", name="The Locket", state=ThreadState.touched, touch_count=2, last_note="advanced")
     again = ThreadRecord.model_validate_json(t.model_dump_json())
     assert again == t
+
+
+def test_structure_score_roundtrips_through_json():
+    s = StructureScore(chapter_id="c1", tension=0.6, pacing_label="rising")
+    again = StructureScore.model_validate_json(s.model_dump_json())
+    assert again == s
+
+
+def test_structure_score_tension_is_bounded():
+    with pytest.raises(ValidationError):
+        StructureScore(chapter_id="c1", tension=2.0)

@@ -94,3 +94,18 @@ async def test_list_and_get_threads(stack):
     fetched = await read.get_thread("the-locket")
     assert fetched is not None and fetched.touch_count == 1
     assert await read.get_thread("missing") is None
+
+
+async def test_list_and_get_structure_scores(stack):
+    from novelizer.canon.events import AnnotationStructureScored
+    events, proj, read = stack
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.6, pacing_label="rising"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c2",
+                        AnnotationStructureScored(chapter_id="c2", tension=0.2, pacing_label="lull"))
+    await proj.catch_up()
+    scores = await read.list_structure_scores()
+    assert {s.chapter_id for s in scores} == {"c1", "c2"}
+    fetched = await read.get_structure_score("c1")
+    assert fetched is not None and fetched.tension == 0.6
+    assert await read.get_structure_score("missing") is None

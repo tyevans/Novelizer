@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class EventType:
@@ -24,6 +24,7 @@ class EventType:
     THREAD_TOUCHED = "thread.touched"
     THREAD_PAID_OFF = "thread.paid_off"
     THREAD_ABANDONED = "thread.abandoned"
+    ANNOTATION_STRUCTURE_SCORED = "annotation.structure_scored"
 
 
 class StoredEvent(BaseModel):
@@ -88,3 +89,15 @@ class ThreadAbandoned(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+
+
+class AnnotationStructureScored(BaseModel):
+    """Payload for annotation.structure_scored — one chapter's tension/pacing
+    score, emitted by the Structure Analyst. Bounded: tension is a fraction
+    in [0.0, 1.0], enforced at construction so an out-of-range LLM score
+    fails fast rather than corrupting the projection.
+    """
+
+    chapter_id: str
+    tension: float = Field(ge=0.0, le=1.0)
+    pacing_label: str = ""

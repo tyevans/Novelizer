@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     author_interval: int = 300
     default_agent_interval: int = 120
     continuity_interval: int = 900
+    structure_analyst_interval: int = 180
     projector_interval: float = 0.5
 
     # Voice (M2.1): active voice pack + active prose profile within it.
