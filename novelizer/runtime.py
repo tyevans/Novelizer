@@ -4,7 +4,9 @@ from novelizer.config import Settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.canon.committer import Committer
+from novelizer.canon.committer import GatingCommitter
+from novelizer.canon.policy import AutonomyPolicy
+from novelizer.canon.proposal_service import ProposalService
 from novelizer.scheduler import Scheduler
 from novelizer.agents.author import Author, build_author_runner
 from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
@@ -20,7 +22,9 @@ class Runtime:
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
         self.read = ReadStore(settings.db_path)
-        self.committer = Committer(self.events)
+        self.policy: Optional[AutonomyPolicy] = None
+        self.proposals: Optional[ProposalService] = None
+        self.committer = None  # constructed in start(), once self.read is initialized
         self._runner = runner          # back-compat: author-only single runner
         self._runners = runners        # full per-agent override
         self.agents: list = []
@@ -44,6 +48,9 @@ class Runtime:
         await self.projector.init()
         await self.read.init()
         await self.projector.catch_up()
+        self.policy = AutonomyPolicy(self.read)
+        self.committer = GatingCommitter(self.events, self.policy)
+        self.proposals = ProposalService(self.events)
         s = self.settings
         self.author = Author(self._runner_for("author", build_author_runner), self.read, self.committer, interval=s.author_interval)
         self.world_architect = WorldArchitect(self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer, interval=s.default_agent_interval)
