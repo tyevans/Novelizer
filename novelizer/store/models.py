@@ -101,6 +101,18 @@ class ThreadRecord(BaseModel):
     last_chapter_id: str = ""
 
 
+class StructureScore(BaseModel):
+    """Read-side row for one chapter's narrative-structure score, built by
+    the Projector from annotation.structure_scored events (see
+    novelizer/canon/projector.py) and consumed by novelizer/brain/sag_spike.py's
+    pure detect_sag_spike function and, in M3.3, the Story Shape TUI view.
+    """
+
+    chapter_id: str
+    tension: float = Field(ge=0.0, le=1.0)
+    pacing_label: str = ""
+
+
 class Event(BaseModel):
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)
