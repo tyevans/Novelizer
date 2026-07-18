@@ -26,10 +26,6 @@ class StoryPickerApp(App[Path | None]):
         height: auto;
         max-height: 10;
     }
-    #new_name {
-        height: 1;
-        border: none;
-    }
     #picker_error {
         height: 1;
     }

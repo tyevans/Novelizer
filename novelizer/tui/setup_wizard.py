@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Footer, Header, Input, Select, Static
 
 from novelizer.settings.setup_core import build_global_config_data, probe_endpoint
@@ -20,21 +20,10 @@ class SetupWizardApp(App[dict | None]):
     BINDINGS = [("q", "quit", "Quit")]
     CSS = """
     #wizard {
-        height: auto;
+        padding: 1 2;
     }
-    #wizard Input, #wizard Select, #wizard Button {
-        height: 1;
-        border: none;
-        min-width: 10;
-    }
-    #wizard Input:focus {
-        background: $boost;
-    }
-    #wizard Static {
-        height: 1;
-    }
-    #wizard_actions {
-        height: 1;
+    #wizard Input, #wizard Select {
+        margin-bottom: 1;
     }
     """
 
@@ -44,7 +33,7 @@ class SetupWizardApp(App[dict | None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="wizard"):
+        with VerticalScroll(id="wizard"):
             yield Static("Point novelizer at your OpenAI-compatible LLM endpoint.")
             yield Input(value="http://localhost:8080/v1", id="base_url", placeholder="LLM base URL")
             yield Input(id="api_key", placeholder="API key (leave blank for local endpoints)", password=True)
