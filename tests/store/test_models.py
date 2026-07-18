@@ -36,3 +36,15 @@ def test_director_signal_defaults():
     s = DirectorSignal(kind=SignalKind.seed, body="The empire falls.")
     assert s.consumed is False
     assert s.target_agent is None
+
+
+def test_character_voice_defaults_to_empty_string():
+    c = Character(name="Mira")
+    assert c.voice == ""
+
+
+def test_character_voice_roundtrips_through_json():
+    c = Character(name="Mira", voice="Clipped sentences, never says 'I love you' outright.")
+    dumped = c.model_dump_json()
+    restored = Character.model_validate_json(dumped)
+    assert restored.voice == "Clipped sentences, never says 'I love you' outright."

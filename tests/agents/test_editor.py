@@ -8,7 +8,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.editor import Editor
 from novelizer.agents.schemas import EditorVerdict
-from novelizer.store.models import Chapter, EditorialStatus
+from novelizer.store.models import Chapter, EditorialStatus, Character
 
 
 class FakeRunner:
@@ -121,3 +121,41 @@ async def test_editor_commit_emits_remark_on_revision(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert len(remarks) == 1
     assert remarks[0].payload["note"] == "This needs more tension."
+
+
+async def test_editor_prompt_includes_character_voices_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(
+        EventType.CHARACTER_CREATED, "ch1",
+        Character(id="ch1", name="Mira", voice="Speaks in short, clipped sentences; never says 'I love you' outright."),
+    )
+    await events.append(
+        EventType.CHAPTER_CREATED, "c1",
+        Chapter(id="c1", title="One", prose="p", character_ids=["ch1"]),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Mira" in sent
+    assert "Speaks in short, clipped sentences" in sent
+    assert "Character voices:" in sent
+
+
+async def test_editor_prompt_omits_voices_section_when_none_set(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira"))
+    await events.append(
+        EventType.CHAPTER_CREATED, "c1",
+        Chapter(id="c1", title="One", prose="p", character_ids=["ch1"]),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Character voices:" not in sent
+    assert sent == f"Chapter title: One\n\nProse:\np"

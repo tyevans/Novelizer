@@ -31,7 +31,10 @@ async def detail_text(read, section_key: str, item_id: str) -> str:
         c = await read.get_character(item_id)
         if not c:
             return ""
-        return f"{c.name}\nTraits: {c.traits}\nArc: {c.arc_status}\nMotivations: {c.motivations}\n\n{c.backstory}"
+        detail = f"{c.name}\nTraits: {c.traits}\nArc: {c.arc_status}\nMotivations: {c.motivations}"
+        if c.voice:
+            detail += f"\nVoice: {c.voice}"
+        return f"{detail}\n\n{c.backstory}"
     if section_key == "world":
         for e in await read.list_world_entries():
             if e.id == item_id:

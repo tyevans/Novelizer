@@ -73,6 +73,7 @@ class Character(BaseModel):
     motivations: str = ""
     backstory: str = ""
     arc_status: str = ""
+    voice: str = ""
     relationships: list[CharacterRelationship] = Field(default_factory=list)
     canon_status: CanonStatus = CanonStatus.active
 

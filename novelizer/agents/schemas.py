@@ -22,6 +22,7 @@ class CharacterUpdate(BaseModel):
     traits: Optional[str] = None
     motivations: Optional[str] = None
     backstory: Optional[str] = None
+    voice: Optional[str] = None
 
 
 class RetconDraft(BaseModel):

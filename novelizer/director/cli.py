@@ -7,6 +7,8 @@ from novelizer.config import Settings
 from novelizer.runtime import Runtime
 from novelizer.director import commands
 from novelizer.voices.loader import load_voice_pack
+from novelizer.voices.models import VoicePack
+from novelizer.store.models import Character
 
 console = Console()
 
@@ -112,24 +114,68 @@ def retcons(ctx):
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+def format_voice_report(pack: VoicePack, characters: list[Character], active_profile: str | None) -> str:
+    """Pure formatter: voice pack + character voice cards -> a plain-text report.
+
+    Kept dependency-free of Click/Rich/ReadStore so it is unit-testable without
+    a runner or a database — the `voices` command below is a thin wrapper that
+    fetches its inputs and prints this string via Rich.
+    """
+    lines = [f"Voice pack: {pack.name}", ""]
+    lines.append("Prose profiles:")
+    for name, profile in pack.prose_profiles.items():
+        marker = "* " if name == active_profile else "  "
+        snippet = profile.casting_note.strip().replace("\n", " ")[:80]
+        lines.append(f"{marker}{name}: {snippet}")
+    lines.append("")
+    lines.append("Agent personalities:")
+    for agent, note in pack.agent_personalities.items():
+        lines.append(f"  {agent}: {note.strip().replace(chr(10), ' ')[:80]}")
+    voiced = [c for c in characters if c.voice]
+    if voiced:
+        lines.append("")
+        lines.append("Character voices:")
+        for c in voiced:
+            lines.append(f"  {c.name}: {c.voice.strip().replace(chr(10), ' ')[:80]}")
+    return "\n".join(lines)
+
+
 @cli.command()
 @click.option("--pack", "pack_path", default=None, help="Inspect a voice pack other than the active one.")
 @click.pass_context
 def voices(ctx, pack_path: str | None):
-    """List the active (or given) voice pack's prose profiles."""
+    """Show the active (or given) voice pack's profiles, agent personalities, and character voice cards."""
     settings = ctx.obj["settings"]
     path = pack_path or settings.voice_pack
     pack = load_voice_pack(path)
     active_name = settings.prose_profile if pack_path is None else None
-    table = Table(title=f"Voice pack: {pack.name}")
-    table.add_column("Active", style="green", no_wrap=True)
-    table.add_column("Profile")
-    table.add_column("Casting note")
-    for name, profile in pack.prose_profiles.items():
-        marker = "*" if name == active_name else ""
-        snippet = profile.casting_note.strip().replace("\n", " ")[:80]
-        table.add_row(marker, name, snippet)
-    console.print(table)
+
+    async def _run(rt: Runtime):
+        characters = await rt.read.list_characters()
+        console.print(format_voice_report(pack, characters, active_name))
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command("voice-scaffold")
+@click.argument("profile_name")
+@click.argument("description")
+@click.option(
+    "--pack", "pack_path", default="stories/user_pack.toml",
+    help="User pack file to write into (defaults to stories/user_pack.toml; never the shipped default pack).",
+)
+@click.pass_context
+def voice_scaffold(ctx, profile_name: str, description: str, pack_path: str):
+    """Scaffold a new prose profile into a user voice pack from a one-line description.
+
+    No LLM call: the description you pass becomes the profile's casting note verbatim.
+    """
+    from novelizer.voices.scaffold import scaffold_prose_profile
+    try:
+        written = scaffold_prose_profile(pack_path, profile_name, description)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        return
+    console.print(f"[green]Scaffolded profile '{profile_name}' into {written}[/green]")
 
 
 @cli.command()

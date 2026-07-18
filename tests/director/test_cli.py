@@ -1,7 +1,9 @@
 import os
 import tempfile
 from click.testing import CliRunner
-from novelizer.director.cli import cli
+from novelizer.director.cli import cli, format_voice_report
+from novelizer.voices.models import ProseProfile, VoicePack
+from novelizer.store.models import Character
 
 
 def _env(path):
@@ -62,3 +64,34 @@ def test_voices_with_explicit_pack_path():
             os.unlink(custom_pack_path)
     finally:
         os.unlink(db_path)
+
+
+def test_report_includes_prose_profiles_with_active_marker():
+    pack = VoicePack(
+        name="default",
+        prose_profiles={
+            "plain": ProseProfile(name="plain", casting_note="Clean and neutral."),
+            "sparse": ProseProfile(name="sparse", casting_note="Spare, concrete, unadorned."),
+        },
+    )
+    report = format_voice_report(pack, characters=[], active_profile="plain")
+    assert "plain" in report and "sparse" in report
+    assert "Clean and neutral." in report
+
+
+def test_report_includes_agent_personalities():
+    pack = VoicePack(name="default", agent_personalities={"editor": "A precise, unsentimental line editor."})
+    report = format_voice_report(pack, characters=[], active_profile=None)
+    assert "editor" in report
+    assert "A precise, unsentimental line editor." in report
+
+
+def test_report_includes_only_characters_with_nonempty_voice():
+    pack = VoicePack(name="default")
+    characters = [
+        Character(id="c1", name="Mira", voice="Clipped sentences."),
+        Character(id="c2", name="Jonas", voice=""),
+    ]
+    report = format_voice_report(pack, characters=characters, active_profile=None)
+    assert "Mira" in report and "Clipped sentences." in report
+    assert "Jonas" not in report
