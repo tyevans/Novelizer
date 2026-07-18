@@ -200,3 +200,28 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_prompt_includes_stale_threads_note_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    for i in range(4):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" in sent
+    assert "The Locket" in sent and "the-locket" in sent
+
+
+async def test_author_prompt_omits_stale_threads_note_when_nothing_stale(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" not in sent
