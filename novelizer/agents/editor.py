@@ -65,7 +65,20 @@ class Editor(BaseAgent):
         pacing = pacing_flags_note(ctx["scores"])
         chapter_order = [c.id for c in ctx["chapters"]]
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
+        # Citation aid, not knowledge-state injection (that is Author-only per
+        # Locked decision #7): knowledge_intents must cite an existing secret
+        # id or be dropped at commit time, so the Editor needs the id list in
+        # its context to annotate what the prose shows. Empty when no secrets
+        # exist -- the prompt stays byte-identical (pinned by tests).
+        secret_ids = ""
+        if ctx["secrets"]:
+            listing = "\n".join(f"- {s.id} ('{s.title}')" for s in ctx["secrets"])
+            secret_ids = (
+                "\n\nActive secrets you may cite by id in knowledge_intents when "
+                "the prose shows a character planting, learning, revealing, or "
+                "using one:\n" + listing
+            )
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}{secret_ids}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

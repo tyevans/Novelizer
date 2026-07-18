@@ -347,3 +347,18 @@ async def test_editor_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert sent == "Chapter title: One\n\nProse:\np"
+
+
+async def test_editor_prompt_lists_active_secret_ids_for_citation(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Active secrets you may cite by id" in sent
+    assert "- the-heir-lives ('The Heir Lives')" in sent
