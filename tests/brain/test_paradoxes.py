@@ -1,3 +1,5 @@
+from hypothesis import given, settings, strategies as st
+
 from novelizer.brain.paradoxes import PARADOX_SOURCE_TAG, ParadoxCandidate, find_paradoxes, paradox_description
 from novelizer.store.models import CausalEdgeRecord
 
@@ -82,3 +84,41 @@ def test_paradox_description_starts_with_the_pinned_tag():
     desc = paradox_description(p)
     assert desc.startswith(PARADOX_SOURCE_TAG)
     assert "c3" in desc and "c1" in desc
+
+
+@given(n=st.integers(min_value=1, max_value=8), data=st.data())
+@settings(max_examples=100)
+def test_any_forward_only_dag_has_no_candidates(n, data):
+    """No false positives: for chapter_order of length n, any set of edges
+    that all point strictly forward (effect index > cause index) never
+    produces a paradox candidate -- neither an ordering violation (by
+    construction) nor a cycle (a forward-only graph over a total order
+    cannot contain a cycle)."""
+    chapter_order = [f"c{i}" for i in range(n)]
+    edge_pairs = data.draw(st.lists(
+        st.tuples(st.integers(0, n - 1), st.integers(0, n - 1)).filter(lambda t: t[1] > t[0]),
+        max_size=10,
+    ))
+    edges = [CausalEdgeRecord(cause_chapter_id=chapter_order[a], effect_chapter_id=chapter_order[b])
+             for a, b in edge_pairs]
+    assert find_paradoxes(edges, chapter_order) == []
+
+
+def test_falsification_self_loop_is_an_ordering_paradox():
+    """A self-edge (cause == effect) is always effect-at-or-before-cause,
+    the degenerate case of the ordering rule."""
+    edges = [CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c1")]
+    result = find_paradoxes(edges, ["c1", "c2"])
+    assert len(result) == 1 and result[0].reason == "ordering"
+
+
+def test_falsification_a_backward_edge_among_forward_edges_is_isolated():
+    """Mixing one backward edge into an otherwise-forward graph flags only
+    the backward edge, not its forward neighbors."""
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),
+        CausalEdgeRecord(cause_chapter_id="c3", effect_chapter_id="c1"),
+    ]
+    result = find_paradoxes(edges, ["c1", "c2", "c3"])
+    assert len(result) == 1
+    assert result[0].cause_chapter_id == "c3" and result[0].effect_chapter_id == "c1"
