@@ -11,6 +11,8 @@ from novelizer.settings.layers import (
     parse_global,
     parse_story,
 )
+from novelizer.settings.loader import EnvOverrides
+from novelizer.settings.models import STORY_OVERRIDABLE_KEYS
 
 
 def test_parse_global_known_keys():
@@ -55,3 +57,19 @@ def test_global_config_path_defaults_to_dot_config(monkeypatch):
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     p = global_config_path()
     assert p == Path.home() / ".config" / "novelizer" / "config.toml"
+
+
+def test_story_config_fields_match_overridable_keys():
+    """Guards against StoryConfig drifting from STORY_OVERRIDABLE_KEYS — both
+    are hand-duplicated key sets and must stay in sync."""
+    assert set(StoryConfig.model_fields) - {"title"} == STORY_OVERRIDABLE_KEYS
+
+
+def test_global_config_fields_match_overridable_plus_global_only_keys():
+    assert set(GlobalConfig.model_fields) == STORY_OVERRIDABLE_KEYS | {
+        "llm_base_url", "llm_api_key", "default_stories_dir", "last_opened_story",
+    }
+
+
+def test_env_overrides_fields_match_global_config_fields():
+    assert set(EnvOverrides.model_fields) == set(GlobalConfig.model_fields)

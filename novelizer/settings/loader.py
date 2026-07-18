@@ -19,6 +19,8 @@ from novelizer.settings.toml_io import load_toml_file
 class EnvOverrides(BaseSettings):
     """NOVELIZER_* environment variables — the highest-precedence layer."""
 
+    # env_file=".env" is intentional back-compat with the legacy Settings
+    # behavior: implicit repo-root .env pickup.
     model_config = SettingsConfigDict(env_prefix="NOVELIZER_", env_file=".env", extra="ignore")
 
     llm_base_url: str | None = None

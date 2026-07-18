@@ -6,7 +6,9 @@ from rich.console import Console
 from rich.table import Table
 from novelizer.settings import (
     EffectiveSettings,
+    StoryConfigError,
     StoryDirectory,
+    TOMLFileError,
     create_story,
     is_story_dir,
     load_effective_settings,
@@ -62,8 +64,11 @@ def _resolve_story(
 @click.pass_context
 def cli(ctx, story_path: str | None):
     ctx.ensure_object(dict)
-    story = _resolve_story(story_path)
-    ctx.obj["settings"] = load_effective_settings(story_dir=story)
+    try:
+        story = _resolve_story(story_path)
+        ctx.obj["settings"] = load_effective_settings(story_dir=story)
+    except (TOMLFileError, StoryConfigError, FileExistsError) as e:
+        raise click.ClickException(str(e)) from e
     if ctx.invoked_subcommand is None:
         _launch_tui(ctx.obj["settings"])
 

@@ -6,7 +6,7 @@ from novelizer.settings.story_dir import (
     is_story_dir,
     migrate_flat_layout,
 )
-from novelizer.settings.toml_io import load_toml_file
+from novelizer.settings.toml_io import load_toml_file, write_toml_file
 
 
 def test_derived_paths(tmp_path):
@@ -57,3 +57,37 @@ def test_migrate_flat_layout_without_chroma(tmp_path):
 def test_migrate_flat_layout_nothing_to_migrate(tmp_path):
     with pytest.raises(FileNotFoundError):
         migrate_flat_layout(tmp_path)
+
+
+def test_migrate_flat_layout_refuses_to_overwrite_existing_db(tmp_path):
+    (tmp_path / "world.db").write_bytes(b"flatdata")
+    target = tmp_path / "default"
+    target.mkdir()
+    (target / "world.db").write_bytes(b"existing")
+    with pytest.raises(FileExistsError) as exc:
+        migrate_flat_layout(tmp_path)
+    msg = str(exc.value)
+    assert str(tmp_path / "world.db") in msg
+    assert str(target / "world.db") in msg
+    # nothing moved
+    assert (tmp_path / "world.db").read_bytes() == b"flatdata"
+    assert (target / "world.db").read_bytes() == b"existing"
+
+
+def test_migrate_flat_layout_refuses_to_overwrite_existing_chroma(tmp_path):
+    (tmp_path / "world.db").write_bytes(b"flatdata")
+    target = tmp_path / "default"
+    target.mkdir()
+    (target / "chroma").mkdir()
+    with pytest.raises(FileExistsError):
+        migrate_flat_layout(tmp_path)
+    assert (tmp_path / "world.db").exists()
+
+
+def test_migrate_flat_layout_preserves_existing_story_toml(tmp_path):
+    (tmp_path / "world.db").write_bytes(b"flatdata")
+    target = tmp_path / "default"
+    target.mkdir()
+    write_toml_file(target / "story.toml", {"title": "Custom Title", "prose_profile": "lush"})
+    sd = migrate_flat_layout(tmp_path)
+    assert load_toml_file(sd.story_toml) == {"title": "Custom Title", "prose_profile": "lush"}

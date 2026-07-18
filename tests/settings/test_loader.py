@@ -1,7 +1,11 @@
 from pathlib import Path
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from novelizer.settings.layers import GlobalConfig, StoryConfig
 from novelizer.settings.loader import EnvOverrides, build_effective, load_effective_settings
+from novelizer.settings.models import EffectiveSettings
 from novelizer.settings.story_dir import StoryDirectory, create_story
 from novelizer.settings.toml_io import write_toml_file
 
@@ -36,7 +40,9 @@ def test_story_title_carried():
 
 
 def test_load_effective_settings_reads_files(tmp_path, monkeypatch):
-    monkeypatch.delenv("NOVELIZER_AUTHOR_MODEL", raising=False)
+    for field in EnvOverrides.model_fields:
+        monkeypatch.delenv(f"NOVELIZER_{field.upper()}", raising=False)
+    monkeypatch.chdir(tmp_path)
     gpath = tmp_path / "config.toml"
     write_toml_file(gpath, {"author_model": "global-m", "author_temperature": 0.3})
     sd = create_story(tmp_path / "novel", title="N")
@@ -55,14 +61,13 @@ def test_load_effective_settings_env_wins(tmp_path, monkeypatch):
     assert eff.author_model == "env-m"
 
 
-def test_load_effective_settings_missing_files_ok(tmp_path):
+def test_load_effective_settings_missing_files_ok(tmp_path, monkeypatch):
+    for field in EnvOverrides.model_fields:
+        monkeypatch.delenv(f"NOVELIZER_{field.upper()}", raising=False)
+    monkeypatch.chdir(tmp_path)
     eff = load_effective_settings(global_path=tmp_path / "absent.toml")
     assert eff.author_model == "local-model"
 
-
-from hypothesis import given
-from hypothesis import strategies as st
-from novelizer.settings.models import EffectiveSettings
 
 # Representative overridable keys, one per value type.
 _PROPERTY_KEYS = {

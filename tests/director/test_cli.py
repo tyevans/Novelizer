@@ -6,6 +6,18 @@ from novelizer.voices.models import ProseProfile, VoicePack
 from novelizer.store.models import Character
 
 
+def test_config_error_shown_as_friendly_message_not_traceback(tmp_path):
+    story_dir = tmp_path / "story"
+    story_dir.mkdir()
+    (story_dir / "story.toml").write_text('llm_api_key = "x"\n')
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--story", str(story_dir), "chapters"])
+    assert result.exit_code != 0
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "Traceback" not in result.output
+    assert "llm_api_key" in result.output
+
+
 def _env(path):
     return {"NOVELIZER_DB_PATH": path}
 

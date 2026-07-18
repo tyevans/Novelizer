@@ -8,7 +8,8 @@
 
 # --- LLM endpoint (OpenAI-compatible) ---
 llm_base_url = "http://localhost:8080/v1"
-# llm_api_key = "sk-..."        # only if your endpoint needs one; file is chmod 0600
+# llm_api_key = "sk-..."        # only if your endpoint needs one; keep this file
+                                 # chmod 0600 (the setup wizard will write it that way)
 
 # --- Models ---
 author_model = "local-model"
@@ -31,4 +32,6 @@ projector_interval = 0.5
 prose_profile = "plain"
 
 # --- App ---
+# default_stories_dir: read by the upcoming story picker; not yet used to
+# locate the default story.
 default_stories_dir = "stories"

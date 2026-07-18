@@ -11,7 +11,7 @@ note by declaring a matching thread_intents entry, unprompted.
 
 Requires the configured OpenAI-compatible LLM endpoint (`Settings().llm_base_url`)
 to be reachable and serving the model named by NOVELIZER_AUTHOR_MODEL (see
-.env.example / README's Configuration table). Run explicitly with:
+README's Configuration section / docs/examples/config.example.toml). Run explicitly with:
 uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
 """
 import os

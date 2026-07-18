@@ -44,10 +44,19 @@ def migrate_flat_layout(stories_root: Path, story_name: str = "default") -> Stor
     if not flat_db.exists():
         raise FileNotFoundError(f"{flat_db}: no flat-layout story to migrate")
     sd = StoryDirectory(root=stories_root / story_name)
+    if sd.db_path.exists():
+        raise FileExistsError(
+            f"Cannot migrate {flat_db} into {sd.db_path}: a story already exists there."
+        )
+    flat_chroma = stories_root / "chroma"
+    if sd.chroma_path.exists():
+        raise FileExistsError(
+            f"Cannot migrate {flat_chroma} into {sd.chroma_path}: a story already exists there."
+        )
     sd.root.mkdir(parents=True, exist_ok=True)
     shutil.move(str(flat_db), str(sd.db_path))
-    flat_chroma = stories_root / "chroma"
     if flat_chroma.exists():
         shutil.move(str(flat_chroma), str(sd.chroma_path))
-    write_toml_file(sd.story_toml, {"title": story_name})
+    if not sd.story_toml.exists():
+        write_toml_file(sd.story_toml, {"title": story_name})
     return sd
