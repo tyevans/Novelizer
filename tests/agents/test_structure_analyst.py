@@ -116,3 +116,26 @@ async def test_work_prompt_includes_personality_when_set(stack):
     await analyst.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "A clinical pacing critic." in sent
+
+
+async def test_commit_propagates_validation_error_and_commits_nothing_for_the_bad_score(stack):
+    """A malformed score (out-of-range tension) reaching commit() — e.g. a future
+    lenient runner that skips ChapterScore's own Field(ge=0.0, le=1.0) bound --
+    still fails fast at AnnotationStructureScored construction, and the exception
+    is not swallowed inside the agent: it propagates out of run_once() uncaught."""
+    import pytest
+    from pydantic import ValidationError
+    from types import SimpleNamespace
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    bad_out = SimpleNamespace(
+        scores=[SimpleNamespace(chapter_id="c1", tension=1.5, pacing_label="off the charts")],
+        feed_note="",
+    )
+    analyst = StructureAnalyst(FakeRunner(bad_out), read, committer)
+    with pytest.raises(ValidationError):
+        await analyst.run_once()
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.ANNOTATION_STRUCTURE_SCORED] == []

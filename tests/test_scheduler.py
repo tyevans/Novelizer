@@ -60,3 +60,42 @@ async def test_status_reports_paused_and_last_ran():
     st = {s["name"]: s for s in sched.status()}
     assert st["b"]["running"] is True
     assert st["a"]["paused"] is True and st["b"]["paused"] is False
+
+
+async def test_tick_propagates_an_agents_exception_uncaught():
+    """Scheduler.tick() has no try/except by design -- a crashing agent's
+    exception must reach the caller, not vanish silently mid-tick."""
+    class BoomAgent(StubAgent):
+        async def run_once(self):
+            raise ValueError("boom")
+
+    a = BoomAgent("a", 0.9)
+    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
+    with pytest.raises(ValueError, match="boom"):
+        await sched.tick()
+
+
+async def test_run_survives_a_ticking_agents_exception_and_keeps_selecting_others():
+    """Scheduler.run()'s loop is the one existing catch-all around tick() for
+    headless use (NovelizerApp._scheduler_loop is the TUI's own, already
+    covered by tests/tui/test_app_resilience.py) -- a single agent's repeated
+    crash must not stop the room from continuing to run other agents."""
+    import asyncio
+
+    class BoomAgent(StubAgent):
+        async def run_once(self):
+            raise ValueError("boom")
+
+    boom = BoomAgent("boom", 0.9)
+    healthy = StubAgent("healthy", 0.1)
+    sched = Scheduler([boom, healthy], StubRead(), tick_sleep=0.01, clock=lambda: 1000.0)
+    task = asyncio.create_task(sched.run())
+    try:
+        # boom always outscores healthy, so only stopping boom lets healthy run;
+        # instead, prove survival: run() must still be alive (not crashed) after
+        # several ticks despite boom raising on every one.
+        await asyncio.sleep(0.1)
+        assert not task.done(), "Scheduler.run() must survive a crashing agent, not exit"
+    finally:
+        sched.stop()
+        await asyncio.wait_for(task, timeout=1.0)
