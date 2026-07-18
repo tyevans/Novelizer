@@ -1,6 +1,8 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import ContinuityOutput
+from novelizer.brain.leaks import find_leaks, leak_description
+from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -33,6 +35,10 @@ class ContinuityChecker(BaseAgent):
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
             "chapters": chapters[-10:],
+            "chapter_order": [c.id for c in chapters],
+            "secret_references": await self._read.list_secret_references(),
+            "knowledge_matrix": await self._read.knowledge_matrix(),
+            "causal_edges": await self._read.list_causal_edges(),
         }
 
     async def work(self, ctx: dict) -> ContinuityOutput | None:
@@ -45,13 +51,39 @@ class ContinuityChecker(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, out: ContinuityOutput | None, ctx: dict) -> None:
-        if out is None:
-            return
-        for r in out.retcon_requests:
-            req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
-                                proposed_resolution=r.proposed_resolution)
+        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+        seen_descriptions = {r.description for r in open_reqs}
+
+        if out is not None:
+            for r in out.retcon_requests:
+                req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
+                                    proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+            await self._remark(out.feed_note)
+
+        for leak in find_leaks(ctx.get("secret_references", []), ctx.get("knowledge_matrix", {})):
+            description = leak_description(leak)
+            if description in seen_descriptions:
+                continue
+            seen_descriptions.add(description)
+            req = RetconRequest(
+                description=description,
+                conflicting_entry_ids=[leak.secret_id, leak.character_id, leak.chapter_id],
+                proposed_resolution="Review whether the reference should be removed or a learn/reveal event added.",
+            )
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
-        await self._remark(out.feed_note)
+
+        for paradox in find_paradoxes(ctx.get("causal_edges", []), ctx.get("chapter_order", [])):
+            description = paradox_description(paradox)
+            if description in seen_descriptions:
+                continue
+            seen_descriptions.add(description)
+            req = RetconRequest(
+                description=description,
+                conflicting_entry_ids=[paradox.cause_chapter_id, paradox.effect_chapter_id],
+                proposed_resolution="Review the causal edge for an ordering or cycle correction.",
+            )
+            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
 
     async def run_once(self) -> None:
         ctx = await self.poll()

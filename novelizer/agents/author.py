@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
-from novelizer.brain.context import stale_threads_note
+from novelizer.brain.context import known_secrets_note, stale_threads_note
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -21,9 +21,10 @@ def _summarize(ctx: dict, casting_note: str = "", personality: str = "") -> str:
     voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
     cast = f"\n\nIn character: {personality}" if personality else ""
     brain = stale_threads_note(ctx["threads"], ctx["chapters"])
+    secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}{secrets}\n\nWrite the next chapter."
     )
 
 
@@ -56,6 +57,7 @@ class Author(BaseAgent):
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
             "threads": await self._read.list_threads(),
             "secrets": await self._read.list_secrets(),
+            "knowledge_matrix": await self._read.knowledge_matrix(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:

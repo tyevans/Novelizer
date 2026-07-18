@@ -14,6 +14,8 @@ from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
 from novelizer.tui.widgets.thread_board import ThreadBoard
 from novelizer.tui.widgets.story_shape import StoryShape
+from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
+from novelizer.tui.widgets.causeway import Causeway
 
 _LABELS = {
     EventType.CHAPTER_CREATED: "Author",
@@ -99,6 +101,8 @@ class NovelizerApp(App):
                 yield Static("no pending proposals", id="proposals")
                 yield ThreadBoard("no threads yet", id="thread_board")
                 yield StoryShape("no chapters scored yet", id="story_shape")
+                yield WhoKnowsWhat("no secrets yet", id="who_knows_what")
+                yield Causeway("no causal edges yet", id="causeway")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
@@ -119,6 +123,8 @@ class NovelizerApp(App):
         self.run_worker(self._thread_board_loop(), exclusive=False)
         self.run_worker(self._story_shape_loop(), exclusive=False)
         self.run_worker(self._settings_watch_loop(), exclusive=False)
+        self.run_worker(self._who_knows_what_loop(), exclusive=False)
+        self.run_worker(self._causeway_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -246,6 +252,22 @@ class NovelizerApp(App):
                 line = f"⚙ settings error: {'; '.join(result['errors'])}"
                 log.write(line)
                 self.messages.append(line)
+
+    async def _who_knows_what_loop(self) -> None:
+        while True:
+            try:
+                await self.query_one("#who_knows_what", WhoKnowsWhat).refresh_from(self.runtime.read)
+            except Exception as e:
+                self._report_worker_error("who_knows_what", e)
+            await asyncio.sleep(1.0)
+
+    async def _causeway_loop(self) -> None:
+        while True:
+            try:
+                await self.query_one("#causeway", Causeway).refresh_from(self.runtime.read)
+            except Exception as e:
+                self._report_worker_error("causeway", e)
+            await asyncio.sleep(1.0)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))

@@ -9,7 +9,7 @@ author_model) -- with no director signal and no manual prompt beyond what
 the room already injects, and asserts it reacts to the injected stale-thread
 note by declaring a matching thread_intents entry, unprompted.
 
-Requires the configured OpenAI-compatible LLM endpoint (`Settings().llm_base_url`)
+Requires the configured OpenAI-compatible LLM endpoint (`load_effective_settings().llm_base_url`)
 to be reachable and serving the model named by NOVELIZER_AUTHOR_MODEL (see
 README's Configuration section / docs/examples/config.example.toml). Run explicitly with:
 uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
@@ -17,7 +17,7 @@ uv run pytest -m live_llm tests/agents/test_author_live_llm.py -v
 import os
 import tempfile
 import pytest
-from novelizer.settings import EffectiveSettings as Settings
+from novelizer.settings import load_effective_settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
@@ -55,7 +55,7 @@ async def test_real_author_reacts_to_a_stale_thread_unprompted(stack):
         )
     await proj.catch_up()
 
-    settings = Settings()
+    settings = load_effective_settings()
     runner = build_author_runner(settings)
     author = Author(runner, read, committer)
     await author.run_once()

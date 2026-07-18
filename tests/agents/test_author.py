@@ -362,3 +362,45 @@ async def test_author_commit_with_no_knowledge_or_causal_intents_emits_no_new_ev
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith(("secret.", "causal_edge."))] == []
+
+
+from novelizer.canon.events import SecretCreated, SecretLearned
+
+
+async def test_author_prompt_includes_known_secrets_note_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", __import__("novelizer.store.models", fromlist=["Character"]).Character(id="mara", name="Mara"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Secrets and who knows them" in sent
+    assert "the-heir-lives" in sent and "Mara" in sent
+
+
+async def test_author_prompt_omits_known_secrets_note_when_no_secrets(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Secrets and who knows them" not in sent
+
+
+async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    expected = (
+        "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+    )
+    assert sent == expected
