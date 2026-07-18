@@ -12,8 +12,16 @@ notes: if revising, specific actionable feedback; if approving, brief praise."""
 
 
 class Editor(BaseAgent):
-    def __init__(self, runner: Runner, read_store: ReadStore, committer: Committer, interval: int = 120) -> None:
+    def __init__(
+        self,
+        runner: Runner,
+        read_store: ReadStore,
+        committer: Committer,
+        interval: int = 120,
+        casting_note: str = "",
+    ) -> None:
         super().__init__(runner, read_store, committer, interval, name="editor")
+        self._casting_note = casting_note
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status=EditorialStatus.draft))
@@ -27,7 +35,12 @@ class Editor(BaseAgent):
         ch = ctx["target"]
         if ch is None:
             return None
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}"
+        voice = (
+            f"\n\nEnforce this prose voice: {self._casting_note}; note any drift in your feedback."
+            if self._casting_note
+            else ""
+        )
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

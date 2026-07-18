@@ -14,6 +14,7 @@ from novelizer.agents.character_keeper import CharacterKeeper, build_character_k
 from novelizer.agents.editor import Editor, build_editor_runner
 from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
 from novelizer.agents.retconner import Retconner, build_retconner_runner
+from novelizer.voices.loader import load_voice_pack
 
 
 class Runtime:
@@ -35,6 +36,8 @@ class Runtime:
         self.continuity_checker = None
         self.retconner = None
         self.scheduler: Optional[Scheduler] = None
+        self.voice_pack = None
+        self.active_prose_profile = None
 
     def _runner_for(self, name: str, builder):
         if self._runners is not None:
@@ -51,11 +54,14 @@ class Runtime:
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
         self.proposals = ProposalService(self.events)
+        self.voice_pack = load_voice_pack(self.settings.voice_pack)
+        self.active_prose_profile = self.voice_pack.profile(self.settings.prose_profile)
+        casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
         s = self.settings
-        self.author = Author(self._runner_for("author", build_author_runner), self.read, self.committer, interval=s.author_interval)
+        self.author = Author(self._runner_for("author", build_author_runner), self.read, self.committer, interval=s.author_interval, casting_note=casting_note)
         self.world_architect = WorldArchitect(self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer, interval=s.default_agent_interval)
         self.character_keeper = CharacterKeeper(self._runner_for("character_keeper", build_character_keeper_runner), self.read, self.committer, interval=s.default_agent_interval)
-        self.editor = Editor(self._runner_for("editor", build_editor_runner), self.read, self.committer, interval=s.default_agent_interval)
+        self.editor = Editor(self._runner_for("editor", build_editor_runner), self.read, self.committer, interval=s.default_agent_interval, casting_note=casting_note)
         self.continuity_checker = ContinuityChecker(self._runner_for("continuity_checker", build_continuity_checker_runner), self.read, self.committer, interval=s.continuity_interval)
         self.retconner = Retconner(self._runner_for("retconner", build_retconner_runner), self.read, self.committer, interval=s.default_agent_interval)
         self.agents = [

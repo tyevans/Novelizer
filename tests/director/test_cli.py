@@ -30,3 +30,35 @@ def test_retcons_command_empty():
         assert "No open retcon" in r.output
     finally:
         os.unlink(path)
+
+
+def test_voices_lists_default_pack_profiles():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        runner = CliRunner()
+        result = runner.invoke(cli, ["voices"], env=_env(path))
+        assert result.exit_code == 0, result.output
+        assert "sparse" in result.output
+        assert "lush" in result.output
+        assert "plain" in result.output
+        assert "*" in result.output or "active" in result.output.lower()
+    finally:
+        os.unlink(path)
+
+
+def test_voices_with_explicit_pack_path():
+    fd, db_path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        fd2, custom_pack_path = tempfile.mkstemp(suffix=".toml"); os.close(fd2)
+        try:
+            with open(custom_pack_path, "w") as f:
+                f.write('name = "custom"\n\n[prose_profiles.terse]\nname = "terse"\ncasting_note = "Very short sentences."\n')
+            runner = CliRunner()
+            result = runner.invoke(cli, ["voices", "--pack", str(custom_pack_path)], env=_env(db_path))
+            assert result.exit_code == 0, result.output
+            assert "terse" in result.output
+            assert "sparse" not in result.output
+        finally:
+            os.unlink(custom_pack_path)
+    finally:
+        os.unlink(db_path)

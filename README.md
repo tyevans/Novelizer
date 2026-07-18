@@ -114,6 +114,31 @@ novelizer chapters
 novelizer read <chapter-id>
 ```
 
+## Voices
+
+Prose voice is data, not code: a **voice pack** is a human-editable TOML file
+(`novelizer/voices/default.toml` ships as the default) listing named
+**prose profiles** — each a natural-language "casting note" describing the
+prose the Author should write in (e.g. `sparse`, `lush`, `plain`).
+
+The active pack and active profile are read from `Settings` at startup:
+
+- `NOVELIZER_VOICE_PACK` — path to a voice-pack TOML file (defaults to the
+  shipped pack).
+- `NOVELIZER_PROSE_PROFILE` — the profile name within that pack to cast the
+  Author (and the Editor's enforcement) in (defaults to `plain`).
+
+Inspect any pack's profiles without starting a run:
+
+```bash
+novelizer voices                       # list the active pack's profiles
+novelizer voices --pack my-pack.toml   # inspect another pack
+```
+
+The active prose profile is chosen per run via `NOVELIZER_PROSE_PROFILE` — restart the
+process to switch. Live in-TUI switching of the active profile, and per-agent
+personality casting (also carried in the pack format today), arrive in M2.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole
