@@ -20,6 +20,11 @@ from novelizer.settings.models import (
     FORBIDDEN_STORY_KEYS,
     STORY_OVERRIDABLE_KEYS,
 )
+from novelizer.settings.setup_core import (
+    ProbeResult,
+    build_global_config_data,
+    probe_endpoint,
+)
 from novelizer.settings.story_dir import (
     StoryDirectory,
     create_story,
@@ -34,12 +39,15 @@ from novelizer.settings.toml_io import (
 
 __all__ = [
     "build_effective",
+    "build_global_config_data",
     "create_story",
     "EffectiveSettings",
     "EnvOverrides",
     "FORBIDDEN_STORY_KEYS",
     "GlobalConfig",
     "load_effective_settings",
+    "probe_endpoint",
+    "ProbeResult",
     "STORY_OVERRIDABLE_KEYS",
     "StoryConfig",
     "StoryConfigError",
