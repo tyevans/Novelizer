@@ -18,3 +18,11 @@ def test_stored_event_roundtrips_through_json():
     )
     again = StoredEvent.model_validate_json(ev.model_dump_json())
     assert again == ev
+
+
+def test_autonomy_and_proposal_event_types_exist():
+    from novelizer.canon.events import EventType
+    assert EventType.PROPOSAL_CREATED == "proposal.created"
+    assert EventType.PROPOSAL_APPROVED == "proposal.approved"
+    assert EventType.PROPOSAL_REJECTED == "proposal.rejected"
+    assert EventType.AUTONOMY_CHANGED == "autonomy.changed"
