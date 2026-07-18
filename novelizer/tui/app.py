@@ -1,11 +1,13 @@
 from __future__ import annotations
 import asyncio
+from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
+from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import AgentRoster
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
@@ -63,7 +65,7 @@ def format_event(ev: StoredEvent) -> str:
 def _status_line(state: AutonomyState) -> str:
     base = (
         f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
-        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id>"
+        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings"
     )
     if state.overrides:
         summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
@@ -74,6 +76,7 @@ def _status_line(state: AutonomyState) -> str:
 class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
     CSS_PATH = "app.tcss"
+    SETTINGS_POLL_INTERVAL: float = 1.0
 
     # Note: Textual 5.3.0 does not accept "colon" as a key name for BINDINGS,
     # so "ctrl+k" is used to focus the command input instead.
@@ -119,6 +122,7 @@ class NovelizerApp(App):
         self.run_worker(self._statusbar_loop(), exclusive=False)
         self.run_worker(self._thread_board_loop(), exclusive=False)
         self.run_worker(self._story_shape_loop(), exclusive=False)
+        self.run_worker(self._settings_watch_loop(), exclusive=False)
         self.run_worker(self._who_knows_what_loop(), exclusive=False)
         self.run_worker(self._causeway_loop(), exclusive=False)
 
@@ -211,6 +215,44 @@ class NovelizerApp(App):
                 self._report_worker_error("story_shape", e)
             await asyncio.sleep(1.0)
 
+    async def _settings_watch_loop(self) -> None:
+        story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
+        watched = [story_dir.story_toml, global_config_path()]
+
+        def snapshot() -> tuple:
+            return tuple(p.stat().st_mtime if p.exists() else 0.0 for p in watched)
+
+        last = snapshot()
+        while True:
+            await asyncio.sleep(self.SETTINGS_POLL_INTERVAL)
+            current = snapshot()
+            if current == last:
+                continue
+            last = current
+            try:
+                new_settings = load_effective_settings(story_dir=story_dir)
+            except TOMLFileError as e:
+                self._report_worker_error("settings", e)
+                continue
+            try:
+                result = self.runtime.apply_settings(new_settings)
+            except Exception as e:
+                self._report_worker_error("settings", e)
+                continue
+            log = self.query_one("#feed", RichLog)
+            if result["applied"]:
+                line = f"⚙ settings applied: {', '.join(result['applied'])}"
+                log.write(line)
+                self.messages.append(line)
+            if result["restart_required"]:
+                line = f"⚙ restart required: {', '.join(result['restart_required'])}"
+                log.write(line)
+                self.messages.append(line)
+            if result.get("errors"):
+                line = f"⚙ settings error: {'; '.join(result['errors'])}"
+                log.write(line)
+                self.messages.append(line)
+
     async def _who_knows_what_loop(self) -> None:
         while True:
             try:
@@ -234,6 +276,13 @@ class NovelizerApp(App):
         self.query_one("#body").toggle_class("room")
 
     async def _run_command(self, line: str) -> None:
+        cmd = line.strip().lstrip(":").split(maxsplit=1)
+        if cmd and cmd[0].lower() == "settings":
+            from novelizer.tui.settings_screen import SettingsScreen
+
+            story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
+            self.push_screen(SettingsScreen(story_dir, lambda: self.runtime.settings))
+            return
         result = await commands.dispatch(self.runtime, line)
         log = self.query_one("#feed", RichLog)
         log.write(f"» {result}")

@@ -5,6 +5,7 @@
 # Any setting here can be overridden per story in <story>/story.toml, EXCEPT:
 #   llm_base_url, llm_api_key, default_stories_dir, last_opened_story (global-only;
 #   llm_api_key in a story.toml is an error — stories are shareable).
+# All of these are also viewable/editable at runtime via :settings in the TUI.
 
 # --- LLM endpoint (OpenAI-compatible) ---
 llm_base_url = "http://localhost:8080/v1"

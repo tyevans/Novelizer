@@ -44,6 +44,15 @@ launch — a story picker lists the stories in `default_stories_dir`
 `stories/world.db` triggers a one-time migration offer; declining is
 remembered.
 
+Inside the TUI, `:settings` opens a settings screen showing every setting
+with its effective value and source layer (default / global / story / env).
+Edits write straight to `config.toml` / `story.toml` — hand-edits to those
+files while novelizer runs are picked up the same way. Cadence, voice, and
+temperature changes apply live (voice and temperature affect the next
+draft); endpoint and model changes are marked "restart required".
+Generated chapters record the model, temperature, voice pack, and prose
+profile they were written under.
+
 ## Usage
 
 Launch the Mission Control TUI (live event feed of the world as it's authored):

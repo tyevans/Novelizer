@@ -172,6 +172,7 @@ class Chapter(BaseModel):
     character_ids: list[str] = Field(default_factory=list)
     editorial_status: EditorialStatus = EditorialStatus.draft
     editor_notes: Optional[str] = None
+    provenance: Optional[dict] = None
 
 
 class RetconRequest(BaseModel):

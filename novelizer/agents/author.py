@@ -37,9 +37,11 @@ class Author(BaseAgent):
         interval: int = 300,
         casting_note: str = "",
         personality: str = "",
+        provenance: dict | None = None,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
+        self.provenance = provenance
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status="draft"))
@@ -66,7 +68,9 @@ class Author(BaseAgent):
     async def commit(self, draft: ChapterDraft | None, ctx: dict) -> None:
         if draft is None:
             return
-        chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
+        chapter = Chapter(
+            title=draft.title, prose=draft.prose, character_ids=draft.character_ids, provenance=self.provenance
+        )
         await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
         active_thread_ids = {
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
