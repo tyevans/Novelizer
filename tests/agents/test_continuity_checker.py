@@ -165,3 +165,28 @@ async def test_poll_includes_knowledge_and_causal_data(stack):
     assert ctx["secret_references"][0].character_id == "mara"
     assert ctx["chapter_order"] == ["c1"]
     assert ctx["causal_edges"] == []
+
+
+async def test_m4_2_done_when_leak_fixture_reaches_the_open_retcon_queue(stack):
+    """M4.2 done-when (mechanical half): seed a secret.referenced event with
+    no covering learn/reveal, run ContinuityChecker.run_once() with a
+    FakeRunner that finds nothing on its own, and confirm a
+    retcon_request.created event lands via the Committer with a
+    LEAK_SOURCE_TAG-prefixed description, visible in
+    list_retcon_requests(status=open)."""
+    events, proj, read, committer = stack
+    await _seed_leak(events, proj)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
+    assert len(leak_reqs) == 1
+    assert leak_reqs[0].status == RetconStatus.open
+
+    log = await events.events_since(0)
+    created = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+               and e.payload["description"].startswith(LEAK_SOURCE_TAG)]
+    assert len(created) == 1
