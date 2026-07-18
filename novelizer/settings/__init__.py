@@ -6,6 +6,11 @@ from novelizer.settings.layers import (
     parse_global,
     parse_story,
 )
+from novelizer.settings.loader import (
+    EnvOverrides,
+    build_effective,
+    load_effective_settings,
+)
 from novelizer.settings.models import (
     EffectiveSettings,
     FORBIDDEN_STORY_KEYS,
@@ -24,10 +29,13 @@ from novelizer.settings.toml_io import (
 )
 
 __all__ = [
+    "build_effective",
     "create_story",
     "EffectiveSettings",
+    "EnvOverrides",
     "FORBIDDEN_STORY_KEYS",
     "GlobalConfig",
+    "load_effective_settings",
     "STORY_OVERRIDABLE_KEYS",
     "StoryConfig",
     "StoryConfigError",
