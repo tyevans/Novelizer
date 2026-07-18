@@ -17,7 +17,7 @@ class WorldEntriesDraft(BaseModel):
 
 class CharacterUpdate(BaseModel):
     id: str
-    arc_status: str = ""
+    arc_status: Optional[str] = None
     traits: Optional[str] = None
     motivations: Optional[str] = None
     backstory: Optional[str] = None

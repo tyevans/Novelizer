@@ -43,8 +43,8 @@ class CharacterKeeper(BaseAgent):
             current = await self._read.get_character(upd.id)
             if current is None:
                 continue
-            fields = {"arc_status": upd.arc_status}
-            for f in ("traits", "motivations", "backstory"):
+            fields = {}
+            for f in ("arc_status", "traits", "motivations", "backstory"):
                 v = getattr(upd, f)
                 if v is not None:
                     fields[f] = v

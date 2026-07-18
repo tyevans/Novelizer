@@ -37,8 +37,11 @@ async def test_resolves_retcon_and_supersedes_entry(stack):
     await agent.run_once()
     await proj.catch_up()
     # old entry superseded (gone from active list), new entry present
-    active = {e.title: e.body for e in await read.list_world_entries()}
-    assert active.get("Suns") == "One sun."
+    active_entries = await read.list_world_entries()
+    assert "w1" not in {e.id for e in active_entries}
+    matching = [e for e in active_entries if e.body == "One sun."]
+    assert len(matching) == 1
+    assert matching[0].supersedes_id == "w1"
     # retcon marked resolved
     assert await read.list_retcon_requests(status=RetconStatus.open) == []
     assert len(await read.list_retcon_requests(status=RetconStatus.resolved)) == 1
