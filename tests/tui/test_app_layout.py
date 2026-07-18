@@ -69,6 +69,9 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
     settings = Settings(db_path=path, projector_interval=0.1)
     rt = Runtime(settings, runners=_runners())
     await rt.start()
+    # Pause all background agents to ensure deterministic test (only the intended proposal exists)
+    for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner"]:
+        rt.scheduler.pause_agent(name)
     try:
         await rt.events.append(EventType.AUTONOMY_CHANGED, "singleton",
                                 AutonomyState(global_level=AutonomyLevel.gated_canon))
