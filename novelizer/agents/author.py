@@ -1,5 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
+from novelizer.brain.context import stale_threads_note
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -19,9 +20,10 @@ def _summarize(ctx: dict, casting_note: str = "", personality: str = "") -> str:
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
     voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
     cast = f"\n\nIn character: {personality}" if personality else ""
+    brain = stale_threads_note(ctx["threads"], ctx["chapters"])
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}\n\nWrite the next chapter."
     )
 
 
@@ -48,6 +50,7 @@ class Author(BaseAgent):
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
             "previous": chapters[-3:],
+            "chapters": chapters,
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
             "threads": await self._read.list_threads(),
         }

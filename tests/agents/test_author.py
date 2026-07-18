@@ -200,3 +200,91 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_prompt_includes_stale_threads_note_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    for i in range(4):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" in sent
+    assert "The Locket" in sent and "the-locket" in sent
+
+
+async def test_author_prompt_omits_stale_threads_note_when_nothing_stale(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" not in sent
+
+
+async def test_author_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    expected = (
+        "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+    )
+    assert sent == expected
+
+
+async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stale(stack):
+    """The M3 done-when, part (a): seed a thread stale enough that
+    StalenessAnalyzer flags it -> assert the Author's built prompt names it
+    (asserted on literal prompt text) -> drive the Author with a FakeRunner
+    preset whose structured output declares a thread_intents entry touching
+    that exact id -> assert the resulting thread.touched event lands via the
+    Committer -> assert the Thread Board's render-time helper (thread_board_line,
+    via is_thread_stale) no longer reports the thread stale. No live model call."""
+    from novelizer.canon.events import ThreadPlanted
+    from novelizer.agents.schemas import ThreadIntent
+    from novelizer.tui.widgets.thread_board import thread_board_line
+
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    for i in range(4):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await proj.catch_up()
+
+    # Step 1: staleness is real before we touch anything.
+    thread_before = await read.get_thread("the-locket")
+    chapters = await read.list_chapters()
+    assert "STALE" in thread_board_line(thread_before, chapters)
+
+    # Step 2: the Author's prompt names the stale thread by name and id.
+    probe_runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    probe_author = Author(probe_runner, read, committer)
+    ctx = await probe_author.poll()
+    await probe_author.work(ctx)
+    prompt = probe_runner.calls[-1]["messages"][0]["content"]
+    assert "The Locket" in prompt and "the-locket" in prompt
+
+    # Step 3: a scripted Author response declares a matching touch intent.
+    draft = ChapterDraft(
+        title="Chapter Five", prose="The locket surfaces again.",
+        thread_intents=[ThreadIntent(action="touch", id="the-locket", note="resurfaces")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+
+    # Step 4: the thread.touched event landed, and the thread is no longer stale.
+    log = await events.events_since(0)
+    assert any(e.event_type == EventType.THREAD_TOUCHED and e.payload["id"] == "the-locket" for e in log)
+    thread_after = await read.get_thread("the-locket")
+    assert thread_after.touch_count == 1
+    chapters_after = await read.list_chapters()
+    assert "STALE" not in thread_board_line(thread_after, chapters_after)

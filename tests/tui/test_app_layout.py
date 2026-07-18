@@ -98,3 +98,34 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
             assert len(chapters) == 1 and chapters[0].title == "Pending One"
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_mission_control_shows_thread_board_and_story_shape_panes():
+    from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored
+    from novelizer.store.models import Chapter
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    try:
+        await rt.events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        await rt.events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+        await rt.events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                               AnnotationStructureScored(chapter_id="c1", tension=0.6, pacing_label="rising"))
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            from textual.widgets import Static
+            assert app.query_one("#thread_board", Static) is not None
+            assert app.query_one("#story_shape", Static) is not None
+            await pilot.pause(0.5)
+            board_text = str(app.query_one("#thread_board", Static).renderable)
+            shape_text = str(app.query_one("#story_shape", Static).renderable)
+            assert "The Locket" in board_text
+            assert "c1" in shape_text and "rising" in shape_text
+    finally:
+        await rt.close(); os.unlink(path)

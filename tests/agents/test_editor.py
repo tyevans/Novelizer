@@ -5,7 +5,7 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, ThreadPlanted
+from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored
 from novelizer.agents.editor import Editor
 from novelizer.agents.schemas import EditorVerdict, ThreadIntent
 from novelizer.store.models import Chapter, EditorialStatus, Character
@@ -200,3 +200,47 @@ async def test_editor_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_editor_prompt_includes_pacing_flags_note_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.9, pacing_label="climax"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c2",
+                        AnnotationStructureScored(chapter_id="c2", tension=0.1, pacing_label="flat"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c3",
+                        AnnotationStructureScored(chapter_id="c3", tension=0.85, pacing_label="climax"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Pacing flags" in sent
+    assert "c2" in sent and "sag" in sent
+
+
+async def test_editor_prompt_omits_pacing_flags_note_when_none_flagged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Pacing flags" not in sent
+    assert sent == f"Chapter title: One\n\nProse:\np"
+
+
+async def test_editor_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert sent == "Chapter title: One\n\nProse:\np"

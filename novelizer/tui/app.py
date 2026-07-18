@@ -10,6 +10,8 @@ from novelizer.tui.widgets.roster import AgentRoster
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
+from novelizer.tui.widgets.thread_board import ThreadBoard
+from novelizer.tui.widgets.story_shape import StoryShape
 
 _LABELS = {
     EventType.CHAPTER_CREATED: "Author",
@@ -92,6 +94,8 @@ class NovelizerApp(App):
                 yield RichLog(highlight=False, markup=False, id="feed")
                 yield AgentRoster(id="roster")
                 yield Static("no pending proposals", id="proposals")
+                yield ThreadBoard("no threads yet", id="thread_board")
+                yield StoryShape("no chapters scored yet", id="story_shape")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
@@ -107,6 +111,8 @@ class NovelizerApp(App):
         self.run_worker(self._browser_loop(), exclusive=False)
         self.run_worker(self._proposals_loop(), exclusive=False)
         self.run_worker(self._statusbar_loop(), exclusive=False)
+        self.run_worker(self._thread_board_loop(), exclusive=False)
+        self.run_worker(self._story_shape_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -180,6 +186,22 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
+
+    async def _thread_board_loop(self) -> None:
+        while True:
+            try:
+                await self.query_one("#thread_board", ThreadBoard).refresh_from(self.runtime.read)
+            except Exception as e:
+                self._report_worker_error("thread_board", e)
+            await asyncio.sleep(1.0)
+
+    async def _story_shape_loop(self) -> None:
+        while True:
+            try:
+                await self.query_one("#story_shape", StoryShape).refresh_from(self.runtime.read)
+            except Exception as e:
+                self._report_worker_error("story_shape", e)
+            await asyncio.sleep(1.0)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))
