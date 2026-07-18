@@ -161,6 +161,45 @@ active voice pack) changes both what it says in the feed and how it
 approaches its next turn of work — on the next process start, per M2.2's
 scope; live in-TUI recasting lands with the voice browser in M2.3.
 
+### Character voices & the voice browser
+
+The Character Keeper grows a **voice card** per character — dialogue patterns,
+vocabulary, and verbal tics — as it reviews recent chapters, revising it
+alongside `arc_status`. The Editor cites any voiced characters appearing in
+the chapter it's reviewing, flagging drift the same way it flags prose-voice
+drift against the active prose profile. Voice cards are visible in the Story
+Browser's character detail pane (right pane, click a character):
+
+```
+Mira
+Traits: stoic
+Arc: cracking
+Motivations: ...
+Voice: Speaks in short, clipped sentences; never says "I love you" outright.
+
+<backstory>
+```
+
+Inspect the active pack's prose profiles, agent personalities, and any
+characters with a voice card from the CLI:
+
+```bash
+novelizer voices
+novelizer voices --pack path/to/other_pack.toml
+```
+
+Scaffold a brand-new prose profile from a one-line description — no LLM call,
+written straight to a user pack file (never the shipped default pack):
+
+```bash
+novelizer voice-scaffold brisk "Fast, punchy, present-tense action prose." --pack stories/user_pack.toml
+```
+
+Switch to it the same way any prose profile is activated (`NOVELIZER_VOICE_PACK`
+and `NOVELIZER_PROSE_PROFILE` in `.env`, per the Configuration table above).
+A dedicated in-TUI voice-editing/scaffolding pane, live in-run profile
+switching, and LLM-expanded scaffolded profiles are deferred past M2.3.
+
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole
