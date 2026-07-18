@@ -60,6 +60,47 @@ Command palette (focus with `Ctrl+K` or `:`, then type):
 
 Toggle Room drill-in view with `r`.
 
+### Autonomy & Approvals
+
+The autonomy dial controls which agent actions require human approval before they update
+the canon:
+
+**Autonomy levels:**
+- `full_auto` — all agents' events append immediately (default; no approval queue)
+- `gated_retcons` — only Retconner output queues as proposals; other agents auto-append
+- `gated_canon` — all agents' canon events queue as proposals (chapters, edits, retcons); director signals (seed, focus, pause, resume) auto-append regardless
+- `gated_all` — all agent events, including director signals if they come from agents (rare; for testing)
+
+Set the autonomy level for all agents or for a specific agent:
+
+```bash
+# TUI command input (focus with `:` or `Ctrl+K`):
+autonomy full_auto
+autonomy gated_retcons Editor
+
+# CLI:
+novelizer autonomy full_auto
+novelizer autonomy gated_retcons Editor
+```
+
+When an agent's output is gated, it queues as a proposal in the approval-queue pane
+(bottom-right in Mission Control). View and approve/reject from the TUI:
+
+```bash
+# TUI command input:
+approve <proposal-id>
+reject <proposal-id>
+
+# CLI:
+novelizer proposals              # list all pending proposals
+novelizer approve <proposal-id>
+novelizer reject <proposal-id>
+```
+
+**Note:** Director signals (`seed`, `focus`, `pause`, `resume`) are never gated,
+regardless of autonomy level — they auto-append immediately and act as context for agents
+on their next run.
+
 Inject a narrative seed — a director signal the Author will pick up on its next pass:
 
 ```bash

@@ -16,7 +16,7 @@ Parent milestone in [`../MILESTONES.md`](../MILESTONES.md); end-state design in
 |---|------|----------|-----------|--------|
 | M1.1 | **The Room Runs** | Canon retcon events/projection/reads; an append-only `Committer` write-seam; shared `BaseAgent`; the five ported agents (WorldArchitect, CharacterKeeper, Editor, ContinuityChecker, Retconner) on deepagents; the readiness-scored scheduler; Runtime wiring all six; CLI `retcons` | The full pipeline (world → chapter → edit → continuity → retcon) runs unattended in full-auto, proven by a driver test + CLI | ✅ complete |
 | M1.2 | **Mission Control** | The multi-pane TUI — activity feed + story browser (chapters/characters/world/retcons) + agent roster strip + status bar — and the command palette | Browse the whole live world/story state from the dashboard | ✅ complete |
-| M1.3 | **Autonomy & Approvals** | Proposal + autonomy events/projections/reads; the *gating* `Committer` implementation + `AutonomyPolicy`; approve/reject service; the dial + approval-queue UI; CLI/TUI `autonomy`/`approve`/`reject` | Gate an agent → its output queues as a proposal → approve/reject from the TUI (M1's done-criterion) | ⬜ not started |
+| M1.3 | **Autonomy & Approvals** | Proposal + autonomy events/projections/reads; the *gating* `Committer` implementation + `AutonomyPolicy`; approve/reject service; the dial + approval-queue UI; CLI/TUI `autonomy`/`approve`/`reject` | Gate an agent → its output queues as a proposal → approve/reject from the TUI (M1's done-criterion) | ✅ complete |
 
 ## Load-bearing design decision
 
