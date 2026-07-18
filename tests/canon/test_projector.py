@@ -272,3 +272,63 @@ async def test_thread_replant_of_paid_off_thread_does_not_resurrect(wired):
     assert len(rows) == 1
     assert rows[0]["state"] == "paid_off"
     assert rows[0]["last_note"] == "resolved"
+
+
+async def _structure_score_rows(proj):
+    cur = await proj._conn.execute("SELECT data FROM structure_scores ORDER BY rowid")
+    return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def test_structure_scored_is_projected(wired):
+    from novelizer.canon.events import AnnotationStructureScored
+    events, proj, _ = wired
+    await events.append(
+        EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+        AnnotationStructureScored(chapter_id="c1", tension=0.6, pacing_label="rising"),
+    )
+    await proj.catch_up()
+    rows = await _structure_score_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["chapter_id"] == "c1" and rows[0]["tension"] == 0.6
+
+
+async def test_structure_scored_replaces_prior_score_for_same_chapter(wired):
+    from novelizer.canon.events import AnnotationStructureScored
+    events, proj, _ = wired
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.3, pacing_label="lull"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.9, pacing_label="climax"))
+    await proj.catch_up()
+    rows = await _structure_score_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["tension"] == 0.9 and rows[0]["pacing_label"] == "climax"
+
+
+async def test_reprojecting_structure_scores_is_equivalent(wired):
+    from novelizer.canon.events import AnnotationStructureScored
+    events, proj, path = wired
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.6, pacing_label="rising"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c2",
+                        AnnotationStructureScored(chapter_id="c2", tension=0.2, pacing_label="lull"))
+    await proj.catch_up()
+    incremental = await _structure_score_rows(proj)
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()
+    await proj2.catch_up()
+    from_scratch = await _structure_score_rows(proj2)
+    await proj2.close()
+    assert incremental == from_scratch
+
+
+async def test_reset_state_clears_structure_scores(wired):
+    from novelizer.canon.events import AnnotationStructureScored
+    events, proj, _ = wired
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.5, pacing_label="steady"))
+    await proj.catch_up()
+    await proj._reset_state()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM structure_scores")
+    assert (await cur.fetchone())[0] == 0
