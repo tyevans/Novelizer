@@ -8,7 +8,9 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.continuity_checker import ContinuityChecker
 from novelizer.agents.schemas import ContinuityOutput, RetconDraft
-from novelizer.store.models import WorldEntry, RetconStatus
+from novelizer.store.models import WorldEntry, RetconStatus, Chapter
+from novelizer.canon.events import SecretCreated, SecretReferenced
+from novelizer.brain.leaks import LEAK_SOURCE_TAG
 
 
 class FakeRunner:
@@ -190,3 +192,58 @@ async def test_m4_2_done_when_leak_fixture_reaches_the_open_retcon_queue(stack):
     created = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
                and e.payload["description"].startswith(LEAK_SOURCE_TAG)]
     assert len(created) == 1
+
+
+async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_shows_unknown(stack):
+    """The M4.3 done-when, part (a): seed a secret (secret.created), a
+    character who has NOT learned it, and a committed secret.referenced
+    event naming that character using the secret in a chapter -> assert
+    LeakDetector (M4.2) flags it -> drive ContinuityChecker.run_once() with
+    a FakeRunner preset to return no LLM-found contradictions -> assert the
+    resulting retcon_request.created event lands via the Committer, its
+    description starting with LEAK_SOURCE_TAG -> assert it appears in
+    list_retcon_requests(status=open) -> assert the Who-Knows-What widget's
+    render-time helper still shows the character as not-having-learned the
+    secret (the leak is flagged, not silently resolved). No live model call.
+    """
+    from novelizer.tui.widgets.who_knows_what import who_knows_what_line
+    from novelizer.store.models import Character
+
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "kestrel", Character(id="kestrel", name="Kestrel"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.SECRET_REFERENCED, "the-heir-lives",
+                        SecretReferenced(id="the-heir-lives", character_id="kestrel", chapter_id="c1"))
+    await proj.catch_up()
+
+    # Step 1: LeakDetector flags it deterministically (no LLM), via the same
+    # poll() the Continuity Checker uses.
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    ctx = await agent.poll()
+    from novelizer.brain.leaks import find_leaks
+    leaks = find_leaks(ctx["secret_references"], ctx["knowledge_matrix"])
+    assert len(leaks) == 1 and leaks[0].character_id == "kestrel"
+
+    # Step 2: run_once() with a FakeRunner that finds nothing on its own
+    # still files a tagged retcon request via the Committer.
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
+    assert len(leak_reqs) == 1
+    assert "the-heir-lives" in leak_reqs[0].description and "kestrel" in leak_reqs[0].description
+
+    # Step 3: it's visible in the open retcon queue.
+    assert leak_reqs[0].status == RetconStatus.open
+
+    # Step 4: the Who-Knows-What widget's render-time helper still shows
+    # Kestrel as not having learned the secret -- the leak is flagged, not
+    # silently resolved.
+    secret = await read.get_secret("the-heir-lives")
+    characters = await read.list_characters()
+    matrix = await read.knowledge_matrix()
+    line = who_knows_what_line(secret, characters, matrix)
+    assert "Kestrel" not in line
+    assert "known to no one" in line
