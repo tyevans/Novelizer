@@ -56,3 +56,36 @@ async def test_mission_control_panes_present_and_populate():
             assert any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_command():
+    from textual.widgets import Static
+    from novelizer.canon.events import EventType
+    from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+    from novelizer.store.models import Chapter
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    try:
+        await rt.events.append(EventType.AUTONOMY_CHANGED, "singleton",
+                                AutonomyState(global_level=AutonomyLevel.gated_canon))
+        await rt.projector.catch_up()
+        ch = Chapter(id="c1", title="Pending One", prose="p")
+        await rt.committer.commit("author", EventType.CHAPTER_CREATED, ch.id, ch)
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            proposals_widget = app.query_one("#proposals", Static)
+            pending = await rt.read.list_proposals(status="open")
+            assert len(pending) == 1
+            proposal_id = pending[0].id
+            await app._run_command(f"approve {proposal_id}")
+            await rt.projector.catch_up()
+            chapters = await rt.read.list_chapters()
+            assert len(chapters) == 1 and chapters[0].title == "Pending One"
+    finally:
+        await rt.close(); os.unlink(path)
