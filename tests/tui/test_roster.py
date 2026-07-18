@@ -14,3 +14,8 @@ def test_paused_agent_marked():
 def test_idle_agent():
     line = roster_line({"name": "retconner", "paused": False, "running": False})
     assert "retconner" in line and "idle" in line
+
+
+def test_roster_line_errored():
+    line = roster_line({"name": "author", "paused": False, "running": False, "last_error": "boom"})
+    assert "author" in line and "boom" in line and "⚠" in line

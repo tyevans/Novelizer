@@ -21,6 +21,7 @@ class GlobalConfig(BaseModel):
 
     llm_base_url: str | None = None
     llm_api_key: str | None = None
+    llm_max_tokens: int | None = None
     default_stories_dir: str | None = None
     last_opened_story: str | None = None
     suppress_flat_migration_prompt: bool | None = None

@@ -44,3 +44,7 @@ def test_key_sets():
     assert "voice_pack" in STORY_OVERRIDABLE_KEYS
     assert "embed_model" in STORY_OVERRIDABLE_KEYS
     assert STORY_OVERRIDABLE_KEYS <= set(EffectiveSettings.model_fields)
+
+
+def test_llm_max_tokens_default_caps_generation():
+    assert EffectiveSettings().llm_max_tokens == 4096

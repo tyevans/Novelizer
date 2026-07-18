@@ -8,6 +8,8 @@ def roster_line(status_row: dict) -> str:
         return f"· {name}  paused"
     if status_row.get("running"):
         return f"● {name}  running"
+    if status_row.get("last_error"):
+        return f"⚠ {name}  error: {status_row['last_error']}"
     return f"· {name}  idle"
 
 

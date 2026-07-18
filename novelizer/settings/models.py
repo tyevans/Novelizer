@@ -37,6 +37,10 @@ class EffectiveSettings(BaseModel):
     author_temperature: float = 0.8
     agent_model: str = "local-model"
     agent_temperature: float = 0.7
+    # Per-request generation cap for every agent runner. Uncapped local models
+    # (especially with server-side reasoning enabled) can generate past a
+    # proxy's request timeout, so no request ever completes.
+    llm_max_tokens: int = 4096
 
     # Cadence (seconds)
     author_interval: int = 300

@@ -16,6 +16,7 @@ class Scheduler:
         self._clock = clock
         self._running = False
         self._last_ran: Optional[str] = None
+        self._last_error: dict[str, str] = {}
 
     def pause_agent(self, name: str) -> None:
         for a in self._agents:
@@ -29,7 +30,12 @@ class Scheduler:
 
     def status(self) -> list:
         return [
-            {"name": a.name, "paused": a.paused, "running": a.name == self._last_ran}
+            {
+                "name": a.name,
+                "paused": a.paused,
+                "running": a.name == self._last_ran,
+                "last_error": self._last_error.get(a.name),
+            }
             for a in self._agents
         ]
 
@@ -56,9 +62,19 @@ class Scheduler:
 
     async def _run(self, agent, now: float) -> None:
         logger.info("scheduler: running %s", agent.name)
-        await agent.run_once()
-        agent.mark_ran(now)
-        self._last_ran = agent.name
+        try:
+            await agent.run_once()
+        except Exception as e:
+            self._last_error[agent.name] = f"{type(e).__name__}: {e}"
+            raise
+        else:
+            self._last_error.pop(agent.name, None)
+            self._last_ran = agent.name
+        finally:
+            # mark_ran even on failure: a crashing agent must consume its
+            # interval (backoff) instead of staying eligible and hot-looping,
+            # which starves every other agent of scheduler slots.
+            agent.mark_ran(now)
 
     async def run(self) -> None:
         self._running = True

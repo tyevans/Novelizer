@@ -17,7 +17,7 @@ from novelizer.settings.story_dir import StoryDirectory
 from novelizer.settings.toml_io import load_toml_file, write_toml_file
 
 RESTART_REQUIRED_KEYS: frozenset[str] = frozenset({
-    "llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model",
+    "llm_base_url", "llm_api_key", "llm_max_tokens", "author_model", "agent_model", "embed_model",
 })
 
 SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key"})

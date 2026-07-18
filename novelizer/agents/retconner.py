@@ -62,5 +62,5 @@ class Retconner(BaseAgent):
 def build_retconner_runner(settings):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature)
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)

@@ -99,3 +99,43 @@ async def test_run_survives_a_ticking_agents_exception_and_keeps_selecting_other
     finally:
         sched.stop()
         await asyncio.wait_for(task, timeout=1.0)
+
+
+async def test_crashing_agent_consumes_its_interval_so_others_can_run():
+    """A crash must still mark_ran: otherwise the crasher stays eligible and,
+    outscoring everyone, hot-loops forever while the rest of the roster
+    starves (observed live: author 502-looping while nothing else ran)."""
+    class BoomAgent(StubAgent):
+        async def run_once(self):
+            raise ValueError("boom")
+
+    boom = BoomAgent("boom", 0.9, interval=10)
+    healthy = StubAgent("healthy", 0.1)
+    sched = Scheduler([boom, healthy], StubRead(), clock=lambda: 1000.0)
+    with pytest.raises(ValueError):
+        await sched.tick()
+    assert boom.ran == 1  # mark_ran despite the crash -> interval backoff
+    assert await sched.tick() == "healthy"
+
+
+async def test_status_reports_last_error_and_clears_on_success():
+    class FlakyAgent(StubAgent):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.fail_next = True
+        async def run_once(self):
+            if self.fail_next:
+                self.fail_next = False
+                raise ValueError("kaboom")
+
+    now = [1000.0]
+    flaky = FlakyAgent("flaky", 0.9, interval=10)
+    sched = Scheduler([flaky], StubRead(), clock=lambda: now[0])
+    with pytest.raises(ValueError):
+        await sched.tick()
+    st = {s["name"]: s for s in sched.status()}
+    assert "kaboom" in st["flaky"]["last_error"]
+    now[0] = 1020.0  # past interval -> eligible again, succeeds this time
+    assert await sched.tick() == "flaky"
+    st = {s["name"]: s for s in sched.status()}
+    assert st["flaky"]["last_error"] is None

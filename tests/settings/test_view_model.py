@@ -55,7 +55,7 @@ def test_secret_redacted_and_restart_flags():
     assert "sk-secret" not in rows["llm_api_key"].value
     assert rows["llm_api_key"].restart_required is True
     assert rows["author_temperature"].restart_required is False
-    assert RESTART_REQUIRED_KEYS == {"llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model"}
+    assert RESTART_REQUIRED_KEYS == {"llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model", "llm_max_tokens"}
 
 
 def test_app_managed_and_derived_keys_hidden():
