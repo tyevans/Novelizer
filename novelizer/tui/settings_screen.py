@@ -4,8 +4,7 @@ from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Input, Static
 
-from novelizer.settings import apply_edit, build_settings_rows, load_layer_configs
-from novelizer.settings.view_model import _SECRET_KEYS
+from novelizer.settings import SECRET_KEYS, apply_edit, build_settings_rows, load_layer_configs
 from novelizer.settings.setup_core import probe_endpoint
 from novelizer.settings.story_dir import StoryDirectory
 
@@ -51,8 +50,12 @@ class SettingsScreen(Screen):
 
     def refresh_rows(self) -> None:
         global_cfg, story_cfg, env = load_layer_configs(self._story_dir)
-        self._rows = build_settings_rows(global_cfg, story_cfg, env, self._effective())
+        new_rows = build_settings_rows(global_cfg, story_cfg, env, self._effective())
+        if new_rows == self._rows:
+            return
+        self._rows = new_rows
         table = self.query_one("#settings_table", DataTable)
+        saved_cursor = table.cursor_row
         table.clear()
         for row in self._rows:
             notes = []
@@ -63,6 +66,8 @@ class SettingsScreen(Screen):
             if row.restart_required:
                 notes.append("(restart required)")
             table.add_row(row.key, row.value, row.source, row.scope, " ".join(notes))
+        if table.row_count:
+            table.move_cursor(row=min(saved_cursor, table.row_count - 1))
 
     def action_dismiss_screen(self) -> None:
         self.app.pop_screen()
@@ -81,7 +86,7 @@ class SettingsScreen(Screen):
         self._editing_key = row.key
         box = self.query_one("#edit_value", Input)
         box.display = True
-        box.password = row.key in _SECRET_KEYS
+        box.password = row.key in SECRET_KEYS
         box.value = "" if row.value == "••••••" else row.value
         msg.update(f"editing {row.key} ({row.scope}) — empty clears a story override")
         box.focus()

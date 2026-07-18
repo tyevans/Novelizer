@@ -20,7 +20,8 @@ RESTART_REQUIRED_KEYS: frozenset[str] = frozenset({
     "llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model",
 })
 
-_SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key"})
+SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key"})
+_SECRET_KEYS = SECRET_KEYS  # internal alias, kept for existing call sites in this module
 _HIDDEN_KEYS: frozenset[str] = frozenset({
     "last_opened_story", "suppress_flat_migration_prompt",
     "db_path", "chroma_path", "story_title",

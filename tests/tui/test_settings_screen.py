@@ -208,6 +208,66 @@ async def test_table_converges_after_external_apply(tmp_path, monkeypatch):
         await rt.close()
 
 
+async def test_refresh_does_not_reset_cursor(tmp_path, monkeypatch):
+    """The 1s periodic refresh must not snap the cursor back to row 0."""
+    app, rt, sd = await _app(tmp_path, monkeypatch)
+    SettingsScreen.REFRESH_INTERVAL = 0.05
+    try:
+        async with app.run_test() as pilot:
+            await app._run_command(":settings")
+            await pilot.pause()
+            screen = app.screen
+            table = screen.query_one("#settings_table", DataTable)
+            target_row = 5
+            table.move_cursor(row=target_row)
+            await pilot.pause()
+            assert table.cursor_row == target_row
+
+            await pilot.pause(0.3)  # let several refresh intervals elapse
+
+            assert table.cursor_row == target_row
+    finally:
+        SettingsScreen.REFRESH_INTERVAL = 1.0
+        await rt.close()
+
+
+async def test_external_change_updates_table_and_preserves_cursor(tmp_path, monkeypatch):
+    """After an external settings change is applied, the table updates and
+    the cursor stays on the same row (rows are stably sorted)."""
+    from novelizer.settings.toml_io import write_toml_file
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    sd = create_story(tmp_path / "novel", title="N")
+    settings = EffectiveSettings(
+        db_path=str(sd.db_path), chroma_path=str(sd.chroma_path),
+        projector_interval=0.1, author_interval=300,
+    )
+    rt = Runtime(settings, runners=_room_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    app.SETTINGS_POLL_INTERVAL = 0.05
+    SettingsScreen.REFRESH_INTERVAL = 0.05
+    try:
+        async with app.run_test() as pilot:
+            await app._run_command(":settings")
+            await pilot.pause()
+            screen = app.screen
+            table = screen.query_one("#settings_table", DataTable)
+            row = _row_index(screen, "author_interval")
+            table.move_cursor(row=row)
+            await pilot.pause()
+            assert table.get_row_at(row)[1] == "300"
+
+            write_toml_file(sd.story_toml, {"title": "N", "author_interval": 45})
+            await pilot.pause(0.5)
+
+            assert table.get_row_at(row)[1] == "45"
+            assert table.cursor_row == row
+    finally:
+        SettingsScreen.REFRESH_INTERVAL = 1.0
+        await rt.close()
+
+
 async def test_probe_action_shows_result(tmp_path, monkeypatch):
     app, rt, sd = await _app(tmp_path, monkeypatch)
 

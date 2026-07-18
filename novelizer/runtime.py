@@ -141,10 +141,10 @@ class Runtime:
                 revert = {}
                 if "voice_pack" in changed:
                     revert["voice_pack"] = old.voice_pack
-                    applied.remove("voice_pack") if "voice_pack" in applied else None
+                    applied.remove("voice_pack")
                 if "prose_profile" in changed:
                     revert["prose_profile"] = old.prose_profile
-                    applied.remove("prose_profile") if "prose_profile" in applied else None
+                    applied.remove("prose_profile")
                 stored = stored.model_copy(update=revert)
             else:
                 self.voice_pack = new_pack

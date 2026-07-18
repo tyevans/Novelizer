@@ -44,6 +44,7 @@ from novelizer.settings.toml_io import (
 )
 from novelizer.settings.view_model import (
     RESTART_REQUIRED_KEYS,
+    SECRET_KEYS,
     SettingsRow,
     apply_edit,
     build_settings_rows,
@@ -69,6 +70,7 @@ __all__ = [
     "probe_endpoint",
     "ProbeResult",
     "RESTART_REQUIRED_KEYS",
+    "SECRET_KEYS",
     "SettingsRow",
     "slugify",
     "STORY_OVERRIDABLE_KEYS",
