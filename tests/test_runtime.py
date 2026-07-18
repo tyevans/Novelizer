@@ -57,6 +57,32 @@ async def test_runtime_wires_gating_committer_and_policy(settings):
         await rt.close()
 
 
+async def test_runtime_wires_continuity_checker_mining_runner_and_event_store(settings):
+    """ContinuityChecker must receive the runtime's own EventStore instance and a
+    non-None mining runner. When a fixture supplies a dedicated
+    "continuity_checker_mining" fake, that dedicated fake -- not the plain
+    "continuity_checker" fake -- must be the one actually held by the instance."""
+    mining_fake = ScriptedRunner(ContinuityOutput())
+    runners = {
+        "world_architect": ScriptedRunner(WorldEntriesDraft(entries=[])),
+        "author": ScriptedRunner(ChapterDraft(title="Chapter One", prose="It began.")),
+        "character_keeper": ScriptedRunner(KeeperOutput()),
+        "editor": ScriptedRunner(EditorVerdict(verdict="approve", notes="ok")),
+        "continuity_checker": ScriptedRunner(ContinuityOutput()),
+        "continuity_checker_mining": mining_fake,
+        "retconner": ScriptedRunner(RetconAmendments()),
+        "structure_analyst": _FakeAgentRunner(),
+    }
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.continuity_checker._events is rt.events
+        assert rt.continuity_checker._mining_runner is not None
+        assert rt.continuity_checker._mining_runner is mining_fake
+    finally:
+        await rt.close()
+
+
 async def test_runtime_gating_end_to_end_via_scheduler(settings):
     """Set autonomy to gate chapters; author's output queues as a proposal, not a chapter.
     Approving it makes the chapter appear."""
