@@ -33,6 +33,7 @@ class NovelizerApp(App):
         super().__init__()
         self.runtime = runtime
         self._last_seq = 0
+        self.messages: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -59,6 +60,8 @@ class NovelizerApp(App):
         while True:
             events = await self.runtime.events.events_since(self._last_seq)
             for ev in events:
-                log.write(format_event(ev))
+                rendered = format_event(ev)
+                log.write(rendered)
+                self.messages.append(rendered)
                 self._last_seq = ev.sequence
             await asyncio.sleep(0.3)

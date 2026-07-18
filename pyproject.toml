@@ -34,4 +34,5 @@ novelizer = "novelizer.director.cli:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "-m 'not ollama'"
 markers = ["ollama: requires running Ollama instance"]
