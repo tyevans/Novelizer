@@ -3,7 +3,7 @@ from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.store.models import Chapter
+from novelizer.store.models import Chapter, ThreadState
 
 AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write the next prose chapter.
 You receive world lore, active characters, previous chapter summaries, and director notes.
@@ -48,6 +48,7 @@ class Author(BaseAgent):
             "characters": await self._read.list_characters(),
             "previous": chapters[-3:],
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
+            "threads": await self._read.list_threads(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -60,6 +61,10 @@ class Author(BaseAgent):
             return
         chapter = Chapter(title=draft.title, prose=draft.prose, character_ids=draft.character_ids)
         await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
+        active_thread_ids = {
+            t.id for t in ctx["threads"] if t.state not in (ThreadState.paid_off, ThreadState.abandoned)
+        }
+        await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter.id)
         await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 

@@ -148,3 +148,58 @@ async def test_commit_emits_no_remark_when_feed_note_empty(stack):
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.AGENT_REMARKED] == []
+
+
+from novelizer.agents.schemas import ThreadIntent
+from novelizer.canon.events import ThreadPlanted
+
+
+async def test_author_commit_plants_a_thread_from_structured_output(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="T", prose="P",
+        thread_intents=[ThreadIntent(action="plant", name="The Locket")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    thread = await read.get_thread("the-locket")
+    assert thread is not None and thread.name == "The Locket"
+
+
+async def test_author_commit_touches_a_known_active_thread(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="T", prose="P",
+        thread_intents=[ThreadIntent(action="touch", id="the-locket", note="reappears")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    thread = await read.get_thread("the-locket")
+    assert thread.touch_count == 1
+
+
+async def test_author_commit_drops_touch_for_unknown_thread_id(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="T", prose="P",
+        thread_intents=[ThreadIntent(action="touch", id="ghost-thread")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(title="T", prose="P")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
