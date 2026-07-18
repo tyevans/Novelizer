@@ -65,7 +65,7 @@ from novelizer.canon.events import EventType, SecretCreated, SecretLearned
 from novelizer.agents.author import Author, build_author_runner
 from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
-from novelizer.store.models import Character, RetconStatus
+from novelizer.store.models import Chapter, Character, RetconStatus
 
 
 @pytest.fixture
@@ -94,6 +94,26 @@ async def test_real_author_and_continuity_checker_catch_an_unprompted_leak(stack
                         SecretCreated(id="the-heir-lives", title="The Heir Lives"))
     await events.append(EventType.SECRET_LEARNED, "the-heir-lives",
                         SecretLearned(id="the-heir-lives", character_id="mara"))
+    # Story pressure, via legitimate room canon (a prior chapter), not manual
+    # prompting: Kestrel is already chasing the heir rumor without having
+    # learned the secret. A natural continuation has Kestrel acting around
+    # the secret, making a `uses` declaration for her plausible -- which is
+    # precisely the ambiguous self-report the LeakDetector exists to flag.
+    # Without this pressure, five consecutive live runs showed the injected
+    # known_secrets_note reliably PREVENTS the leak (the guardrail working),
+    # leaving the catch half of the chain unobservable.
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(
+        id="c1", title="Whispers in the Archive",
+        prose=(
+            # NOTE: the Author's prompt summarizes prior chapters as
+            # prose[:200] (author.py) -- every load-bearing fact must sit
+            # inside that window, so the departure comes FIRST.
+            "Mara was gone, ridden south at dawn, telling no one what she "
+            "knew. Kestrel worked the sealed dispatches alone, chasing the "
+            "rumor that would not die: that the old king's line had not "
+            "ended."
+        ),
+    ))
     await proj.catch_up()
 
     settings = load_effective_settings()
