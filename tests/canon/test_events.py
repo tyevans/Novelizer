@@ -55,3 +55,25 @@ def test_thread_payload_models_roundtrip():
     for cls in (ThreadTouched, ThreadPaidOff, ThreadAbandoned):
         inst = cls(id="the-locket", chapter_id="c2", note="advanced")
         assert cls.model_validate_json(inst.model_dump_json()) == inst
+
+
+def test_annotation_structure_scored_event_type_exists():
+    from novelizer.canon.events import EventType
+    assert EventType.ANNOTATION_STRUCTURE_SCORED == "annotation.structure_scored"
+
+
+def test_annotation_structure_scored_payload_roundtrips():
+    from novelizer.canon.events import AnnotationStructureScored
+    scored = AnnotationStructureScored(chapter_id="c1", tension=0.7, pacing_label="rising")
+    again = AnnotationStructureScored.model_validate_json(scored.model_dump_json())
+    assert again == scored
+
+
+def test_annotation_structure_scored_tension_is_bounded():
+    import pytest
+    from pydantic import ValidationError
+    from novelizer.canon.events import AnnotationStructureScored
+    with pytest.raises(ValidationError):
+        AnnotationStructureScored(chapter_id="c1", tension=1.5, pacing_label="off the charts")
+    with pytest.raises(ValidationError):
+        AnnotationStructureScored(chapter_id="c1", tension=-0.1, pacing_label="negative")
