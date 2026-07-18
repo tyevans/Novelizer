@@ -27,7 +27,7 @@ a leak. For that to be *plausible* for a real LLM to produce unforced:
    chooses to have Kestrel reference the secret, that's the room's existing
    injected context alone producing the leak, unprompted.
 
-Requires the configured OpenAI-compatible LLM endpoint (`Settings().llm_base_url`)
+Requires the configured OpenAI-compatible LLM endpoint (`load_effective_settings().llm_base_url`)
 to be reachable and serving the model named by NOVELIZER_AUTHOR_MODEL (see
 README's Configuration section / docs/examples/config.example.toml). Run explicitly with:
 uv run pytest -m live_llm tests/agents/test_author_leak_live_llm.py -v
@@ -56,7 +56,7 @@ tells you *which* half broke:
 import os
 import tempfile
 import pytest
-from novelizer.settings import EffectiveSettings as Settings
+from novelizer.settings import load_effective_settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
@@ -96,7 +96,7 @@ async def test_real_author_and_continuity_checker_catch_an_unprompted_leak(stack
                         SecretLearned(id="the-heir-lives", character_id="mara"))
     await proj.catch_up()
 
-    settings = Settings()
+    settings = load_effective_settings()
     author = Author(build_author_runner(settings), read, committer)
     await author.run_once()
     await proj.catch_up()
