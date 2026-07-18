@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.canon.events import EventType
-from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatus
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.store.models import DirectorSignal, SignalKind
 
@@ -31,7 +31,7 @@ async def approve(events, read, proposal_id: str) -> str:
     proposal = await read.get_proposal(proposal_id)
     if proposal is None:
         return f"Proposal not found: {proposal_id}"
-    if proposal.status != proposal.status.open:
+    if proposal.status != ProposalStatus.open:
         return f"Proposal {proposal_id} is already {proposal.status.value}."
     await ProposalService(events).approve(proposal)
     return f"Approved proposal {proposal_id} ({proposal.target_event_type})"
@@ -41,9 +41,24 @@ async def reject(events, read, proposal_id: str) -> str:
     proposal = await read.get_proposal(proposal_id)
     if proposal is None:
         return f"Proposal not found: {proposal_id}"
-    if proposal.status != proposal.status.open:
+    if proposal.status != ProposalStatus.open:
         return f"Proposal {proposal_id} is already {proposal.status.value}."
     await ProposalService(events).reject(proposal)
+    return f"Rejected proposal {proposal_id} ({proposal.target_event_type})"
+
+
+async def _dispatch_decision(runtime, proposal_id: str, action: str) -> str:
+    """Resolve the proposal and mutate through the runtime's single ProposalService
+    instance so the open-status guard in ProposalService always applies."""
+    proposal = await runtime.read.get_proposal(proposal_id)
+    if proposal is None:
+        return f"Proposal not found: {proposal_id}"
+    if proposal.status != ProposalStatus.open:
+        return f"Proposal {proposal_id} is already {proposal.status.value}."
+    if action == "approve":
+        await runtime.proposals.approve(proposal)
+        return f"Approved proposal {proposal_id} ({proposal.target_event_type})"
+    await runtime.proposals.reject(proposal)
     return f"Rejected proposal {proposal_id} ({proposal.target_event_type})"
 
 
@@ -85,7 +100,7 @@ async def dispatch(runtime, line: str) -> str:
         await autonomy(runtime.events, next_state)
         return f"Global autonomy set to {level.value}"
     if cmd == "approve" and rest:
-        return await approve(runtime.events, runtime.read, rest[0])
+        return await _dispatch_decision(runtime, rest[0], "approve")
     if cmd == "reject" and rest:
-        return await reject(runtime.events, runtime.read, rest[0])
+        return await _dispatch_decision(runtime, rest[0], "reject")
     return f"Unknown command: {line.strip()}"

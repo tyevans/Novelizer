@@ -5,6 +5,7 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.events import EventType
+from novelizer.canon.proposal_service import ProposalService
 from novelizer.store.models import SignalKind
 from novelizer.director import commands
 
@@ -18,6 +19,7 @@ class FakeScheduler:
 class FakeRuntime:
     def __init__(self, events, scheduler):
         self.events = events; self.scheduler = scheduler; self.read = None
+        self.proposals = ProposalService(events)
 
 
 @pytest.fixture

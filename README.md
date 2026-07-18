@@ -69,7 +69,7 @@ the canon:
 - `full_auto` — all agents' events append immediately (default; no approval queue)
 - `gated_retcons` — only Retconner output queues as proposals; other agents auto-append
 - `gated_canon` — all agents' canon events queue as proposals (chapters, edits, retcons); director signals (seed, focus, pause, resume) auto-append regardless
-- `gated_all` — all agent events, including director signals if they come from agents (rare; for testing)
+- `gated_all` — all agent canon-changing events (rare; for testing); director signals are never gated
 
 Set the autonomy level for all agents or for a specific agent:
 

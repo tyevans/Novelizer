@@ -13,10 +13,14 @@ class ProposalService:
         self._events = event_store
 
     async def approve(self, proposal: Proposal) -> None:
+        if proposal.status != ProposalStatus.open:
+            return
         await self._events.append_raw(proposal.target_event_type, proposal.target_aggregate_id, proposal.payload)
         approved = proposal.model_copy(update={"status": ProposalStatus.approved})
         await self._events.append(EventType.PROPOSAL_APPROVED, proposal.id, approved)
 
     async def reject(self, proposal: Proposal) -> None:
+        if proposal.status != ProposalStatus.open:
+            return
         rejected = proposal.model_copy(update={"status": ProposalStatus.rejected})
         await self._events.append(EventType.PROPOSAL_REJECTED, proposal.id, rejected)

@@ -83,6 +83,8 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
             pending = await rt.read.list_proposals(status="open")
             assert len(pending) == 1
             proposal_id = pending[0].id
+            proposals_text = str(proposals_widget.renderable)
+            assert proposal_id[:8] in proposals_text or "chapter.created" in proposals_text
             await app._run_command(f"approve {proposal_id}")
             await rt.projector.catch_up()
             chapters = await rt.read.list_chapters()

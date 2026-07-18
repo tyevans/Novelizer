@@ -107,13 +107,13 @@ async def test_proposal_created_is_projected_open(wired):
 
 
 async def test_proposal_approved_flips_status(wired):
-    from novelizer.canon.autonomy import Proposal
+    from novelizer.canon.autonomy import Proposal, ProposalStatus
     events, proj, _ = wired
     prop = Proposal(proposing_agent="author", target_event_type="chapter.created",
                      target_aggregate_id="c1", payload={"title": "One", "prose": "p"})
     await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
     await proj.catch_up()
-    approved = prop.model_copy(update={"status": "approved"})
+    approved = prop.model_copy(update={"status": ProposalStatus.approved})
     await events.append(EventType.PROPOSAL_APPROVED, prop.id, approved)
     await proj.catch_up()
     cur = await proj._conn.execute("SELECT status FROM proposals WHERE id=?", (prop.id,))
@@ -121,13 +121,13 @@ async def test_proposal_approved_flips_status(wired):
 
 
 async def test_proposal_rejected_flips_status(wired):
-    from novelizer.canon.autonomy import Proposal
+    from novelizer.canon.autonomy import Proposal, ProposalStatus
     events, proj, _ = wired
     prop = Proposal(proposing_agent="editor", target_event_type="chapter.status_changed",
                      target_aggregate_id="c1", payload={})
     await events.append(EventType.PROPOSAL_CREATED, prop.id, prop)
     await proj.catch_up()
-    rejected = prop.model_copy(update={"status": "rejected"})
+    rejected = prop.model_copy(update={"status": ProposalStatus.rejected})
     await events.append(EventType.PROPOSAL_REJECTED, prop.id, rejected)
     await proj.catch_up()
     cur = await proj._conn.execute("SELECT status FROM proposals WHERE id=?", (prop.id,))
