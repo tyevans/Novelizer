@@ -221,3 +221,45 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
         assert "One sun." in active_bodies
     finally:
         await rt.close()
+
+
+class _FakeAgentRunner:
+    async def ainvoke(self, inputs):
+        return {"structured_response": None}
+
+
+def _all_fake_runners():
+    return {
+        name: _FakeAgentRunner()
+        for name in ("author", "world_architect", "character_keeper", "editor", "continuity_checker", "retconner")
+    }
+
+
+async def test_runtime_wires_active_prose_profile_into_author():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        settings = Settings(db_path=path, prose_profile="sparse")
+        rt = Runtime(settings, runners=_all_fake_runners())
+        await rt.start()
+        assert rt.active_prose_profile is not None
+        assert rt.active_prose_profile.name == "sparse"
+        assert rt.author._casting_note == rt.active_prose_profile.casting_note
+        assert rt.editor._casting_note == rt.active_prose_profile.casting_note
+        await rt.close()
+    finally:
+        os.unlink(path)
+
+
+async def test_runtime_unknown_profile_falls_back_to_empty_casting_note():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        settings = Settings(db_path=path, prose_profile="does-not-exist")
+        rt = Runtime(settings, runners=_all_fake_runners())
+        await rt.start()
+        assert rt.active_prose_profile is None
+        assert rt.author._casting_note == ""
+        await rt.close()
+    finally:
+        os.unlink(path)
