@@ -1,3 +1,7 @@
+from novelizer.settings.global_store import (
+    update_global_config,
+    write_global_config,
+)
 from novelizer.settings.layers import (
     GlobalConfig,
     StoryConfig,
@@ -47,5 +51,7 @@ __all__ = [
     "migrate_flat_layout",
     "parse_global",
     "parse_story",
+    "update_global_config",
+    "write_global_config",
     "write_toml_file",
 ]
