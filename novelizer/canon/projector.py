@@ -5,6 +5,8 @@ from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
+from novelizer.store.models import ThreadRecord, ThreadState
+from novelizer.canon.threads import TERMINAL_STATES
 
 _CREATE = """
 CREATE TABLE IF NOT EXISTS chapters (
@@ -30,6 +32,9 @@ CREATE TABLE IF NOT EXISTS autonomy_state (
 );
 CREATE TABLE IF NOT EXISTS projector_state (
     id TEXT PRIMARY KEY, last_sequence INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
 );
 """
 
@@ -66,7 +71,10 @@ class Projector:
 
     async def _reset_state(self) -> None:
         """Testing/rebuild helper: forget position and clear projections."""
-        for table in ("chapters", "world_entries", "characters", "director_signals", "retcon_requests", "proposals", "autonomy_state"):
+        for table in (
+            "chapters", "world_entries", "characters", "director_signals",
+            "retcon_requests", "proposals", "autonomy_state", "threads",
+        ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
 
@@ -145,6 +153,42 @@ class Projector:
             await self._conn.execute(
                 "UPDATE proposals SET status=? WHERE id=?", (new_status, p["id"])
             )
+        elif t == EventType.THREAD_PLANTED:
+            record = ThreadRecord(
+                id=p["id"], name=p["name"], state=ThreadState.planted,
+                last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
+            )
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                (record.id, record.model_dump_json(), record.state.value),
+            )
+        elif t in (EventType.THREAD_TOUCHED, EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED):
+            cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ThreadRecord.model_validate_json(row[0])
+                if record.state.value not in TERMINAL_STATES:
+                    new_state = {
+                        EventType.THREAD_TOUCHED: ThreadState.touched,
+                        EventType.THREAD_PAID_OFF: ThreadState.paid_off,
+                        EventType.THREAD_ABANDONED: ThreadState.abandoned,
+                    }[t]
+                    touch_count = record.touch_count + (1 if t == EventType.THREAD_TOUCHED else 0)
+                    updated = record.model_copy(update={
+                        "state": new_state,
+                        "touch_count": touch_count,
+                        "last_note": p.get("note", ""),
+                        "last_chapter_id": p.get("chapter_id", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.state.value),
+                    )
+                # else: absorbing terminal state — the event is a fact in the log,
+                # but the threads projection does not change.
+            # else: no row for this id yet (shouldn't happen under correct agent
+            # behavior, since agents validate intents against known ids before
+            # committing) — nothing to project, no error raised.
         elif t == EventType.AUTONOMY_CHANGED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)
