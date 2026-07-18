@@ -10,7 +10,9 @@ SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world.
 You receive characters (with traits and arcs) and recent prose chapters. Your tasks:
 1. Update each character's arc_status to reflect what recent chapters show.
 2. Flag behavioral contradictions between a character's defined traits and their actions.
-Return updated_characters (id + revised arc_status, and any corrected traits/motivations/backstory)
+3. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
+   in their lines, and revise it as their voice evolves across chapters.
+Return updated_characters (id + revised arc_status, and any corrected traits/motivations/backstory/voice)
 and retcon_requests (description, conflicting_entry_ids, proposed_resolution)."""
 
 
@@ -52,7 +54,7 @@ class CharacterKeeper(BaseAgent):
             if current is None:
                 continue
             fields = {}
-            for f in ("arc_status", "traits", "motivations", "backstory"):
+            for f in ("arc_status", "traits", "motivations", "backstory", "voice"):
                 v = getattr(upd, f)
                 if v is not None:
                     fields[f] = v

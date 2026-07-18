@@ -79,3 +79,32 @@ async def test_commit_emits_remark_when_feed_note_present(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert len(remarks) == 1
     assert remarks[0].payload["note"] == "Mara's arc is bending toward trust."
+
+
+async def test_updates_character_voice_and_leaves_unset_voice_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(
+        EventType.CHARACTER_CREATED, "c1",
+        Character(id="c1", name="Mira", traits="stoic", arc_status="wary", voice="Speaks in short, clipped sentences."),
+    )
+    await proj.catch_up()
+
+    # First update: voice is set explicitly and should change.
+    out = KeeperOutput(updated_characters=[
+        CharacterUpdate(id="c1", voice="Now trails off mid-sentence when scared."),
+    ])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    mira = await read.get_character("c1")
+    assert mira.voice == "Now trails off mid-sentence when scared."
+    assert mira.traits == "stoic"  # untouched field unaffected
+
+    # Second update: voice left None should not clobber the existing voice.
+    out2 = KeeperOutput(updated_characters=[CharacterUpdate(id="c1", arc_status="cracking")])
+    agent2 = CharacterKeeper(FakeRunner(out2), read, committer)
+    await agent2.run_once()
+    await proj.catch_up()
+    mira2 = await read.get_character("c1")
+    assert mira2.voice == "Now trails off mid-sentence when scared."
+    assert mira2.arc_status == "cracking"
