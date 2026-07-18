@@ -48,3 +48,15 @@ async def test_respects_interval():
     # same clock -> not interval-ready now
     sched2 = Scheduler([a], StubRead(), clock=lambda: 1005.0)
     assert await sched2.tick() is None
+
+
+async def test_status_reports_paused_and_last_ran():
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    before = {s["name"]: s for s in sched.status()}
+    assert before["a"]["running"] is False and before["b"]["running"] is False
+    await sched.tick()  # runs b
+    sched.pause_agent("a")
+    st = {s["name"]: s for s in sched.status()}
+    assert st["b"]["running"] is True
+    assert st["a"]["paused"] is True and st["b"]["paused"] is False
