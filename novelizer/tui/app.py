@@ -4,10 +4,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
+from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
 from novelizer.tui.widgets.roster import AgentRoster
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
+from novelizer.tui.widgets.proposals_model import pending_lines
 
 _LABELS = {
     EventType.CHAPTER_CREATED: "Author",
@@ -37,6 +39,17 @@ def format_event(ev: StoredEvent) -> str:
     return f"◆ {who} — {detail}"
 
 
+def _status_line(state: AutonomyState) -> str:
+    base = (
+        f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
+        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id>"
+    )
+    if state.overrides:
+        summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
+        base += f"  (overrides: {summary})"
+    return base
+
+
 class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
     CSS_PATH = "app.tcss"
@@ -61,10 +74,11 @@ class NovelizerApp(App):
             with Vertical(id="left"):
                 yield RichLog(highlight=False, markup=False, id="feed")
                 yield AgentRoster(id="roster")
+                yield Static("no pending proposals", id="proposals")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
-        yield Static("AUTONOMY: full-auto   ·   :seed <text> · :focus <x> · :pause <agent>", id="statusbar")
+        yield Static("AUTONOMY: loading…", id="statusbar")
         yield Input(id="command", placeholder="command… (seed/focus/pause/resume)")
         yield Footer()
 
@@ -74,6 +88,8 @@ class NovelizerApp(App):
         self.run_worker(self._feed_loop(), exclusive=False)
         self.run_worker(self._roster_loop(), exclusive=False)
         self.run_worker(self._browser_loop(), exclusive=False)
+        self.run_worker(self._proposals_loop(), exclusive=False)
+        self.run_worker(self._statusbar_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -129,6 +145,24 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("browser", e)
             await asyncio.sleep(1.0)
+
+    async def _proposals_loop(self) -> None:
+        while True:
+            try:
+                lines = await pending_lines(self.runtime.read)
+                self.query_one("#proposals", Static).update("\n".join(lines) or "no pending proposals")
+            except Exception as e:
+                self._report_worker_error("proposals", e)
+            await asyncio.sleep(0.5)
+
+    async def _statusbar_loop(self) -> None:
+        while True:
+            try:
+                state = await self.runtime.read.get_autonomy_state()
+                self.query_one("#statusbar", Static).update(_status_line(state))
+            except Exception as e:
+                self._report_worker_error("statusbar", e)
+            await asyncio.sleep(0.5)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))

@@ -22,6 +22,12 @@ CREATE TABLE IF NOT EXISTS director_signals (
 CREATE TABLE IF NOT EXISTS retcon_requests (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS proposals (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, proposing_agent TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS autonomy_state (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS projector_state (
     id TEXT PRIMARY KEY, last_sequence INTEGER NOT NULL
 );
@@ -60,7 +66,7 @@ class Projector:
 
     async def _reset_state(self) -> None:
         """Testing/rebuild helper: forget position and clear projections."""
-        for table in ("chapters", "world_entries", "characters", "director_signals", "retcon_requests"):
+        for table in ("chapters", "world_entries", "characters", "director_signals", "retcon_requests", "proposals", "autonomy_state"):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
 
@@ -128,5 +134,19 @@ class Projector:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO retcon_requests (id, data, status) VALUES (?,?,?)",
                 (p["id"], data, p.get("status", "resolved" if t == EventType.RETCON_REQUEST_RESOLVED else "rejected")),
+            )
+        elif t == EventType.PROPOSAL_CREATED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO proposals (id, data, status, proposing_agent) VALUES (?,?,?,?)",
+                (p["id"], data, p.get("status", "open"), p["proposing_agent"]),
+            )
+        elif t == EventType.PROPOSAL_APPROVED or t == EventType.PROPOSAL_REJECTED:
+            new_status = "approved" if t == EventType.PROPOSAL_APPROVED else "rejected"
+            await self._conn.execute(
+                "UPDATE proposals SET status=? WHERE id=?", (new_status, p["id"])
+            )
+        elif t == EventType.AUTONOMY_CHANGED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)
             )
         await self._conn.commit()

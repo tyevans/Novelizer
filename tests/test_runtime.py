@@ -11,6 +11,10 @@ from novelizer.agents.schemas import (
     EditorVerdict, ContinuityOutput, RetconAmendments, RetconDraft,
 )
 from novelizer.agents.base import ChapterDraft
+from novelizer.canon.committer import GatingCommitter
+from novelizer.canon.policy import AutonomyPolicy
+from novelizer.canon.proposal_service import ProposalService
+from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 
 
 class FakeRunner:
@@ -36,6 +40,44 @@ async def test_start_wires_a_working_slice(settings):
         await rt.author.run_once()
         await rt.projector.catch_up()
         assert "Chapter One" in [c.title for c in await rt.read.list_chapters()]
+    finally:
+        await rt.close()
+
+
+async def test_runtime_wires_gating_committer_and_policy(settings):
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert isinstance(rt.committer, GatingCommitter)
+        assert isinstance(rt.policy, AutonomyPolicy)
+        assert isinstance(rt.proposals, ProposalService)
+        assert rt.author._committer is rt.committer
+        assert rt.world_architect._committer is rt.committer
+    finally:
+        await rt.close()
+
+
+async def test_runtime_gating_end_to_end_via_scheduler(settings):
+    """Set autonomy to gate chapters; author's output queues as a proposal, not a chapter.
+    Approving it makes the chapter appear."""
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        await rt.events.append(EventType.AUTONOMY_CHANGED, "singleton",
+                                AutonomyState(global_level=AutonomyLevel.gated_canon))
+        await rt.projector.catch_up()
+        from novelizer.store.models import Chapter
+        ch = Chapter(id="c1", title="Gated One", prose="p")
+        await rt.committer.commit("author", EventType.CHAPTER_CREATED, ch.id, ch)
+        await rt.projector.catch_up()
+        assert await rt.read.list_chapters() == []
+        pending = await rt.read.list_proposals(status="open")
+        assert len(pending) == 1 and pending[0].payload["title"] == "Gated One"
+
+        await rt.proposals.approve(pending[0])
+        await rt.projector.catch_up()
+        chapters = await rt.read.list_chapters()
+        assert len(chapters) == 1 and chapters[0].title == "Gated One"
     finally:
         await rt.close()
 

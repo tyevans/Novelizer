@@ -15,6 +15,10 @@ class EventType:
     RETCON_REQUEST_CREATED = "retcon_request.created"
     RETCON_REQUEST_RESOLVED = "retcon_request.resolved"
     RETCON_REQUEST_REJECTED = "retcon_request.rejected"
+    PROPOSAL_CREATED = "proposal.created"
+    PROPOSAL_APPROVED = "proposal.approved"
+    PROPOSAL_REJECTED = "proposal.rejected"
+    AUTONOMY_CHANGED = "autonomy.changed"
 
 
 class StoredEvent(BaseModel):

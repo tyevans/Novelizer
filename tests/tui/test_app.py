@@ -31,3 +31,19 @@ def test_format_chapter_status_changed_labels_editor():
                      aggregate_id="c1", payload={"title": "One", "editorial_status": "reviewed"}, created_at="t")
     line = format_event(ev)
     assert "One" in line and "Editor" in line
+
+
+def test_status_line_shows_real_autonomy_level():
+    from novelizer.tui.app import _status_line
+    from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+    line = _status_line(AutonomyState(global_level=AutonomyLevel.gated_canon))
+    assert "gated_canon" in line
+    assert "full-auto" not in line
+
+
+def test_status_line_summarizes_overrides():
+    from novelizer.tui.app import _status_line
+    from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+    line = _status_line(AutonomyState(global_level=AutonomyLevel.full_auto,
+                                       overrides={"retconner": AutonomyLevel.gated_all}))
+    assert "retconner=gated_all" in line

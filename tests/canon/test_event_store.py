@@ -56,3 +56,19 @@ async def test_sequences_are_strictly_increasing(n):
     finally:
         await s.close()
         os.unlink(path)
+
+
+async def test_append_raw_stores_dict_payload_without_a_model():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    store = EventStore(path)
+    await store.init()
+    try:
+        stored = await store.append_raw(EventType.CHAPTER_CREATED, "c1", {"id": "c1", "title": "One", "prose": "p"})
+        assert stored.event_type == EventType.CHAPTER_CREATED
+        assert stored.payload["title"] == "One"
+        fetched = await store.events_since(0)
+        assert fetched[0].payload["title"] == "One"
+    finally:
+        await store.close()
+        os.unlink(path)
