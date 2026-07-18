@@ -156,6 +156,28 @@ def voices(ctx, pack_path: str | None):
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+@cli.command("voice-scaffold")
+@click.argument("profile_name")
+@click.argument("description")
+@click.option(
+    "--pack", "pack_path", default="stories/user_pack.toml",
+    help="User pack file to write into (defaults to stories/user_pack.toml; never the shipped default pack).",
+)
+@click.pass_context
+def voice_scaffold(ctx, profile_name: str, description: str, pack_path: str):
+    """Scaffold a new prose profile into a user voice pack from a one-line description.
+
+    No LLM call: the description you pass becomes the profile's casting note verbatim.
+    """
+    from novelizer.voices.scaffold import scaffold_prose_profile
+    try:
+        written = scaffold_prose_profile(pack_path, profile_name, description)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        return
+    console.print(f"[green]Scaffolded profile '{profile_name}' into {written}[/green]")
+
+
 @cli.command()
 @click.argument("level")
 @click.argument("agent", required=False)
