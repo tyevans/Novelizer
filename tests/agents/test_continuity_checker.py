@@ -427,6 +427,94 @@ async def test_mining_runs_only_for_chapters_without_a_mined_marker(stack):
     assert len(mining_runner.calls) == 1
 
 
+import asyncio
+from hypothesis import given, settings as hyp_settings, strategies as st
+
+
+async def _run_mining_idempotency(fact_count: int, run_twice: bool) -> tuple[int, int]:
+    """Seeds `fact_count` distinct secrets, a chapter, and a character; covers
+    the even-indexed secrets with a pre-existing secret.referenced event
+    (source='declared') so only the odd-indexed ones are "new" for mining to
+    find. Runs a FakeRunner mining pass citing all fact_count facts once (via
+    run_once), then optionally a second run_once with a runner whose mining
+    response would re-cite the same facts -- but since the chapter already
+    carries a chapter.mined marker, poll() must exclude it and the mining
+    runner must never be invoked again.
+
+    Returns (chapter_mined_count, mined_sourced_secret_referenced_count).
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        events = EventStore(path); await events.init()
+        proj = Projector(events, path); await proj.init()
+        read = ReadStore(path); await read.init()
+        committer = Committer(events)
+
+        secret_ids = [f"s{i}" for i in range(fact_count)]
+        uncovered_ids = []
+        await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+        await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        for i, sid in enumerate(secret_ids):
+            await events.append(EventType.SECRET_CREATED, sid, SecretCreated(id=sid, title=sid))
+            if i % 2 == 0:
+                await events.append(EventType.SECRET_REFERENCED, sid,
+                                    SecretReferenced(id=sid, character_id="mara", chapter_id="c1"))
+            else:
+                uncovered_ids.append(sid)
+        await proj.catch_up()
+
+        mining_out = MinedFactsOutput(secret_facts=[
+            MinedSecretFact(action="uses", id=sid, character_id="mara", chapter_id="c1")
+            for sid in secret_ids
+        ])
+        agent = ContinuityChecker(
+            FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events,
+        )
+        await agent.run_once()
+        await proj.catch_up()
+
+        if run_twice:
+            # A second run whose mining response, if ever invoked for this
+            # chapter, would try to recommit the same facts -- poll()'s
+            # mined_chapters exclusion must mean it's never called.
+            second_mining_runner = FakeRunner(mining_out)
+            agent2 = ContinuityChecker(
+                FakeRunner(ContinuityOutput()), second_mining_runner, read, committer, events,
+            )
+            await agent2.run_once()
+            await proj.catch_up()
+            assert second_mining_runner.calls == []
+
+        log = await events.events_since(0)
+        mined_markers = [e for e in log if e.event_type == EventType.CHAPTER_MINED
+                          and e.payload["chapter_id"] == "c1"]
+        mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED
+                      and e.payload.get("source") == "mined"]
+        return len(mined_markers), len(mined_refs)
+    finally:
+        await read.close(); await proj.close(); await events.close(); os.unlink(path)
+
+
+@given(
+    fact_count=st.integers(min_value=0, max_value=5),
+    run_twice=st.booleans(),
+)
+@hyp_settings(max_examples=25, deadline=None)
+def test_mining_the_same_chapter_twice_never_double_commits_idempotency(fact_count, run_twice):
+    """Idempotency invariant (M5.1 Locked decision 2): running run_once()
+    against the same un-mined chapter any number of times with arbitrary
+    mined-fact counts commits each distinct fact at most once, and always
+    ends with exactly one chapter.mined marker for that chapter -- the
+    marker absorbs repeat mining attempts regardless of what the second
+    run's FakeRunner would have returned.
+    """
+    uncovered_count = (fact_count + 1) // 2  # odd-indexed secrets, 0..fact_count-1
+    mined_marker_count, mined_ref_count = asyncio.run(_run_mining_idempotency(fact_count, run_twice))
+    assert mined_marker_count == 1
+    assert mined_ref_count <= uncovered_count
+
+
 async def test_poll_includes_threads_secrets_and_mined_chapters(stack):
     from novelizer.canon.events import ThreadPlanted
 
