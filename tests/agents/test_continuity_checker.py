@@ -532,3 +532,125 @@ async def test_poll_includes_threads_secrets_and_mined_chapters(stack):
     assert {s.id for s in ctx["secrets"]} == {"the-heir-lives"}
     assert {t.id for t in ctx["threads"]} == {"the-lost-heir"}
     assert {c.id for c in ctx["mined_chapters"]} == {"c1"}
+
+
+async def test_m5_1_done_when_mechanical_chain(stack):
+    """M5.1 done-when (a), traced clause by clause -- see
+    docs/submilestones/M5-finish.md's M5.1 done-when cell and
+    docs/superpowers/plans/2026-07-18-novelizer-m5.1-prose-mining.md Task 9."""
+    from novelizer.canon.committer import GatingCommitter
+    from novelizer.canon.policy import AutonomyPolicy
+    from novelizer.canon.autonomy import AutonomyLevel
+    from novelizer.brain.leaks import find_leaks
+
+    events, proj, read, committer = stack
+
+    # --- Clause 1+2: seed a chapter's prose with an undeclared secret use
+    # (no secret.referenced event for it in the log) and a FakeRunner mining
+    # response declaring that use; run run_once() -> the resulting
+    # secret.referenced event exists, tagged source="mined".
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1",
+                        Chapter(id="c1", title="One", prose="Mara knew the heir lived."))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1"),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    assert mined_refs[0].payload["character_id"] == "mara"
+
+    # --- Clause 3: find_leaks now flags it -- mining feeds the existing
+    # deterministic detector, doesn't bypass it.
+    matrix = await read.knowledge_matrix()
+    refs = await read.list_secret_references()
+    leaks = find_leaks(refs, matrix)
+    assert any(l.secret_id == "the-heir-lives" and l.character_id == "mara" for l in leaks)
+
+    # --- Clause 4: a second run_once() against the same chapter does not
+    # re-commit the same mined fact (idempotency via chapter.mined).
+    second_mining_runner = FakeRunner(mining_out)
+    agent2 = ContinuityChecker(FakeRunner(ContinuityOutput()), second_mining_runner, read, committer, events)
+    await agent2.run_once()
+    await proj.catch_up()
+
+    assert second_mining_runner.calls == []  # mined_chapters excluded c1
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    mined_markers = [e for e in log if e.event_type == EventType.CHAPTER_MINED and e.payload["chapter_id"] == "c1"]
+    assert len(mined_markers) == 1
+
+    # --- Clause 5: an ambiguous-mining fixture (known_id=False, unknown id)
+    # produces a retcon_request.created tagged MINED_SOURCE_TAG instead of a
+    # bad event.
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="A stranger spoke of something unclear."))
+    await proj.catch_up()
+
+    ambiguous_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="some-unknown-secret", character_id="mara", chapter_id="c2", known_id=False),
+    ])
+    agent3 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(ambiguous_out), read, committer, events)
+    await agent3.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    bad_events = [e for e in log if e.event_type in (EventType.SECRET_REFERENCED, EventType.SECRET_LEARNED)
+                  and e.payload.get("id") == "some-unknown-secret"]
+    assert bad_events == []
+    tagged_retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                      and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert any("some-unknown-secret" in e.payload["description"] for e in tagged_retcons)
+
+    # --- Clause 6: a mined-reveal fixture produces a retcon_request.created
+    # tagged MINED_SOURCE_TAG and NO secret.revealed event, at every
+    # autonomy level -- mined reveals never auto-commit. First under a
+    # plain Committer:
+    await events.append(EventType.CHAPTER_CREATED, "c3", Chapter(id="c3", title="Three", prose="The heir's truth came out."))
+    await proj.catch_up()
+
+    reveal_out = MinedFactsOutput(reveal_facts=[
+        MinedRevealFact(id="the-heir-lives", chapter_id="c3"),
+    ])
+    agent4 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(reveal_out), read, committer, events)
+    await agent4.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
+    retcons_after_c3 = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                        and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert any("the-heir-lives" in e.payload["description"] for e in retcons_after_c3)
+
+    # And explicitly under a GatingCommitter at AutonomyLevel.full_auto too,
+    # per the decomposition's literal "at every autonomy level" wording --
+    # mined reveals never auto-commit even when full_auto would let every
+    # other event type through ungated.
+    autonomy_state = await read.get_autonomy_state()
+    assert autonomy_state.global_level == AutonomyLevel.full_auto  # default; asserted, not set
+
+    await events.append(EventType.CHAPTER_CREATED, "c4", Chapter(id="c4", title="Four", prose="Another reveal, unspoken."))
+    await proj.catch_up()
+
+    gating_committer = GatingCommitter(events, AutonomyPolicy(read))
+    reveal_out_2 = MinedFactsOutput(reveal_facts=[
+        MinedRevealFact(id="the-heir-lives", chapter_id="c4"),
+    ])
+    agent5 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(reveal_out_2), read, gating_committer, events)
+    await agent5.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
+    tagged_retcons_after = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                            and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert len(tagged_retcons_after) >= len(retcons_after_c3) + 1
