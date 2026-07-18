@@ -14,7 +14,7 @@ _LABELS = {
     EventType.WORLD_ENTRY_CREATED: "Architect",
     EventType.CHARACTER_CREATED: "Keeper",
     EventType.DIRECTOR_SIGNAL_CREATED: "Director",
-    EventType.RETCON_REQUEST_CREATED: "Continuity",
+    EventType.RETCON_REQUEST_CREATED: "Retcon",
     EventType.CHAPTER_STATUS_CHANGED: "Editor",
 }
 
