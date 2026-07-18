@@ -6,6 +6,8 @@
 #proposals { height: auto; max-height: 6; border: round $secondary; }
 #thread_board { height: auto; max-height: 8; border: round $secondary; }
 #story_shape { height: auto; max-height: 8; border: round $secondary; }
+#who_knows_what { height: auto; max-height: 8; border: round $secondary; }
+#causeway { height: auto; max-height: 8; border: round $secondary; }
 #browser { height: 2fr; border: round $primary; }
 #detail { height: 1fr; border: round $secondary; padding: 0 1; }
 #statusbar { height: 1; background: $panel; color: $text; }

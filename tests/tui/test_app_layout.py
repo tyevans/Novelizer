@@ -129,3 +129,37 @@ async def test_mission_control_shows_thread_board_and_story_shape_panes():
             assert "c1" in shape_text and "rising" in shape_text
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_mission_control_shows_who_knows_what_and_causeway_panes():
+    from novelizer.canon.events import EventType, SecretCreated, SecretLearned, CausalEdgeDeclared
+    from novelizer.store.models import Chapter, Character
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    try:
+        await rt.events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        await rt.events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+        await rt.events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+        await rt.events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara"))
+        await rt.events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+        await rt.events.append(EventType.CAUSAL_EDGE_DECLARED, "c1",
+                               CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c1"))
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            from textual.widgets import Static
+            assert app.query_one("#who_knows_what", Static) is not None
+            assert app.query_one("#causeway", Static) is not None
+            await pilot.pause(0.5)
+            wkw_text = str(app.query_one("#who_knows_what", Static).renderable)
+            causeway_text = str(app.query_one("#causeway", Static).renderable)
+            assert "The Heir Lives" in wkw_text and "Mara" in wkw_text
+            assert "c2" in causeway_text and "c1" in causeway_text and "PARADOX" in causeway_text
+    finally:
+        await rt.close(); os.unlink(path)
