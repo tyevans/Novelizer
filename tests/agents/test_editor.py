@@ -303,3 +303,35 @@ async def test_editor_commit_with_no_knowledge_or_causal_intents_emits_no_new_ev
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith(("secret.", "causal_edge."))] == []
+
+
+from novelizer.canon.events import CausalEdgeDeclared
+
+
+async def test_editor_prompt_includes_causal_flags_note_when_present(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c1",
+                        CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c1"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Causal flags" in sent
+    assert "c2" in sent and "c1" in sent and "ordering" in sent
+
+
+async def test_editor_prompt_omits_causal_flags_note_when_no_edges(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Causal flags" not in sent
+    assert sent == f"Chapter title: One\n\nProse:\np"
