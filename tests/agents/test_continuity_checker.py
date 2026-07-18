@@ -23,20 +23,6 @@ class FakeRunner:
         return {"structured_response": self._out}
 
 
-class SequencedFakeRunner:
-    """Returns successive structured responses from `outs`, one per call,
-    popped in order. Used where a test needs the contradiction-pass and
-    mining-pass calls to return different structured responses."""
-
-    def __init__(self, outs):
-        self._outs = list(outs)
-        self.calls = []
-
-    async def ainvoke(self, inputs):
-        self.calls.append(inputs)
-        return {"structured_response": self._outs.pop(0)}
-
-
 @pytest.fixture
 async def stack():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
@@ -407,6 +393,51 @@ async def test_mining_thread_fact_dedups_against_raw_log_scan(stack):
     assert len(touches) == 1
 
 
+class RaisingThenFakeMiningRunner:
+    """Raises on its first call (simulating a mining-pass failure for one
+    chapter), then returns `out` for every subsequent call."""
+
+    def __init__(self, out):
+        self._out = out
+        self._first_call = True
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        if self._first_call:
+            self._first_call = False
+            raise RuntimeError("mining pass exploded")
+        return {"structured_response": self._out}
+
+
+async def test_mining_exception_for_one_chapter_does_not_block_the_next(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c2"),
+    ])
+    mining_runner = RaisingThenFakeMiningRunner(mining_out)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    assert len(mining_runner.calls) == 2  # both chapters attempted
+
+    log = await events.events_since(0)
+    mined_markers = {e.payload["chapter_id"] for e in log if e.event_type == EventType.CHAPTER_MINED}
+    assert mined_markers == {"c2"}  # c1's failure left it unstamped, c2 succeeded
+
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    assert mined_refs[0].payload["chapter_id"] == "c2"
+
+
 async def test_mining_runs_only_for_chapters_without_a_mined_marker(stack):
     from novelizer.canon.events import ChapterMined
 
@@ -532,6 +563,7 @@ async def test_poll_includes_threads_secrets_and_mined_chapters(stack):
     assert {s.id for s in ctx["secrets"]} == {"the-heir-lives"}
     assert {t.id for t in ctx["threads"]} == {"the-lost-heir"}
     assert {c.id for c in ctx["mined_chapters"]} == {"c1"}
+    assert ctx["thread_touch_pairs"] == set()
 
 
 async def test_m5_1_done_when_mechanical_chain(stack):

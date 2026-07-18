@@ -58,6 +58,10 @@ class ContinuityChecker(BaseAgent):
         chapters = await self._read.list_chapters()
         mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
         already_mined = already_mined_chapter_ids(mined_events)
+        thread_events = await self._events.events_since(
+            0, event_types=[EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED,
+                             EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
+        )
         return {
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
@@ -69,6 +73,7 @@ class ContinuityChecker(BaseAgent):
             "threads": await self._read.list_threads(),
             "secrets": await self._read.list_secrets(),
             "mined_chapters": [c for c in chapters if c.id not in already_mined],
+            "thread_touch_pairs": thread_touch_log(thread_events),
         }
 
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
@@ -83,7 +88,14 @@ class ContinuityChecker(BaseAgent):
         mined: dict[str, MinedFactsOutput] = {}
         for chapter in ctx.get("mined_chapters", []):
             mining_msg = self._mining_prompt(chapter, ctx)
-            mining_result = await self._mining_runner.ainvoke({"messages": [{"role": "user", "content": mining_msg}]})
+            try:
+                mining_result = await self._mining_runner.ainvoke({"messages": [{"role": "user", "content": mining_msg}]})
+            except Exception:
+                logger.warning(
+                    "%s: mining pass for chapter %r raised an exception; not stamped "
+                    "chapter.mined, will retry next poll", self.name, chapter.id, exc_info=True,
+                )
+                continue
             mining_out = mining_result.get("structured_response")
             if not isinstance(mining_out, MinedFactsOutput):
                 logger.warning(
@@ -118,15 +130,17 @@ class ContinuityChecker(BaseAgent):
         active_thread_ids = {t.id for t in ctx.get("threads", [])}
         matrix = ctx.get("knowledge_matrix", {})
         secret_refs = {(r.secret_id, r.character_id) for r in ctx.get("secret_references", [])}
-        thread_touches = thread_touch_log(await self._events.events_since(
-            0, event_types=[EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED,
-                             EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
-        ))
+        thread_touches = ctx.get("thread_touch_pairs", set())
         causal_pairs = {(e.cause_chapter_id, e.effect_chapter_id) for e in ctx.get("causal_edges", [])}
         valid_chapter_ids = set(ctx.get("chapter_order", []))
 
         for fact in mined_out.secret_facts:
             if not fact.known_id or fact.id not in active_secret_ids:
+                logger.warning(
+                    "%s: mined secret %s fact citing unrecognized/unknown secret id %r for "
+                    "character %r in chapter %r escalated to retcon",
+                    self.name, fact.action, fact.id, fact.character_id, chapter_id,
+                )
                 await self._file_mined_retcon(
                     f"mined secret {fact.action} fact citing unrecognized/unknown secret id "
                     f"'{fact.id}' for character '{fact.character_id}' in chapter '{chapter_id}'",
@@ -134,8 +148,16 @@ class ContinuityChecker(BaseAgent):
                 )
                 continue
             if fact.action == "uses" and (fact.id, fact.character_id) in secret_refs:
+                logger.info(
+                    "%s: skipped mined secret uses fact for %r/%r in chapter %r, already covered",
+                    self.name, fact.id, fact.character_id, chapter_id,
+                )
                 continue
             if fact.action == "learn" and fact.character_id in matrix.get(fact.id, {}).get("known_by", set()):
+                logger.info(
+                    "%s: skipped mined secret learn fact for %r/%r in chapter %r, already known",
+                    self.name, fact.id, fact.character_id, chapter_id,
+                )
                 continue
             await self._commit_knowledge_intents(
                 [KnowledgeIntent(action=fact.action, id=fact.id, character_id=fact.character_id, note=fact.note)],
@@ -144,6 +166,10 @@ class ContinuityChecker(BaseAgent):
             )
 
         for fact in mined_out.reveal_facts:
+            logger.info(
+                "%s: mined secret reveal fact for %r in chapter %r escalated to retcon, never auto-committed",
+                self.name, fact.id, chapter_id,
+            )
             await self._file_mined_retcon(
                 f"mined secret reveal fact citing id '{fact.id}' in chapter '{chapter_id}'",
                 [fact.id, chapter_id],
@@ -151,6 +177,10 @@ class ContinuityChecker(BaseAgent):
 
         for fact in mined_out.thread_facts:
             if not fact.known_id or fact.id not in active_thread_ids:
+                logger.warning(
+                    "%s: mined thread %s fact citing unrecognized/unknown thread id %r in "
+                    "chapter %r escalated to retcon", self.name, fact.action, fact.id, chapter_id,
+                )
                 await self._file_mined_retcon(
                     f"mined thread {fact.action} fact citing unrecognized/unknown thread id "
                     f"'{fact.id}' in chapter '{chapter_id}'",
@@ -158,6 +188,10 @@ class ContinuityChecker(BaseAgent):
                 )
                 continue
             if (fact.id, chapter_id) in thread_touches:
+                logger.info(
+                    "%s: skipped mined thread %s fact for %r in chapter %r, already touched",
+                    self.name, fact.action, fact.id, chapter_id,
+                )
                 continue
             intent_action = _MINED_THREAD_ACTION_TO_INTENT[fact.action]
             await self._commit_thread_intents(
