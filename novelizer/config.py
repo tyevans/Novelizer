@@ -1,4 +1,8 @@
+import importlib.resources
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_VOICE_PACK = str(importlib.resources.files("novelizer.voices").joinpath("default.toml"))
 
 
 class Settings(BaseSettings):
@@ -22,3 +26,7 @@ class Settings(BaseSettings):
     default_agent_interval: int = 120
     continuity_interval: int = 900
     projector_interval: float = 0.5
+
+    # Voice (M2.1): active voice pack + active prose profile within it.
+    voice_pack: str = _DEFAULT_VOICE_PACK
+    prose_profile: str = "plain"
