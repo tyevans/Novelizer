@@ -142,7 +142,8 @@ def cli(ctx, story_path: str | None):
         base = load_effective_settings()
         stories_root = Path(base.default_stories_dir).expanduser()
         story = _resolve_story(story_path, stories_root, base)
-        update_global_config(last_opened_story=str(story.root))
+        if global_config_path().exists():
+            update_global_config(last_opened_story=str(story.root))
         ctx.obj["settings"] = load_effective_settings(story_dir=story)
     except (TOMLFileError, StoryConfigError, FileExistsError) as e:
         raise click.ClickException(str(e)) from e

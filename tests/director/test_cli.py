@@ -2,6 +2,7 @@ import os
 import tempfile
 from click.testing import CliRunner
 from novelizer.director.cli import cli, format_voice_report
+from novelizer.settings.toml_io import load_toml_file, write_toml_file
 from novelizer.voices.models import ProseProfile, VoicePack
 from novelizer.store.models import Character
 
@@ -21,6 +22,40 @@ def test_config_error_shown_as_friendly_message_not_traceback(monkeypatch, tmp_p
 
 def _env(path, xdg_config_home):
     return {"NOVELIZER_DB_PATH": path, "XDG_CONFIG_HOME": str(xdg_config_home)}
+
+
+def test_headless_subcommand_does_not_create_global_config_when_absent(tmp_path):
+    """A fresh user's first command must not suppress the first-run wizard.
+
+    update_global_config() creates global_config.toml as a side effect. The
+    wizard only fires when that file is absent, so a headless subcommand run
+    before the file exists must not create it.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    try:
+        gpath = xdg / "novelizer" / "config.toml"
+        assert not gpath.exists()
+        r = CliRunner().invoke(cli, ["seed", "a storm is coming"], env=_env(path, xdg))
+        assert r.exit_code == 0, r.output
+        assert not gpath.exists()
+    finally:
+        os.unlink(path)
+
+
+def test_headless_subcommand_still_records_last_opened_when_config_exists(tmp_path):
+    """Existing regression guard: once the config exists, last_opened_story keeps updating."""
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    try:
+        gpath = xdg / "novelizer" / "config.toml"
+        gpath.parent.mkdir(parents=True)
+        write_toml_file(gpath, {})
+        r = CliRunner().invoke(cli, ["seed", "a storm is coming"], env=_env(path, xdg))
+        assert r.exit_code == 0, r.output
+        assert "last_opened_story" in load_toml_file(gpath)
+    finally:
+        os.unlink(path)
 
 
 def test_seed_then_chapters_roundtrip(tmp_path):

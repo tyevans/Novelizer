@@ -27,6 +27,9 @@ class SetupWizardApp(App[dict | None]):
         border: none;
         min-width: 10;
     }
+    #wizard Input:focus {
+        background: $boost;
+    }
     #wizard Static {
         height: 1;
     }

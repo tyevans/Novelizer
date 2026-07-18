@@ -1,5 +1,3 @@
-import os
-
 from novelizer.settings.discovery import StoryMeta, list_stories, order_stories, slugify
 from novelizer.settings.story_dir import create_story
 from novelizer.settings.toml_io import write_toml_file
