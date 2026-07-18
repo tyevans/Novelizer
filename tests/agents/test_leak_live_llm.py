@@ -88,15 +88,23 @@ async def test_planted_prose_leak_is_annotated_by_the_real_editor_and_reaches_th
     # The planted leak: a draft chapter whose prose has Kestrel flatly using
     # the secret she never learned. Draft status makes it the Editor's next
     # poll target.
+    # The prose must show USAGE, not revelation: an early draft had Kestrel
+    # announce the secret to a council, and the live Editor -- correctly --
+    # annotated that as a `reveal`, which makes the secret public and
+    # un-leakable. Here Kestrel privately ACTS on knowledge she was never
+    # given: quiet, unexplained, unannounced use.
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(
-        id="c1", title="The Pretender's Council",
+        id="c1", title="The Shuttered Window",
         character_ids=["mara", "kestrel"],
         prose=(
-            "Kestrel slammed the ledger shut. \"Stop pretending, all of you. "
-            "The heir lives -- I have known it for weeks, and I have known "
-            "where she sleeps.\" Mara went very still; she had told no one, "
-            "and yet here was Kestrel, speaking her secret aloud to the whole "
-            "council as if it were her own."
+            "Kestrel moved through the curfew-dark streets with uncanny "
+            "certainty, taking the turning toward the old cooper's yard "
+            "without once checking her map. No one had told her the heir "
+            "lived; no one had told her anything. Yet she stopped beneath "
+            "the one shuttered window where the heir slept, pressed two "
+            "fingers to the sill as if in greeting, and slipped away before "
+            "the watch came past. Across the city, Mara woke from a dream "
+            "of being followed, and could not say why."
         ),
     ))
     await proj.catch_up()
@@ -107,7 +115,10 @@ async def test_planted_prose_leak_is_annotated_by_the_real_editor_and_reaches_th
     await proj.catch_up()
 
     references = await read.list_secret_references(secret_id="the-heir-lives")
-    kestrel_refs = [r for r in references if r.character_id == "kestrel"]
+    # Casing-tolerant: some models emit the display name ("Kestrel") as the
+    # character_id. Either way the matrix has no learned cell for it, so the
+    # leak chain fires identically; the filter should not fail on casing.
+    kestrel_refs = [r for r in references if r.character_id.lower() == "kestrel"]
     assert kestrel_refs, (
         "STAGE 1 (Editor): the real Editor, reviewing prose in which Kestrel "
         "plainly asserts 'the heir lives', did NOT declare a `uses` knowledge "
@@ -123,7 +134,7 @@ async def test_planted_prose_leak_is_annotated_by_the_real_editor_and_reaches_th
 
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)
-                 and "the-heir-lives" in r.description and "kestrel" in r.description]
+                 and "the-heir-lives" in r.description and "kestrel" in r.description.lower()]
     assert leak_reqs, (
         "STAGE 2 (Checker): Kestrel's leak provably landed as a "
         "`secret.referenced` event, but no LEAK_SOURCE_TAG-prefixed retcon "
