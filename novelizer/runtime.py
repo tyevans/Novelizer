@@ -4,6 +4,7 @@ from novelizer.config import Settings
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
+from novelizer.canon.committer import Committer
 from novelizer.agents.author import Author, build_author_runner
 
 
@@ -13,6 +14,7 @@ class Runtime:
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
         self.read = ReadStore(settings.db_path)
+        self.committer = Committer(self.events)
         self._runner = runner
         self.author: Optional[Author] = None
 
@@ -22,7 +24,7 @@ class Runtime:
         await self.read.init()
         await self.projector.catch_up()
         runner = self._runner or build_author_runner(self.settings)
-        self.author = Author(runner, self.read, self.events, interval=self.settings.author_interval)
+        self.author = Author(runner, self.read, self.committer, interval=self.settings.author_interval)
 
     async def close(self) -> None:
         await self.read.close()
