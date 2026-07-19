@@ -54,3 +54,11 @@ def test_flag_membership_matches_the_deviation_invariant(tensions):
             assert flags.get(s.chapter_id) == "spike"
         else:
             assert s.chapter_id not in flags
+
+def test_detect_sag_spike_respects_explicit_delta():
+    scores = [
+        StructureScore(chapter_id="c1", tension=0.5, pacing_label="steady"),
+        StructureScore(chapter_id="c2", tension=0.65, pacing_label="steady"),
+    ]
+    assert detect_sag_spike(scores, delta=0.3) == {}
+    assert detect_sag_spike(scores, delta=0.05) == {"c1": "sag", "c2": "spike"}

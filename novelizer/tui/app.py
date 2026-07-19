@@ -203,7 +203,9 @@ class NovelizerApp(App):
     async def _thread_board_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#thread_board", ThreadBoard).refresh_from(self.runtime.read)
+                await self.query_one("#thread_board", ThreadBoard).refresh_from(
+                    self.runtime.read, threshold=self.runtime.settings.staleness_threshold_chapters
+                )
             except Exception as e:
                 self._report_worker_error("thread_board", e)
             await asyncio.sleep(1.0)
@@ -211,7 +213,9 @@ class NovelizerApp(App):
     async def _story_shape_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#story_shape", StoryShape).refresh_from(self.runtime.read)
+                await self.query_one("#story_shape", StoryShape).refresh_from(
+                    self.runtime.read, delta=self.runtime.settings.sag_spike_delta
+                )
             except Exception as e:
                 self._report_worker_error("story_shape", e)
             await asyncio.sleep(1.0)
