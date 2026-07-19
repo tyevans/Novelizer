@@ -1,5 +1,5 @@
 from __future__ import annotations
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from novelizer.agents.schemas import WorldEntriesDraft
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -11,7 +11,8 @@ SYSTEM_PROMPT = """You are the World Architect for an ever-expanding fictional w
 Generate new lore, geography, factions, history, and cosmology. You receive a summary of
 what already exists plus any director seeds; identify thin or unexplored areas and expand them.
 Return 1-3 new world entries, each with a title, 2-4 paragraphs of rich body lore, a domain
-(one of: physical, social, metaphysical, historical, other), and tags."""
+(one of: physical, social, metaphysical, historical, other), and tags.""" + PASS_PROMPT_INSTRUCTION + """
+Never set no_action when director seeds are present — a seed is always your work."""
 
 
 class WorldArchitect(BaseAgent):
@@ -46,6 +47,12 @@ class WorldArchitect(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, draft: WorldEntriesDraft | None, ctx: dict) -> None:
+        if draft is not None and draft.no_action and not ctx["signals"]:
+            # Honored only with no pending seeds: a pass must never silently
+            # consume (or strand) director input.
+            await self._remark(draft.feed_note or DEFAULT_PASS_REMARK)
+            self.note_pass()
+            return
         if draft is not None:
             for e in draft.entries:
                 entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags)
