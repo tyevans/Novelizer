@@ -504,3 +504,80 @@ async def test_runtime_start_completes_with_flags_on_and_no_fake_author(settings
         assert rt.author.pull_mode is True
     finally:
         await rt.close()
+
+
+async def test_runtime_chat_pull_mode_on_wires_tooled_chat_runner(settings, monkeypatch):
+    """CPT-M5: chat_tools_enabled=True must set ChatService.pull_mode True and
+    build the real chat runner with the runtime's canon backend/tools."""
+    settings = settings.model_copy(update={"chat_tools_enabled": True})
+    runners = _all_fake_runners()
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.chat.pull_mode is True
+
+        seen_kwargs: list[dict] = []
+
+        def _spy_build_chat_runner(settings, agent_name, callbacks=None, backend=None, tools=None):
+            seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
+            return _FakeAgentRunner()
+
+        monkeypatch.setattr("novelizer.runtime.build_chat_runner", _spy_build_chat_runner)
+
+        rt._chat_runner_for("author")
+
+        assert len(seen_kwargs) == 1
+        assert seen_kwargs[0]["backend"] is rt._canon_backend
+        assert seen_kwargs[0]["tools"] is rt._canon_tools
+        assert seen_kwargs[0]["callbacks"] is rt._llm_callbacks
+    finally:
+        await rt.close()
+
+
+async def test_runtime_chat_pull_mode_off_uses_bare_chat_runner(settings, monkeypatch):
+    """CPT-M5: chat_tools_enabled=False must set ChatService.pull_mode False
+    and build the chat runner via the bare legacy call (no backend/tools)."""
+    settings = settings.model_copy(update={"chat_tools_enabled": False})
+    runners = _all_fake_runners()
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.chat.pull_mode is False
+
+        seen_kwargs: list[dict] = []
+
+        def _spy_build_chat_runner(settings, agent_name, callbacks=None, backend=None, tools=None):
+            seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
+            return _FakeAgentRunner()
+
+        monkeypatch.setattr("novelizer.runtime.build_chat_runner", _spy_build_chat_runner)
+
+        rt._chat_runner_for("author")
+
+        assert len(seen_kwargs) == 1
+        assert seen_kwargs[0]["backend"] is None
+        assert seen_kwargs[0]["tools"] is None
+    finally:
+        await rt.close()
+
+
+async def test_chat_runner_for_falls_back_to_bare_before_start(settings, monkeypatch):
+    """_chat_runner_for can be invoked without start() having run (no
+    self._canon_backend/_canon_tools yet) -- must fall back to the bare
+    builder rather than raising AttributeError."""
+    settings = settings.model_copy(update={"chat_tools_enabled": True})
+    rt = Runtime(settings, runners=_all_fake_runners())
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_chat_runner(settings, agent_name, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _FakeAgentRunner()
+
+    monkeypatch.setattr("novelizer.runtime.build_chat_runner", _spy_build_chat_runner)
+
+    rt._chat_runner_for("author")
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is None
+    assert seen_kwargs[0]["tools"] is None

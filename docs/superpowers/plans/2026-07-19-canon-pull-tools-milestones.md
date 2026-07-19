@@ -21,6 +21,16 @@ milestone touches the write path.
 
 ## Status
 
+- **CPT-M5: delivered** (2026-07-19). Phase-c chat personas are wired: the
+  per-agent chat runner (`Runtime._chat_runner_for`) builds via
+  `build_chat_runner(..., backend=self._canon_backend, tools=self._canon_tools)`
+  when `chat_tools_enabled` is on (the default) and the runtime's toolkit is
+  present, else the bare legacy call — with a before-`start()` guard so tests
+  that invoke `_chat_runner_for` without a running toolkit still get the bare
+  builder instead of an `AttributeError`. `ChatService` is constructed with
+  `pull_mode=settings.chat_tools_enabled`. Injected `chat_<name>` fakes keep
+  winning unchanged.
+
 - **CPT-M4: delivered** (2026-07-19). Phase-a pull agents are live: Author
   and Continuity Checker run with `CanonBackend` + `search_canon` when
   `author_tools_enabled`/`checker_tools_enabled` are on (the default),

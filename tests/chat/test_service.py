@@ -126,6 +126,9 @@ async def test_gated_intent_becomes_proposal(db_path):
 @pytest.mark.asyncio
 async def test_story_context_default_mode_uses_recent_chapter_excerpts(db_path):
     rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    # Legacy mode under test: CPT-M5's runtime wiring flips pull_mode on by
+    # default (chat_tools_enabled=True), so pin it off explicitly here.
+    rt.chat.pull_mode = False
     try:
         await rt.events.append(
             EventType.CHAPTER_CREATED, "c1",
