@@ -56,16 +56,17 @@ class Scheduler:
         if not eligible:
             await self._emit_eligibility(now, scores={})
             return None
+        scored = [(await a.readiness(), a) for a in eligible]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        scores = {a.name: s for s, a in scored}
         if override:
             for a in eligible:
                 if a.name == override:
-                    await self._emit_eligibility(now, scores={})
+                    await self._emit_eligibility(now, scores=scores)
                     await self._run(a, now)
                     return a.name
-        scored = [(await a.readiness(), a) for a in eligible]
-        scored.sort(key=lambda x: x[0], reverse=True)
+        await self._emit_eligibility(now, scores=scores)
         best_score, best = scored[0]
-        await self._emit_eligibility(now, scores={a.name: s for s, a in scored})
         if best_score > 0.0:
             await self._run(best, now)
             return best.name

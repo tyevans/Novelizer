@@ -205,3 +205,17 @@ async def test_status_includes_next_ready_in_and_tolerates_stub_agents():
     sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
     st = sched.status()[0]
     assert st["next_ready_in"] == 0.0  # StubAgent has no seconds_until_ready -> 0.0
+
+
+async def test_override_tick_still_reports_readiness_zero_for_other_agents():
+    from novelizer.store.models import DirectorSignal, SignalKind
+    from novelizer.telemetry.events import TelemetryEventType
+    zero = StubAgent("zero", 0.0)
+    target = StubAgent("target", 0.5)
+    sig = DirectorSignal(kind=SignalKind.override, body="", target_agent="target")
+    rec = CapturingRecorder()
+    sched = Scheduler([zero, target], StubRead([sig]), clock=lambda: 1000.0, telemetry=rec)
+    assert await sched.tick() == "target"
+    elig = {p.agent_name: p for t, p in rec.emitted
+            if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
+    assert elig["zero"].reason == "readiness 0" and elig["zero"].eligible is False
