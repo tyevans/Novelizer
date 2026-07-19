@@ -16,50 +16,13 @@ from novelizer.tui.widgets.thread_board import ThreadBoard
 from novelizer.tui.widgets.story_shape import StoryShape
 from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
 from novelizer.tui.widgets.causeway import Causeway
-
-_LABELS = {
-    EventType.CHAPTER_CREATED: "Author",
-    EventType.WORLD_ENTRY_CREATED: "Architect",
-    EventType.CHARACTER_CREATED: "Keeper",
-    EventType.DIRECTOR_SIGNAL_CREATED: "Director",
-    EventType.RETCON_REQUEST_CREATED: "Retcon",
-    EventType.CHAPTER_STATUS_CHANGED: "Editor",
-}
-
-_AGENT_LABELS = {
-    "author": "Author",
-    "editor": "Editor",
-    "world_architect": "Architect",
-    "character_keeper": "Keeper",
-    "continuity_checker": "Continuity",
-    "retconner": "Retconner",
-}
-
-
-def _agent_label(agent_name: str) -> str:
-    return _AGENT_LABELS.get(agent_name, agent_name.replace("_", " ").title())
+from novelizer.tui.widgets.feed_model import render_event
 
 
 def format_event(ev: StoredEvent) -> str:
-    p = ev.payload
-    if ev.event_type == EventType.AGENT_REMARKED:
-        label = _agent_label(p.get("agent_name", "?"))
-        note = p.get("note", "")
-        return f'💬 {label}: "{note}"'
-    who = _LABELS.get(ev.event_type, "System")
-    if ev.event_type == EventType.CHAPTER_CREATED:
-        detail = f"new chapter: {p.get('title', '')}"
-    elif ev.event_type == EventType.WORLD_ENTRY_CREATED:
-        detail = f"lore: {p.get('title', '')}"
-    elif ev.event_type == EventType.DIRECTOR_SIGNAL_CREATED:
-        detail = f"signal: {p.get('body', '')}"
-    elif ev.event_type == EventType.RETCON_REQUEST_CREATED:
-        detail = f"retcon: {p.get('description', '')}"
-    elif ev.event_type == EventType.CHAPTER_STATUS_CHANGED:
-        detail = f"chapter reviewed: {p.get('title', '')}"
-    else:
-        detail = ev.event_type
-    return f"◆ {who} — {detail}"
+    """Plain-text rendering of a feed line — the string surface app.messages
+    and the existing tests assert on. Styling lives in render_event."""
+    return render_event(ev).plain
 
 
 def _status_line(state: AutonomyState) -> str:
