@@ -42,7 +42,8 @@ SPEAKER_WIDTH = 12
 
 def identity_for(agent_name: str) -> AgentIdentity:
     """Registry lookup with a dim, title-cased fallback for unknown names
-    (preserves the existing 'Mystery Agent' behavior of _agent_label)."""
+    (preserves the historical 'Mystery Agent' title-case fallback for any
+    agent_name not in the registry, including the empty string)."""
     ident = IDENTITIES.get(agent_name)
     if ident is not None:
         return ident

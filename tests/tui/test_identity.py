@@ -62,3 +62,10 @@ def test_every_glyph_is_single_cell_with_single_ascii_fallback():
     for ident in IDENTITIES.values():
         assert len(ident.glyph) == 1
         assert len(ident.fallback) == 1 and ident.fallback.isascii()
+
+
+def test_identity_for_empty_string_falls_back_to_system():
+    ident = identity_for("")
+    assert ident.label == "System"
+    assert ident.glyph == "·"
+    assert ident.style == "dim"

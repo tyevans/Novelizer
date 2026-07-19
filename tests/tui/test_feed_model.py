@@ -79,6 +79,21 @@ def test_md_inline_leaves_a_lone_star_pair_literal():
     assert md_inline("2 ** 3 is eight").plain == "2 ** 3 is eight"
 
 
+def test_render_remark_bold_pair_spanning_the_clamp_wrap_boundary_renders_bold():
+    # A bold pair that starts near the wrap column so textwrap.wrap breaks the
+    # line mid-phrase, inserting a newline between the ** markers before
+    # md_inline ever sees the text. Confirm it actually wraps mid-pair first.
+    note = ("x " * 34) + "**bold phrase that wraps**"
+    clamped, _ = clamp_text(note)
+    assert "\n" in clamped
+    lines = clamped.splitlines()
+    assert "**bold phrase that wraps**" not in lines[0]
+    assert "**" in lines[0] or "**" in lines[1]
+
+    text = render_event(_ev(EventType.AGENT_REMARKED, {"agent_name": "editor", "note": note}))
+    assert "**" not in text.plain
+
+
 from novelizer.canon.events import EventType, StoredEvent
 from novelizer.tui.widgets.feed_model import (
     ALARM_STYLE, chapter_rule, render_event, welcome_lines, worker_error_line,
@@ -190,3 +205,19 @@ def test_format_event_is_the_plain_rendering():
     from novelizer.tui.app import format_event
     ev = _ev(EventType.CHAPTER_CREATED, {"title": "One"})
     assert format_event(ev) == render_event(ev).plain
+
+
+def test_render_remark_with_none_agent_name_and_note_does_not_raise():
+    text = render_event(_ev(EventType.AGENT_REMARKED, {"agent_name": None, "note": None}))
+    assert isinstance(text.plain, str)
+
+
+def test_render_retcon_with_none_description_does_not_raise():
+    text = render_event(_ev(EventType.RETCON_REQUEST_CREATED, {"description": None}))
+    assert isinstance(text.plain, str)
+
+
+def test_render_structure_scored_with_non_numeric_tension_does_not_raise():
+    text = render_event(_ev(EventType.ANNOTATION_STRUCTURE_SCORED,
+                            {"tension": "not-a-number", "pacing_label": "brisk"}))
+    assert isinstance(text.plain, str)

@@ -28,6 +28,11 @@ SOURCE_BADGES: dict[str, str] = {
 }
 
 
+def _s(value: object) -> str:
+    """Coerce a possibly-None/non-str payload value to a safe string."""
+    return "" if value is None else str(value)
+
+
 def parse_source_badge(description: str) -> tuple[str | None, str]:
     """Split a retcon description into (badge, remaining text).
 
@@ -44,7 +49,7 @@ def parse_source_badge(description: str) -> tuple[str | None, str]:
 CLAMP_WIDTH = 76
 CLAMP_LINES = 2
 
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
 
 def clamp_text(s: str, width: int = CLAMP_WIDTH, max_lines: int = CLAMP_LINES) -> tuple[str, bool]:
@@ -129,21 +134,25 @@ def _detail_for(ev: StoredEvent) -> str:
     p = ev.payload
     t = ev.event_type
     if t == EventType.CHAPTER_CREATED:
-        return f'drafted "{p.get("title", "")}"'
+        return f'drafted "{_s(p.get("title"))}"'
     if t == EventType.CHAPTER_STATUS_CHANGED:
-        return f'reviewed "{p.get("title", "")}" — {p.get("editorial_status", "")}'
+        return f'reviewed "{_s(p.get("title"))}" — {_s(p.get("editorial_status"))}'
     if t == EventType.WORLD_ENTRY_CREATED:
-        return f"lore: {p.get('title', '')}"
+        return f"lore: {_s(p.get('title'))}"
     if t == EventType.CHARACTER_CREATED:
-        return f"new character: {p.get('name', '')}"
+        return f"new character: {_s(p.get('name'))}"
     if t == EventType.DIRECTOR_SIGNAL_CREATED:
-        return f"signal: {p.get('body', '')}"
+        return f"signal: {_s(p.get('body'))}"
     if t == EventType.ANNOTATION_STRUCTURE_SCORED:
-        return f"scored — tension {float(p.get('tension', 0.0)):.2f}, {p.get('pacing_label', '')}"
+        try:
+            tension = float(p.get("tension", 0.0))
+        except (TypeError, ValueError):
+            tension = 0.0
+        return f"scored — tension {tension:.2f}, {_s(p.get('pacing_label'))}"
     for key in ("title", "name", "note", "description", "body"):
         val = p.get(key)
         if val:
-            return str(val)
+            return _s(val)
     return t
 
 
@@ -151,8 +160,8 @@ def render_event(ev: StoredEvent) -> Text:
     """One feed line per event: canon (speaker + detail + dim domain chip),
     remark (dim italic 💬), or alarm (bold red ⚠ + source badge)."""
     if ev.event_type == EventType.AGENT_REMARKED:
-        note, truncated = clamp_text(ev.payload.get("note", ""))
-        line = _speaker(ev.payload.get("agent_name", "system"))
+        note, truncated = clamp_text(_s(ev.payload.get("note")))
+        line = _speaker(_s(ev.payload.get("agent_name")) or "system")
         line.append("💬 ", style="dim italic")
         body = md_inline(f'"{note}"')
         body.stylize("dim italic")
@@ -163,7 +172,7 @@ def render_event(ev: StoredEvent) -> Text:
 
     speaker = _EVENT_SPEAKERS.get(ev.event_type, "system")
     if ev.event_type in _ALARM_EVENTS:
-        badge, rest = parse_source_badge(ev.payload.get("description", ""))
+        badge, rest = parse_source_badge(_s(ev.payload.get("description")))
         detail, truncated = clamp_text(f"retcon filed: {rest}")
         line = _speaker(speaker)
         body = md_inline(f"⚠ {detail}")
