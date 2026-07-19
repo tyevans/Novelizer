@@ -57,3 +57,12 @@ def test_render_character_no_secrets_omits_knows_section():
     c = Character(name="Bo")
     out = render_character(c, {}, [])
     assert "## Knows" not in out
+
+
+def test_render_character_revealed_secret_excluded_from_knows():
+    c = Character(name="Mara")
+    secrets = [SecretRecord(id="s1", title="Out in the open", revealed=True)]
+    matrix = {"s1": {"revealed": True, "known_by": {c.id}}}
+    out = render_character(c, matrix, secrets)
+    assert "## Knows" not in out
+    assert "s1" not in out
