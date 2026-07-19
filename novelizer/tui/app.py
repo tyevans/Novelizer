@@ -66,15 +66,30 @@ class NovelizerApp(App):
         yield Header()
         with Horizontal(id="body"):
             with Vertical(id="left"):
-                yield RichLog(highlight=False, markup=False, id="feed")
-                yield Static("no pending proposals", id="proposals")
-                yield ThreadBoard("no threads yet", id="thread_board")
-                yield StoryShape("no chapters scored yet", id="story_shape")
-                yield WhoKnowsWhat("no secrets yet", id="who_knows_what")
-                yield Causeway("no causal edges yet", id="causeway")
+                feed = RichLog(highlight=False, markup=False, id="feed")
+                feed.border_title = "THE ROOM"
+                yield feed
+                proposals = Static("no pending proposals", id="proposals")
+                proposals.border_title = "PROPOSALS"
+                yield proposals
+                thread_board = ThreadBoard("no threads yet", id="thread_board")
+                thread_board.border_title = "THREADS"
+                yield thread_board
+                story_shape = StoryShape("no chapters scored yet", id="story_shape")
+                story_shape.border_title = "STORY SHAPE"
+                yield story_shape
+                who_knows_what = WhoKnowsWhat("no secrets yet", id="who_knows_what")
+                who_knows_what.border_title = "WHO KNOWS WHAT"
+                yield who_knows_what
+                causeway = Causeway("no causal edges yet", id="causeway")
+                causeway.border_title = "CAUSEWAY"
+                yield causeway
             with Vertical(id="right"):
-                yield StoryBrowser("Story", id="browser")
-                with VerticalScroll(id="detail_scroll"):
+                browser = StoryBrowser("Story", id="browser")
+                browser.border_title = "STORY"
+                yield browser
+                with VerticalScroll(id="detail_scroll") as detail_scroll:
+                    detail_scroll.border_title = "DETAIL"
                     yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: loading…", id="statusbar")
         # compact=True drops Input's default tall border, which would consume

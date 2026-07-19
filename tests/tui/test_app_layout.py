@@ -165,3 +165,31 @@ async def test_mission_control_shows_who_knows_what_and_causeway_panes():
             assert "c2" in causeway_text and "c1" in causeway_text and "PARADOX" in causeway_text
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_every_pane_has_its_border_title():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test():
+            expected = {
+                "#feed": "THE ROOM",
+                "#proposals": "PROPOSALS",
+                "#thread_board": "THREADS",
+                "#story_shape": "STORY SHAPE",
+                "#who_knows_what": "WHO KNOWS WHAT",
+                "#causeway": "CAUSEWAY",
+                "#browser": "STORY",
+                "#detail_scroll": "DETAIL",
+            }
+            for selector, title in expected.items():
+                assert str(app.query_one(selector).border_title) == title, selector
+    finally:
+        await rt.close(); os.unlink(path)

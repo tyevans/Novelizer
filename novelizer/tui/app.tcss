@@ -20,3 +20,5 @@
 #settings_table { height: 1fr; }
 #settings_msg { height: 1; }
 #edit_value { height: 3; }
+#feed, #browser { border-title-style: bold; }
+#proposals, #thread_board, #story_shape, #who_knows_what, #causeway, #detail_scroll { border-title-color: $text-muted; }
