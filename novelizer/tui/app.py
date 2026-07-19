@@ -83,6 +83,7 @@ class NovelizerApp(App):
     BINDINGS = [
         ("ctrl+k", "focus_command", "Command"),
         ("r", "toggle_room", "Room"),
+        ("v", "toggle_reading", "Reading"),
         ("q", "quit", "Quit"),
     ]
 
@@ -265,7 +266,16 @@ class NovelizerApp(App):
         self.set_focus(self.query_one("#command", Input))
 
     def action_toggle_room(self) -> None:
-        self.query_one("#body").toggle_class("room")
+        # Room and reading are mutually exclusive: room hides #right, reading
+        # hides #left — both at once would blank the whole body.
+        body = self.query_one("#body")
+        body.remove_class("reading")
+        body.toggle_class("room")
+
+    def action_toggle_reading(self) -> None:
+        body = self.query_one("#body")
+        body.remove_class("room")
+        body.toggle_class("reading")
 
     async def _run_command(self, line: str) -> None:
         cmd = line.strip().lstrip(":").split(maxsplit=1)
