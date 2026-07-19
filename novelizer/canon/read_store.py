@@ -3,7 +3,8 @@ from typing import Optional
 import aiosqlite
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
-    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, InspirationHandRecord,
+    InspirationUptakeRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -165,5 +166,39 @@ class ReadStore:
         cur = await self._conn.execute(query, params)
         return [
             SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
+            for r in await cur.fetchall()
+        ]
+
+    async def get_active_hand(self) -> Optional[InspirationHandRecord]:
+        cur = await self._conn.execute(
+            "SELECT data FROM inspiration_hands WHERE status='active' ORDER BY rowid DESC LIMIT 1"
+        )
+        row = await cur.fetchone()
+        return InspirationHandRecord.model_validate_json(row[0]) if row else None
+
+    async def get_hand(self, hand_id: str) -> Optional[InspirationHandRecord]:
+        cur = await self._conn.execute("SELECT data FROM inspiration_hands WHERE id=?", (hand_id,))
+        row = await cur.fetchone()
+        return InspirationHandRecord.model_validate_json(row[0]) if row else None
+
+    async def list_hands(self, status: Optional[str] = None) -> list[InspirationHandRecord]:
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM inspiration_hands WHERE status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM inspiration_hands ORDER BY rowid")
+        return [InspirationHandRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_uptake(self, hand_id: Optional[str] = None) -> list[InspirationUptakeRecord]:
+        query = "SELECT hand_id, kind, item, chapter_id FROM inspiration_uptake"
+        params: tuple = ()
+        if hand_id is not None:
+            query += " WHERE hand_id=?"
+            params = (hand_id,)
+        query += " ORDER BY rowid"
+        cur = await self._conn.execute(query, params)
+        return [
+            InspirationUptakeRecord(hand_id=r[0], kind=r[1], item=r[2], chapter_id=r[3])
             for r in await cur.fetchall()
         ]

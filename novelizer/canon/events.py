@@ -34,6 +34,10 @@ class EventType:
     CHAPTER_MINED = "chapter.mined"
     THEME_INTRODUCED = "theme.introduced"
     THEME_DEVELOPED = "theme.developed"
+    INSPIRATION_DRAWN = "inspiration.drawn"
+    INSPIRATION_HAND_CONSUMED = "inspiration.hand_consumed"
+    INSPIRATION_HAND_SUPERSEDED = "inspiration.hand_superseded"
+    INSPIRATION_UPTAKE_RECORDED = "inspiration.uptake_recorded"
 
 
 class StoredEvent(BaseModel):
@@ -257,3 +261,59 @@ class ChapterMined(BaseModel):
     """
 
     chapter_id: str
+
+
+def _default_authority() -> dict[str, str]:
+    return {"names": "binding", "professions": "inspiration",
+            "settings": "inspiration", "beats": "inspiration"}
+
+
+class InspirationDrawn(BaseModel):
+    """Payload for inspiration.drawn — the Muse deals a hand of PRNG draws
+    from bundled corpora. `seed` is sourced from OS entropy at deal time and
+    recorded here, so replaying the log reproduces the exact draw via
+    novelizer.muse.draws.deal_hand (fresh entropy forward, deterministic
+    replay back). `authority` carries the per-kind force level so raising
+    beat authority later is a settings change, not a schema change.
+    """
+
+    hand_id: str
+    seed: int
+    corpus_version: str
+    era: str
+    names: list[str] = Field(default_factory=list)
+    professions: list[str] = Field(default_factory=list)
+    settings: list[str] = Field(default_factory=list)
+    beats: list[str] = Field(default_factory=list)
+    target_agent: str = "author"
+    authority: dict[str, str] = Field(default_factory=_default_authority)
+
+
+class InspirationHandConsumed(BaseModel):
+    """Payload for inspiration.hand_consumed — the Author committed a chapter
+    while this hand was live. Consumed is absorbing (like terminal threads):
+    a later supersede for a consumed hand is a projection no-op.
+    """
+
+    hand_id: str
+    chapter_id: str = ""
+
+
+class InspirationHandSuperseded(BaseModel):
+    """Payload for inspiration.hand_superseded — a director reroll discarded
+    the hand before any chapter used it. The draw stays in the log as a fact.
+    """
+
+    hand_id: str
+
+
+class InspirationUptakeRecorded(BaseModel):
+    """Payload for inspiration.uptake_recorded — one dealt item visibly landed
+    in prose. `item` is the dealt item verbatim (never the prose's variant),
+    so the projection's (hand_id, kind, item) key dedupes re-mining runs.
+    """
+
+    hand_id: str
+    kind: str
+    item: str
+    chapter_id: str = ""
