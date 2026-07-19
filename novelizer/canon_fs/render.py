@@ -1,5 +1,5 @@
 from __future__ import annotations
-from novelizer.store.models import Chapter, WorldEntry, Character, SecretRecord
+from novelizer.store.models import Chapter, WorldEntry, Character, SecretRecord, ThemeRecord, ThreadRecord
 from novelizer.canon.secrets import knowledge_cell_state
 
 
@@ -55,3 +55,42 @@ def render_character(
         lines = "\n".join(f"- {s.id} ({s.title})" for s in known)
         body.append(f"\n## Knows\n\n{lines}\n")
     return fm + "".join(body)
+
+
+def render_thread(thread: ThreadRecord) -> str:
+    fm = _frontmatter([
+        ("id", thread.id),
+        ("kind", "thread"),
+        ("state", thread.state.value),
+        ("touch_count", str(thread.touch_count)),
+        ("last_chapter_id", thread.last_chapter_id),
+    ])
+    note = f"\n{thread.last_note}\n" if thread.last_note else ""
+    return f"{fm}\n# {thread.name}\n{note}"
+
+
+def render_secret(
+    secret: SecretRecord, matrix: dict[str, dict], characters: list[Character]
+) -> str:
+    known = sorted(
+        c.name for c in characters
+        if knowledge_cell_state(matrix, secret.id, c.id) == "known"
+    )
+    who = f"known to: {', '.join(known)}" if known else "known to no one"
+    fm = _frontmatter([
+        ("id", secret.id),
+        ("kind", "secret"),
+        ("revealed", str(secret.revealed)),
+    ])
+    return f"{fm}\n# {secret.title}\n\n{who}\n"
+
+
+def render_theme(theme: ThemeRecord) -> str:
+    fm = _frontmatter([
+        ("id", theme.id),
+        ("kind", "theme"),
+        ("touch_count", str(theme.touch_count)),
+        ("last_chapter_id", theme.last_chapter_id),
+    ])
+    note = f"\n{theme.last_note}\n" if theme.last_note else ""
+    return f"{fm}\n# {theme.title}\n{note}"

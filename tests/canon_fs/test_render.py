@@ -66,3 +66,39 @@ def test_render_character_revealed_secret_excluded_from_knows():
     out = render_character(c, matrix, secrets)
     assert "## Knows" not in out
     assert "s1" not in out
+
+
+from novelizer.canon_fs.render import render_secret, render_theme, render_thread
+from novelizer.store.models import ThemeRecord, ThreadRecord, ThreadState
+
+
+def test_render_thread_state_and_touches():
+    t = ThreadRecord(id="t1", name="Bell's Curse", state=ThreadState.touched,
+                     touch_count=3, last_note="rang again", last_chapter_id="ch9")
+    out = render_thread(t)
+    assert "id: t1" in out and "kind: thread" in out
+    assert "state: touched" in out and "touch_count: 3" in out
+    assert "last_chapter_id: ch9" in out and "rang again" in out
+
+
+def test_render_secret_who_knows():
+    mara = Character(name="Mara")
+    s = SecretRecord(id="s1", title="The scar's origin")
+    matrix = {"s1": {"revealed": False, "known_by": {mara.id}}}
+    out = render_secret(s, matrix, [mara])
+    assert "id: s1" in out and "kind: secret" in out
+    assert "revealed: False" in out
+    assert "known to: Mara" in out
+
+
+def test_render_secret_known_to_no_one():
+    s = SecretRecord(id="s2", title="Hidden door")
+    out = render_secret(s, {"s2": {"revealed": False, "known_by": set()}}, [])
+    assert "known to no one" in out
+
+
+def test_render_theme():
+    th = ThemeRecord(id="th1", title="Drowning as memory", touch_count=2, last_chapter_id="ch4")
+    out = render_theme(th)
+    assert "id: th1" in out and "kind: theme" in out
+    assert "touch_count: 2" in out and "last_chapter_id: ch4" in out
