@@ -159,11 +159,11 @@ Set the autonomy level for all agents or for a specific agent:
 ```bash
 # TUI command input (focus with `Ctrl+K`):
 autonomy full_auto
-autonomy gated_retcons Editor
+autonomy gated_retcons editor
 
 # CLI:
 novelizer autonomy full_auto
-novelizer autonomy gated_retcons Editor
+novelizer autonomy gated_retcons editor
 ```
 
 When an agent's output is gated, it queues as a proposal in the approval-queue pane
