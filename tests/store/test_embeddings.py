@@ -2,7 +2,7 @@ import os
 import pytest
 import tempfile
 from novelizer.store.embeddings import EmbeddingStore
-from novelizer.store.models import WorldEntry, ThemeRecord
+from novelizer.store.models import WorldEntry, ThemeRecord, ThreadRecord, SecretRecord
 from tests.conftest import FakeEmbeddingFunction
 
 
@@ -44,3 +44,17 @@ async def test_delete(store):
     await store.delete(entry.id, collection="world_entries")
     results = await store.query_world_entries("old place", n=5)
     assert len(results) == 0
+
+
+async def test_upsert_and_delete_thread_and_secret():
+    with tempfile.TemporaryDirectory() as tmp_path:
+        store = EmbeddingStore(path=tmp_path, embedding_function=FakeEmbeddingFunction())
+        await store.upsert_thread(ThreadRecord(id="t1", name="Bell's Curse", last_note="rang again"))
+        await store.upsert_secret(SecretRecord(id="s1", title="The Scar"))
+        assert store._threads.count() == 1
+        assert store._secrets.count() == 1
+        await store.delete("t1", "threads")
+        await store.delete("s1", "secrets")
+        assert store._threads.count() == 0
+        assert store._secrets.count() == 0
+        store.close()

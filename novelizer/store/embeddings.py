@@ -1,7 +1,7 @@
 from __future__ import annotations
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-from novelizer.store.models import WorldEntry, Character, Chapter, ThemeRecord
+from novelizer.store.models import WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord
 
 
 class EmbeddingStore:
@@ -24,6 +24,8 @@ class EmbeddingStore:
         self._chars = self._client.get_or_create_collection("characters", embedding_function=ef)
         self._chapters = self._client.get_or_create_collection("chapters", embedding_function=ef)
         self._themes = self._client.get_or_create_collection("themes", embedding_function=ef)
+        self._threads = self._client.get_or_create_collection("threads", embedding_function=ef)
+        self._secrets = self._client.get_or_create_collection("secrets", embedding_function=ef)
 
     def close(self) -> None:
         pass  # chromadb PersistentClient auto-flushes
@@ -46,12 +48,21 @@ class EmbeddingStore:
     async def upsert_theme(self, theme: ThemeRecord) -> None:
         self._themes.upsert(ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}])
 
+    async def upsert_thread(self, thread: ThreadRecord) -> None:
+        text = f"{thread.name}\n{thread.last_note}" if thread.last_note else thread.name
+        self._threads.upsert(ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}])
+
+    async def upsert_secret(self, secret: SecretRecord) -> None:
+        self._secrets.upsert(ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}])
+
     async def delete(self, entity_id: str, collection: str) -> None:
         col = {
             "world_entries": self._world,
             "characters": self._chars,
             "chapters": self._chapters,
             "themes": self._themes,
+            "threads": self._threads,
+            "secrets": self._secrets,
         }[collection]
         col.delete(ids=[entity_id])
 
