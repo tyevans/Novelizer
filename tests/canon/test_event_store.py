@@ -73,3 +73,61 @@ async def test_append_raw_stores_dict_payload_without_a_model():
     finally:
         await store.close()
         os.unlink(path)
+
+
+async def test_append_stores_and_returns_run_id(store):
+    ev = await store.append(EventType.CHAPTER_CREATED, "c1",
+                            Chapter(title="A", prose="a"), run_id="run-42")
+    assert ev.run_id == "run-42"
+    fetched = await store.events_since(0)
+    assert fetched[0].run_id == "run-42"
+
+
+async def test_append_without_run_id_defaults_to_none(store):
+    ev = await store.append(EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+    assert ev.run_id is None
+    assert (await store.events_since(0))[0].run_id is None
+
+
+async def test_events_for_run_returns_only_that_runs_events_in_order(store):
+    await store.append(EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"), run_id="r1")
+    await store.append(EventType.CHAPTER_CREATED, "c2", Chapter(title="B", prose="b"), run_id="r2")
+    await store.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(title="W", body="w"), run_id="r1")
+    got = await store.events_for_run("r1")
+    assert [e.aggregate_id for e in got] == ["c1", "w1"]
+
+
+async def test_init_migrates_a_pre_run_id_database():
+    import aiosqlite
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    # Build a DB with the pre-migration schema (no run_id column) and one row.
+    old_schema = """
+    CREATE TABLE IF NOT EXISTS events (
+        sequence     INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT NOT NULL UNIQUE,
+        event_type   TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        payload      TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+    );
+    """
+    conn = await aiosqlite.connect(path)
+    await conn.executescript(old_schema)
+    await conn.execute(
+        "INSERT INTO events (id, event_type, aggregate_id, payload, created_at) VALUES (?,?,?,?,?)",
+        ("old-1", EventType.CHAPTER_CREATED, "c1", '{"title": "Old", "prose": "p"}', "t"),
+    )
+    await conn.commit()
+    await conn.close()
+    s = EventStore(path)
+    await s.init()  # must ALTER TABLE, not crash
+    try:
+        old = await s.events_since(0)
+        assert old[0].run_id is None and old[0].payload["title"] == "Old"
+        newer = await s.append(EventType.CHAPTER_CREATED, "c2",
+                               Chapter(title="New", prose="p"), run_id="r9")
+        assert newer.run_id == "r9"
+    finally:
+        await s.close()
+        os.unlink(path)

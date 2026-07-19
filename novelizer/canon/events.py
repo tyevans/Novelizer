@@ -40,6 +40,7 @@ class StoredEvent(BaseModel):
     aggregate_id: str
     payload: dict[str, Any]
     created_at: str
+    run_id: str | None = None
 
 
 class AgentRemark(BaseModel):
