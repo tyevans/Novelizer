@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
-from novelizer.brain.context import known_secrets_note, stale_threads_note
+from novelizer.brain.context import causal_flags_note, known_secrets_note, stale_threads_note
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -29,9 +29,10 @@ def _summarize(
     cast = f"\n\nIn character: {personality}" if personality else ""
     brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
+    causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}{secrets}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
     )
 
 
@@ -70,6 +71,7 @@ class Author(BaseAgent):
             "secrets": await self._read.list_secrets(),
             "knowledge_matrix": await self._read.knowledge_matrix(),
             "themes": await self._read.list_themes(),
+            "causal_edges": await self._read.list_causal_edges(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:

@@ -57,6 +57,35 @@ bucket."
    points in this doc's closeout note (following M4's closeout-note precedent) rather than
    claiming success without having actually read the output.
 
+### M5.3 Task 7 verdict — causal graph in the Author's prompt
+
+**Verdict: adopted.** `Author.poll()`'s ctx now includes `causal_edges` (via
+`self._read.list_causal_edges()`, mirroring how `themes`/`threads`/`secrets` are already
+fetched), and `_summarize` calls the existing `causal_flags_note(ctx["causal_edges"],
+[c.id for c in ctx["chapters"]])` — the same function `editor.py` already uses — appended
+to the prompt exactly like the `stale_threads_note`/`known_secrets_note` blocks that
+precede it.
+
+Rationale, condensed from the plan's four criteria: **cost** is genuinely zero until
+causal edges exist (empty string, same "nothing to report" shape as every prior brain-note
+addition, pinned by a byte-identical-when-silent test); **signal quality** closes a real
+gap — the Author already declares new `causal_intents` (M4.2) but previously did so blind
+to existing edges, so it had no ordering context when deciding what edge to declare;
+**risk** is prompt-length growth on the highest-frequency agent in the room, but it is
+prose content, not response-format grammar, so it's lower-risk than the `ProviderStrategy`
+concerns M5.2 flagged; **precedent** — `known_secrets_note`/`stale_threads_note` are
+exactly this shape and are load-bearing for M5.1's reliability story, so this addition is
+consistent with, not a departure from, the established pattern. No live-quality evidence
+surfaced during implementation that contradicts the plan's recommended verdict, so
+"adopt, scoped small" stands as written.
+
+Implementation: `novelizer/agents/author.py` (`Author.poll()` ctx key, `_summarize` call,
+import from `novelizer.brain.context`), tests in `tests/agents/test_author.py`
+(`test_summarize_omits_causal_flags_block_when_no_edges`,
+`test_author_prompt_includes_causal_flags_when_edges_flagged`,
+`test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges`). Full suite green
+(678 passed, 6 deselected live_llm) after the change.
+
 ## Locked decisions
 
 1. **Prose mining commits through the identical `Committer`/event-type seam as

@@ -425,7 +425,7 @@ def test_summarize_uses_configured_prior_chapter_chars():
     ctx = {
         "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
-        "themes": [],
+        "themes": [], "causal_edges": [],
     }
     out = _summarize(ctx, prior_chapter_chars=50)
     assert "x" * 51 not in out
@@ -438,7 +438,7 @@ def test_summarize_default_prior_chapter_chars_is_200():
     ctx = {
         "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
-        "themes": [],
+        "themes": [], "causal_edges": [],
     }
     out = _summarize(ctx)
     assert "x" * 200 in out and "x" * 201 not in out
@@ -469,3 +469,47 @@ async def test_author_constructor_threads_staleness_threshold_through(stack):
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Stale threads" in sent and "the-locket" in sent
+
+
+from novelizer.canon.events import CausalEdgeDeclared
+
+
+def test_summarize_omits_causal_flags_block_when_no_edges():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [], "chapters": [], "signals": [],
+        "threads": [], "secrets": [], "knowledge_matrix": {}, "themes": [], "causal_edges": [],
+    }
+    out = _summarize(ctx)
+    assert "Causal flags:" not in out
+
+
+async def test_author_prompt_includes_causal_flags_when_edges_flagged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c1",
+                        CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c1"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Causal flags:" in sent
+    assert "c2" in sent and "c1" in sent and "ordering" in sent
+
+
+async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    expected = (
+        "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+    )
+    assert sent == expected
