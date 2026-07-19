@@ -57,6 +57,59 @@ async def test_run_once_consumes_targeted_signals(stack):
     assert await read.list_unconsumed_signals(target_agent="author") == []
 
 
+async def test_author_revise_signal_commits_chapter_revised_not_chapter_created(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(title="One", prose="fixed prose")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    chapters = await read.list_chapters()
+    assert len(chapters) == 1  # chapter count unchanged
+    revised = await read.get_chapter("c1")
+    assert revised.prose == "fixed prose"
+
+
+async def test_author_revise_signal_still_commits_thread_intents(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="One", prose="fixed prose",
+        thread_intents=[ThreadIntent(action="plant", id="", name="A new thread")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    threads = await read.list_threads()
+    assert len(threads) == 1
+    assert threads[0].name == "A new thread"
+
+
+async def test_author_revise_signal_is_consumed(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(title="One", prose="fixed prose")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    assert await read.list_unconsumed_signals(target_agent="author") == []
+
+
 async def test_work_returns_none_is_noop(stack):
     events, proj, read, committer = stack
     author = Author(FakeRunner(None), read, committer)

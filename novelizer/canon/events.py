@@ -10,6 +10,7 @@ class EventType:
     CHARACTER_UPDATED = "character.updated"
     CHAPTER_CREATED = "chapter.created"
     CHAPTER_STATUS_CHANGED = "chapter.status_changed"
+    CHAPTER_REVISED = "chapter.revised"
     DIRECTOR_SIGNAL_CREATED = "director_signal.created"
     DIRECTOR_SIGNAL_CONSUMED = "director_signal.consumed"
     RETCON_REQUEST_CREATED = "retcon_request.created"
@@ -230,6 +231,21 @@ class AnnotationStructureScored(BaseModel):
     chapter_id: str
     tension: float = Field(ge=0.0, le=1.0)
     pacing_label: str = ""
+
+
+class ChapterRevised(BaseModel):
+    """Payload for chapter.revised — an existing chapter's prose is rewritten
+    in place, cited by id (Locked decision 10). No minted identity and no
+    new title/character_ids: a revision changes prose, not the chapter's
+    identity or cast. The Projector folds this into the existing chapter
+    row and resets editorial_status back to draft, re-entering the
+    draft->review cycle instead of leaving it in whatever status it was
+    flagged at.
+    """
+
+    chapter_id: str
+    prose: str
+    editor_notes_ref: str = ""
 
 
 class ChapterMined(BaseModel):

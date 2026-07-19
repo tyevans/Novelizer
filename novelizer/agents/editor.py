@@ -96,7 +96,7 @@ class Editor(BaseAgent):
             updated = ch.model_copy(update={"editorial_status": EditorialStatus.reviewed, "editor_notes": verdict.notes})
             await self._committer.commit(self.name, EventType.CHAPTER_STATUS_CHANGED, updated.id, updated)
         else:
-            sig = DirectorSignal(kind=SignalKind.note, body=f"[Editor on '{ch.title}'] {verdict.notes}", target_agent="author")
+            sig = DirectorSignal(kind=SignalKind.revise, body=verdict.notes, target_agent="author", target_entity=ch.id)
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
         active_thread_ids = {
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES

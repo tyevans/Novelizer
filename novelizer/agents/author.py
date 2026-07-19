@@ -6,7 +6,8 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import Chapter
+from novelizer.canon.events import ChapterRevised
+from novelizer.store.models import Chapter, SignalKind
 
 AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write the next prose chapter.
 You receive world lore, active characters, previous chapter summaries, and director notes.
@@ -34,6 +35,20 @@ def _summarize(
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
         f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
     )
+
+
+def _revise_summarize(target: Chapter, revise_signal, casting_note: str = "", personality: str = "") -> str:
+    voice = BaseAgent._guarded_line("Write in this prose voice", casting_note)
+    cast = BaseAgent._guarded_line("In character", personality)
+    return (
+        f"You are revising an existing chapter. Rewrite it in full, addressing the "
+        f"feedback below.\n\nChapter title: {target.title}\n\nOriginal prose:\n{target.prose}\n\n"
+        f"Editor feedback: {revise_signal.body}{voice}{cast}\n\nWrite the revised chapter."
+    )
+
+
+def _find_revise_signal(signals):
+    return next((s for s in signals if s.kind == SignalKind.revise), None)
 
 
 class Author(BaseAgent):
@@ -75,30 +90,48 @@ class Author(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
-        content = _summarize(
-            ctx, self._casting_note, self.personality,
-            prior_chapter_chars=self._prior_chapter_summary_chars,
-            staleness_threshold_chapters=self._staleness_threshold_chapters,
-        )
+        revise_signal = _find_revise_signal(ctx["signals"])
+        target = None
+        if revise_signal is not None:
+            target = next((c for c in ctx["chapters"] if c.id == revise_signal.target_entity), None)
+        if revise_signal is not None and target is not None:
+            content = _revise_summarize(target, revise_signal, self._casting_note, self.personality)
+        else:
+            content = _summarize(
+                ctx, self._casting_note, self.personality,
+                prior_chapter_chars=self._prior_chapter_summary_chars,
+                staleness_threshold_chapters=self._staleness_threshold_chapters,
+            )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
 
     async def commit(self, draft: ChapterDraft | None, ctx: dict) -> None:
         if draft is None:
             return
-        chapter = Chapter(
-            title=draft.title, prose=draft.prose, character_ids=draft.character_ids, provenance=self.provenance
-        )
-        await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
+        revise_signal = _find_revise_signal(ctx["signals"])
+        target = None
+        if revise_signal is not None:
+            target = next((c for c in ctx["chapters"] if c.id == revise_signal.target_entity), None)
+        if revise_signal is not None and target is not None:
+            chapter_id = target.id
+            revised = ChapterRevised(chapter_id=chapter_id, prose=draft.prose, editor_notes_ref=revise_signal.id)
+            await self._committer.commit(self.name, EventType.CHAPTER_REVISED, chapter_id, revised)
+            valid_chapter_ids = {c.id for c in ctx["chapters"]}
+        else:
+            chapter = Chapter(
+                title=draft.title, prose=draft.prose, character_ids=draft.character_ids, provenance=self.provenance
+            )
+            await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
+            chapter_id = chapter.id
+            valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}
         active_thread_ids = {
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
-        await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter.id)
+        await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter_id)
         active_theme_ids = {t.id for t in ctx["themes"]}
-        await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter.id)
+        await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter_id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
-        await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter.id)
-        valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}
+        await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter_id)
         await self._commit_causal_intents(draft.causal_intents, valid_chapter_ids)
         await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])

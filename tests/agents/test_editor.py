@@ -60,6 +60,22 @@ async def test_revise_keeps_draft_and_notes_author(stack):
     assert any("middle sags" in s.body for s in notes)
 
 
+async def test_editor_revise_verdict_commits_revise_signal_with_target_entity(stack):
+    from novelizer.store.models import SignalKind
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    agent = Editor(FakeRunner(EditorVerdict(verdict="revise", notes="fix pacing")), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    signals = await read.list_unconsumed_signals(target_agent="author")
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.kind == SignalKind.revise
+    assert sig.target_agent == "author"
+    assert sig.target_entity == "c1"
+
+
 async def test_editor_prompt_includes_active_prose_profile(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
