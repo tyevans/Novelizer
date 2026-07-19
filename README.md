@@ -77,6 +77,15 @@ Command palette (focus with `Ctrl+K` or `:`, then type):
 
 Toggle Room drill-in view with `r`.
 
+Toggle the Engine Room view with `e` — a live machinery pane (which agent is running,
+the model's tokens streaming in, call vitals) over a durable trace of every run, LLM
+call, and scheduler decision (stored in `telemetry.db` beside the story; deleting it
+loses machinery history and nothing else). Inside the Engine Room, `p` toggles
+inspection of the exact prompt for the call in flight (off by default). The one-line
+activity strip above the command bar shows the same signal at a glance: `▶ author ·
+drafting · 3.4k tok · 52s` while a run is live, `idle · next: editor in 12s` between
+runs, and a red crash notice if an agent fails.
+
 ### Autonomy & Approvals
 
 The autonomy dial controls which agent actions require human approval before they update
