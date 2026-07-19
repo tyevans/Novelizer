@@ -6,7 +6,9 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
+from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
+from novelizer.tui.chat_screen import ChatScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import roster_summary
 from novelizer.tui.widgets.browser import StoryBrowser
@@ -46,6 +48,11 @@ def format_event(ev: StoredEvent) -> str:
         label = _agent_label(p.get("agent_name", "?"))
         note = p.get("note", "")
         return f'💬 {label}: "{note}"'
+    if ev.event_type == EventType.CHAT_AGENT_REPLIED:
+        label = _agent_label(p.get("agent_name", "?"))
+        text = p.get("text", "")
+        preview = text[:80] + ("…" if len(text) > 80 else "")
+        return f'💬 {label} replied: "{preview}"'
     who = _LABELS.get(ev.event_type, "System")
     if ev.event_type == EventType.CHAPTER_CREATED:
         detail = f"new chapter: {p.get('title', '')}"
@@ -65,7 +72,7 @@ def format_event(ev: StoredEvent) -> str:
 def _status_line(state: AutonomyState) -> str:
     base = (
         f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
-        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings"
+        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings · @agent <msg>"
     )
     if state.overrides:
         summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
@@ -156,10 +163,12 @@ class NovelizerApp(App):
             try:
                 events = await self.runtime.events.events_since(self._last_seq)
                 for ev in events:
+                    self._last_seq = ev.sequence
+                    if ev.event_type == EventType.CHAT_USER_MESSAGED:
+                        continue
                     rendered = format_event(ev)
                     log.write(rendered)
                     self.messages.append(rendered)
-                    self._last_seq = ev.sequence
             except Exception as e:
                 self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)
@@ -268,6 +277,18 @@ class NovelizerApp(App):
         self.query_one("#body").toggle_class("room")
 
     async def _run_command(self, line: str) -> None:
+        stripped = line.strip()
+        if stripped.startswith("@"):
+            token, _, text = stripped[1:].partition(" ")
+            agent = resolve_agent_name(token)
+            if agent is None:
+                known = ", ".join(f"@{n}" for n in CHAT_PERSONAS)
+                msg = f"» unknown agent @{token} — try: {known}"
+                self.query_one("#feed", RichLog).write(msg)
+                self.messages.append(msg)
+                return
+            await self._open_chat(agent, text.strip())
+            return
         cmd = line.strip().lstrip(":").split(maxsplit=1)
         if cmd and cmd[0].lower() == "settings":
             from novelizer.tui.settings_screen import SettingsScreen
@@ -279,6 +300,14 @@ class NovelizerApp(App):
         log = self.query_one("#feed", RichLog)
         log.write(f"» {result}")
         self.messages.append(f"» {result}")
+
+    async def _open_chat(self, agent_name: str, text: str) -> None:
+        if isinstance(self.screen, ChatScreen):
+            self.screen.set_current(agent_name)
+        else:
+            await self.push_screen(ChatScreen(self.runtime, agent_name))
+        if text:
+            await self.send_chat_message(agent_name, text)
 
     async def send_chat_message(self, agent_name: str, text: str) -> None:
         """Send a chat message and schedule reply generation (completed in the
@@ -296,7 +325,6 @@ class NovelizerApp(App):
             except Exception:
                 pass
             self.messages.append(line)
-            from novelizer.tui.chat_screen import ChatScreen
             if isinstance(self.screen, ChatScreen):
                 self.screen.add_error(agent_name, line)
 
