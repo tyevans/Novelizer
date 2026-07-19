@@ -20,6 +20,8 @@ class EventType:
     PROPOSAL_REJECTED = "proposal.rejected"
     AUTONOMY_CHANGED = "autonomy.changed"
     AGENT_REMARKED = "agent.remarked"
+    CHAT_USER_MESSAGED = "chat.user_messaged"
+    CHAT_AGENT_REPLIED = "chat.agent_replied"
     THREAD_PLANTED = "thread.planted"
     THREAD_TOUCHED = "thread.touched"
     THREAD_PAID_OFF = "thread.paid_off"
@@ -241,3 +243,29 @@ class ChapterMined(BaseModel):
     """
 
     chapter_id: str
+
+
+class ChatUserMessaged(BaseModel):
+    """Payload for chat.user_messaged — the Director speaks to one agent.
+
+    One conversation per agent: the event's aggregate_id is the agent name.
+    Never gated (chat is a first-person channel, not an agent canon write).
+    """
+
+    message_id: str
+    agent_name: str
+    text: str
+
+
+class ChatAgentReplied(BaseModel):
+    """Payload for chat.agent_replied — an agent's completed chat reply.
+
+    Committed only when generation completes; a failed generation commits
+    nothing (the log never records a failure as speech). `replying_to` cites
+    the chat.user_messaged message_id that prompted this reply.
+    """
+
+    message_id: str
+    agent_name: str
+    text: str
+    replying_to: str = ""

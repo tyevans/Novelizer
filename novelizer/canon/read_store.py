@@ -3,7 +3,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
-    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -167,3 +167,20 @@ class ReadStore:
             SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
             for r in await cur.fetchall()
         ]
+
+    async def list_chat_messages(self, agent_name: str, limit: int = 200) -> list[ChatMessageRecord]:
+        cur = await self._conn.execute(
+            "SELECT agent_name, role, text, message_id FROM chat_messages "
+            "WHERE agent_name=? ORDER BY rowid DESC LIMIT ?",
+            (agent_name, limit),
+        )
+        rows = list(await cur.fetchall())[::-1]
+        return [
+            ChatMessageRecord(agent_name=r[0], role=r[1], text=r[2], message_id=r[3]) for r in rows
+        ]
+
+    async def list_chat_conversations(self) -> list[str]:
+        cur = await self._conn.execute(
+            "SELECT DISTINCT agent_name FROM chat_messages ORDER BY agent_name"
+        )
+        return [r[0] for r in await cur.fetchall()]
