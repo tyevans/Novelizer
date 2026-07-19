@@ -86,7 +86,7 @@ async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_l
         async def ainvoke(self, inputs):
             raise AssertionError("not used")
 
-    def _spy_build_author_runner(settings):
+    def _spy_build_author_runner(settings, callbacks=None):
         seen.append(settings)
         return _FakeRunner()
 

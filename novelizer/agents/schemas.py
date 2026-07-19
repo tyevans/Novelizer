@@ -1,19 +1,45 @@
 from __future__ import annotations
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Must match novelizer.store.models.Domain — the draft stays dependency-free of
+# the store layer, so the pairing is enforced by test_schemas instead of an import.
+_DOMAINS = ("physical", "social", "metaphysical", "historical", "other")
 
 
 class WorldEntryDraft(BaseModel):
     title: str
     body: str
-    domain: str = "physical"
+    domain: Literal["physical", "social", "metaphysical", "historical", "other"] = "physical"
     tags: list[str] = Field(default_factory=list)
     supersedes_id: Optional[str] = None
+
+    @field_validator("domain", mode="before")
+    @classmethod
+    def _coerce_unknown_domain(cls, v: object) -> object:
+        # An out-of-enum answer (the live retconner got domain="character")
+        # must never raise out of structured-output parsing or commit().
+        return v if v in _DOMAINS else "other"
 
 
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
     feed_note: str = ""
+
+
+class NewCharacter(BaseModel):
+    """One new character the Character Keeper observed in recent chapters but
+    found missing from the cast. The system mints the id by slugging `name`
+    (see novelizer.canon.characters.slugify_character_name); a slug colliding
+    with an existing character is dropped at commit time, never re-created.
+    """
+
+    name: str
+    traits: str = ""
+    motivations: str = ""
+    backstory: str = ""
+    arc_status: str = ""
+    voice: str = ""
 
 
 class CharacterUpdate(BaseModel):
@@ -103,6 +129,7 @@ class RetconDraft(BaseModel):
 
 
 class KeeperOutput(BaseModel):
+    new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)

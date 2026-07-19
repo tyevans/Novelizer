@@ -1,0 +1,112 @@
+import uuid
+from types import SimpleNamespace
+from langchain_core.messages import HumanMessage, SystemMessage
+from novelizer.run_context import current_run_id, current_agent_name
+from novelizer.telemetry.callbacks import TelemetryCallbackHandler, render_messages
+from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+
+
+class FakeRecorder:
+    def __init__(self):
+        self.emitted = []
+        self.tokens = []
+        self._counts = {}
+
+    async def emit(self, event_type, aggregate_id, payload):
+        self.emitted.append((event_type, payload))
+
+    def publish_token(self, delta):
+        self.tokens.append(delta)
+
+    def next_call_index(self, run_id):
+        self._counts[run_id] = self._counts.get(run_id, 0) + 1
+        return self._counts[run_id]
+
+
+def _in_run(fn):
+    """Run coroutine fn under an ambient novelizer run context."""
+    import asyncio
+
+    async def wrapper():
+        rid = current_run_id.set("nrun-1")
+        name = current_agent_name.set("author")
+        try:
+            return await fn()
+        finally:
+            current_run_id.reset(rid)
+            current_agent_name.reset(name)
+    return asyncio.run(wrapper())
+
+
+def test_render_messages_includes_role_and_content():
+    text = render_messages([[SystemMessage(content="Be brief."), HumanMessage(content="Write.")]])
+    assert "[system]" in text and "Be brief." in text
+    assert "[human]" in text and "Write." in text
+
+
+def test_chat_model_start_emits_call_started_with_prompt_and_index():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start(
+            {"kwargs": {"model_name": "qwen"}},
+            [[HumanMessage(content="Write the next chapter.")]],
+            run_id=lc_run,
+        )
+    _in_run(go)
+    (etype, payload), = rec.emitted
+    assert etype == TelemetryEventType.LLM_CALL_STARTED
+    assert payload.run_id == "nrun-1" and payload.agent_name == "author"
+    assert payload.call_index == 1 and payload.model == "qwen"
+    assert "Write the next chapter." in payload.prompt
+
+
+def test_new_token_publishes_delta_and_llm_end_reports_usage_tokens():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start({"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run)
+        await h.on_llm_new_token("The ", run_id=lc_run)
+        await h.on_llm_new_token("sea", run_id=lc_run)
+        response = SimpleNamespace(generations=[[SimpleNamespace(
+            message=SimpleNamespace(usage_metadata={"output_tokens": 42}))]])
+        await h.on_llm_end(response, run_id=lc_run)
+    _in_run(go)
+    assert [d.text for d in rec.tokens] == ["The ", "sea"]
+    assert all(isinstance(d, TokenDelta) and d.run_id == "nrun-1" for d in rec.tokens)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.LLM_CALL_FINISHED
+    assert payload.output_tokens == 42
+    assert payload.duration_s >= 0.0
+
+
+def test_llm_end_without_usage_falls_back_to_streamed_chunk_count():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start({"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run)
+        await h.on_llm_new_token("a", run_id=lc_run)
+        await h.on_llm_new_token("b", run_id=lc_run)
+        await h.on_llm_end(SimpleNamespace(generations=[[]]), run_id=lc_run)
+    _in_run(go)
+    assert rec.emitted[-1][1].output_tokens == 2
+
+
+def test_llm_error_emits_call_failed():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start({"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run)
+        await h.on_llm_error(TimeoutError("proxy timeout"), run_id=lc_run)
+    _in_run(go)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.LLM_CALL_FAILED
+    assert payload.error_type == "TimeoutError" and "proxy timeout" in payload.error_message

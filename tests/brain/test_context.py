@@ -89,3 +89,20 @@ def test_causal_flags_note_lists_ordering_paradox():
     note = causal_flags_note(edges, ["c1", "c2"])
     assert note.startswith("\n\n")
     assert "c2" in note and "c1" in note and "ordering" in note
+
+
+def test_stale_threads_note_respects_explicit_threshold():
+    chs = _chapters(3)
+    thread = ThreadRecord(id="t1", name="T", state=ThreadState.planted, last_chapter_id="c0")
+    assert stale_threads_note([thread], chs, threshold=3) == ""
+    assert "t1" in stale_threads_note([thread], chs, threshold=1)
+
+
+def test_pacing_flags_note_respects_explicit_delta():
+    scores = [
+        StructureScore(chapter_id="c1", tension=0.5, pacing_label="steady"),
+        StructureScore(chapter_id="c2", tension=0.65, pacing_label="steady"),
+    ]
+    assert pacing_flags_note(scores, delta=0.3) == ""
+    note = pacing_flags_note(scores, delta=0.05)
+    assert "c1" in note and "c2" in note

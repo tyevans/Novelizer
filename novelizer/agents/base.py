@@ -1,5 +1,7 @@
 from __future__ import annotations
 import logging
+import time
+import uuid
 from typing import Protocol
 from pydantic import BaseModel, Field
 from novelizer.canon.events import (
@@ -11,8 +13,26 @@ from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
 from novelizer.canon.themes import slugify_theme_name
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.store.models import RetconRequest, RetconStatus
+from novelizer.run_context import current_run_id, current_agent_name
+from novelizer.telemetry.events import (
+    TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_id(raw: str) -> str:
+    """Canonicalize an agent- or LLM-supplied id for comparison/storage.
+
+    Canon ids are minted lowercase everywhere (every `slugify_*_name`
+    output), so a casing mismatch on a *citing* id (not a minting one) is a
+    correctness bug, not an unknown-id case. Applied only at
+    membership-check/payload-construction sites in the commit helpers below
+    -- never to minting logic.
+    """
+    return raw.strip().lower()
+
 
 _KNOWLEDGE_EVENT_BY_ACTION = {
     "learn": (EventType.SECRET_LEARNED, SecretLearned),
@@ -57,6 +77,12 @@ class BaseAgent:
         self.personality = personality
         self.paused = False
         self._last_run = 0.0
+        self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
+
+    @staticmethod
+    def _guarded_line(label: str, value: str) -> str:
+        """Return an optional "\n\n{label}: {value}" line, or "" if value is falsy."""
+        return f"\n\n{label}: {value}" if value else ""
 
     def pause(self) -> None:
         self.paused = True
@@ -70,11 +96,51 @@ class BaseAgent:
     def mark_ran(self, now: float) -> None:
         self._last_run = now
 
+    def seconds_until_ready(self, now: float) -> float:
+        return max(0.0, self.interval - (now - self._last_run))
+
     async def readiness(self) -> float:
         return 0.0
 
+    async def _run(self) -> None:
+        """Subclasses put their poll/work/commit body here (M-telemetry:
+        run_once became a final template that brackets _run with machinery
+        events and ambient run context)."""
+
     async def run_once(self) -> None:
-        pass
+        run_id = str(uuid.uuid4())
+        started = time.monotonic()
+        rid_token = current_run_id.set(run_id)
+        name_token = current_agent_name.set(self.name)
+        await self._emit_telemetry(
+            TelemetryEventType.AGENT_RUN_STARTED, run_id,
+            AgentRunStarted(run_id=run_id, agent_name=self.name),
+        )
+        try:
+            await self._run()
+        except Exception as e:
+            phase = "llm_call" if (self.telemetry and self.telemetry.in_llm_call(run_id)) else "agent"
+            await self._emit_telemetry(
+                TelemetryEventType.AGENT_RUN_FAILED, run_id,
+                AgentRunFailed(run_id=run_id, agent_name=self.name,
+                               error_type=type(e).__name__, error_message=str(e),
+                               phase=phase, duration_s=time.monotonic() - started),
+            )
+            raise
+        else:
+            await self._emit_telemetry(
+                TelemetryEventType.AGENT_RUN_FINISHED, run_id,
+                AgentRunFinished(run_id=run_id, agent_name=self.name,
+                                 duration_s=time.monotonic() - started),
+            )
+        finally:
+            current_run_id.reset(rid_token)
+            current_agent_name.reset(name_token)
+
+    async def _emit_telemetry(self, event_type: str, aggregate_id: str, payload) -> None:
+        if self.telemetry is None:
+            return
+        await self.telemetry.emit(event_type, aggregate_id, payload)
 
     async def _consume_signals(self, signals) -> None:
         for sig in signals:
@@ -136,7 +202,8 @@ class BaseAgent:
                     ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note, source=source),
                 )
                 continue
-            if intent.id not in active_thread_ids:
+            thread_id = _normalize_id(intent.id)
+            if thread_id not in active_thread_ids:
                 logger.warning(
                     "%s: dropped thread %s intent for unknown id %r", self.name, intent.action, intent.id
                 )
@@ -147,10 +214,10 @@ class BaseAgent:
                 "abandon": (ThreadAbandoned, EventType.THREAD_ABANDONED),
             }[intent.action]
             if payload_cls is ThreadAbandoned:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note)
             else:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source)
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source)
+            await self._committer.commit(self.name, event_type, thread_id, payload)
 
     async def _commit_theme_intents(
         self,
@@ -158,6 +225,7 @@ class BaseAgent:
         active_theme_ids: set[str],
         chapter_id: str = "",
         source: str = "declared",
+        embedding_store=None,
     ) -> None:
         """Turn agent-declared ThemeIntent entries into theme.* commits.
 
@@ -166,6 +234,18 @@ class BaseAgent:
         in `active_theme_ids` — an intent naming an unknown id is dropped
         with a logged warning and no event is committed. No-op on an empty
         list. Themes have no terminal state (M5.2 Locked decision 6).
+
+        `embedding_store` is an optional `novelizer.store.embeddings.
+        EmbeddingStore`; when provided, every successful `introduce` commit
+        is upserted into its themes collection and checked for a near-
+        duplicate via `novelizer.brain.theme_similarity.
+        suggest_near_duplicate_theme`. A near-duplicate never blocks or
+        merges the new theme.introduced commit -- it only files an Editor-
+        facing `retcon_request.created`, tagged `THEME_SIMILARITY_SOURCE_TAG`,
+        deduped against the open queue by description (same pattern as the
+        Editor's voice-drift flags). When `embedding_store` is None (the
+        default, and every existing call site that predates this), this is
+        a complete no-op -- behavior is unchanged.
         """
         for intent in intents:
             if intent.action == "introduce":
@@ -193,19 +273,50 @@ class BaseAgent:
                     "caller) the commit will be a projection no-op",
                     self.name, intent.title, theme_id,
                 )
+                if embedding_store is not None:
+                    from novelizer.brain.theme_similarity import (
+                        THEME_SIMILARITY_SOURCE_TAG, suggest_near_duplicate_theme,
+                    )
+                    from novelizer.store.models import ThemeRecord as _ThemeRecord
+                    new_theme = _ThemeRecord(id=theme_id, title=intent.title)
+                    duplicate_id = await suggest_near_duplicate_theme(embedding_store, new_theme)
                 await self._committer.commit(
                     self.name, EventType.THEME_INTRODUCED, theme_id,
                     ThemeIntroduced(id=theme_id, title=intent.title, chapter_id=chapter_id, note=intent.note, source=source),
                 )
+                if embedding_store is not None:
+                    await embedding_store.upsert_theme(new_theme)
+                    if duplicate_id is not None:
+                        existing = None
+                        get_theme = getattr(self._read, "get_theme", None)
+                        if get_theme is not None:
+                            existing = await get_theme(duplicate_id)
+                        existing_title = existing.title if existing is not None else duplicate_id
+                        description = (
+                            f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "
+                            f"may duplicate existing theme '{duplicate_id}' ('{existing_title}')"
+                        )
+                        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+                        seen_descriptions = {r.description for r in open_reqs}
+                        if description not in seen_descriptions:
+                            req = RetconRequest(
+                                description=description,
+                                conflicting_entry_ids=[theme_id, duplicate_id],
+                                proposed_resolution="",
+                            )
+                            await self._committer.commit(
+                                self.name, EventType.RETCON_REQUEST_CREATED, req.id, req
+                            )
                 continue
-            if intent.id not in active_theme_ids:
+            theme_id = _normalize_id(intent.id)
+            if theme_id not in active_theme_ids:
                 logger.warning(
                     "%s: dropped theme %s intent for unknown id %r", self.name, intent.action, intent.id
                 )
                 continue
             await self._committer.commit(
-                self.name, EventType.THEME_DEVELOPED, intent.id,
-                ThemeDeveloped(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source),
+                self.name, EventType.THEME_DEVELOPED, theme_id,
+                ThemeDeveloped(id=theme_id, chapter_id=chapter_id, note=intent.note, source=source),
             )
 
     async def _commit_knowledge_intents(
@@ -259,7 +370,8 @@ class BaseAgent:
                     SecretCreated(id=secret_id, title=intent.title, chapter_id=chapter_id, note=intent.note),
                 )
                 continue
-            if intent.id not in active_secret_ids:
+            secret_id = _normalize_id(intent.id)
+            if secret_id not in active_secret_ids:
                 logger.warning(
                     "%s: dropped knowledge %s intent for unknown secret id %r", self.name, intent.action, intent.id
                 )
@@ -271,13 +383,13 @@ class BaseAgent:
                 continue
             event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
             if intent.action == "reveal":
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note)
             else:
                 payload = payload_cls(
-                    id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note,
-                    source=source,
+                    id=secret_id, character_id=_normalize_id(intent.character_id), chapter_id=chapter_id,
+                    note=intent.note, source=source,
                 )
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+            await self._committer.commit(self.name, event_type, secret_id, payload)
 
     async def _commit_causal_intents(
         self, intents: list[CausalIntent], valid_chapter_ids: set[str], source: str = "declared"
@@ -298,22 +410,24 @@ class BaseAgent:
         No-op on an empty list.
         """
         for intent in intents:
-            if intent.cause_chapter_id == intent.effect_chapter_id:
+            cause_id = _normalize_id(intent.cause_chapter_id)
+            effect_id = _normalize_id(intent.effect_chapter_id)
+            if cause_id == effect_id:
                 logger.warning(
                     "%s: dropped self-edge causal intent for chapter %r", self.name, intent.cause_chapter_id
                 )
                 continue
-            if intent.cause_chapter_id not in valid_chapter_ids or intent.effect_chapter_id not in valid_chapter_ids:
+            if cause_id not in valid_chapter_ids or effect_id not in valid_chapter_ids:
                 logger.warning(
                     "%s: dropped causal intent citing unknown chapter id(s) %r -> %r",
                     self.name, intent.cause_chapter_id, intent.effect_chapter_id,
                 )
                 continue
             await self._committer.commit(
-                self.name, EventType.CAUSAL_EDGE_DECLARED, intent.effect_chapter_id,
+                self.name, EventType.CAUSAL_EDGE_DECLARED, effect_id,
                 CausalEdgeDeclared(
-                    cause_chapter_id=intent.cause_chapter_id,
-                    effect_chapter_id=intent.effect_chapter_id,
+                    cause_chapter_id=cause_id,
+                    effect_chapter_id=effect_id,
                     note=intent.note,
                     source=source,
                 ),

@@ -42,6 +42,10 @@ class EnvOverrides(BaseSettings):
     continuity_interval: int | None = None
     structure_analyst_interval: int | None = None
     projector_interval: float | None = None
+    prior_chapter_summary_chars: int | None = None
+    staleness_threshold_chapters: int | None = None
+    sag_spike_delta: float | None = None
+    max_concurrent_agents: int | None = None
 
 
 def build_effective(
