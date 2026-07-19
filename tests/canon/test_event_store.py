@@ -97,6 +97,15 @@ async def test_events_for_run_returns_only_that_runs_events_in_order(store):
     assert [e.aggregate_id for e in got] == ["c1", "w1"]
 
 
+async def test_events_tail_returns_last_n_in_ascending_order(store):
+    for i in range(5):
+        await store.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(title=str(i), prose="x"))
+    tail = await store.events_tail(2)
+    assert [e.sequence for e in tail] == [4, 5]
+    full = await store.events_tail(10)
+    assert [e.sequence for e in full] == [1, 2, 3, 4, 5]
+
+
 async def test_init_migrates_a_pre_run_id_database():
     import aiosqlite
     fd, path = tempfile.mkstemp(suffix=".db")

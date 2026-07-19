@@ -83,6 +83,18 @@ def test_seed_state_of_a_finished_run_is_not_stuck_running():
     assert s.status == "finished"
 
 
+def test_vitals_line_running_and_finished_forms():
+    running = LiveRunState(status="running", agent_name="author", model="qwen",
+                           call_index=2, tokens=1500, started_at=100.0)
+    line = vitals_line(running, now=110.0)
+    assert "author" in line and "qwen" in line and "call 2" in line and "1.5k tok" in line and "10s" in line
+
+    finished = LiveRunState(status="finished", agent_name="author", tokens=2500,
+                            started_at=100.0, ended_at=142.0)
+    fline = vitals_line(finished, now=999.0)
+    assert "author" in fline and "finished" in fline and "42s" in fline and "2.5k tok" in fline
+
+
 def test_trace_line_formats_key_event_shapes():
     fin = _ev(3, TelemetryEventType.AGENT_RUN_FINISHED,
               {"run_id": "r1", "agent_name": "author", "duration_s": 52.0})

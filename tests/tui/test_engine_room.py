@@ -1,5 +1,3 @@
-import os
-import tempfile
 import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
@@ -193,6 +191,26 @@ async def test_selecting_a_trace_row_shows_detail_with_prompt_and_produced(rt):
         text = str(detail.renderable)
         assert "Write it." in text                       # stored prompt round-trips (C-in-D)
         assert "produced: agent.remarked author" in text  # run_id join to domain log
+
+
+async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequence_minus_one(rt):
+    from textual.widgets import DataTable
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry_store.close()
+        rt.telemetry_store._conn = None  # guard EventStore.close() no-op at fixture teardown
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="editor"))
+        await pilot.pause(0.8)
+        table = app.query_one("#er_trace", DataTable)
+        rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
+        assert any("author" in r for r in rows)
+        assert any("editor" in r for r in rows)
+        assert not any("telemetry error" in m for m in app.messages)
 
 
 async def test_seeded_trace_survives_restart(rt):

@@ -26,6 +26,8 @@ Priority order established with the user:
 Depth of live view: stream the actual model output tokens as they arrive (core),
 with a vitals summary layered in (agent, task, model, token count, elapsed,
 attempt). Full prompt inspection is available but **off by default, toggleable**.
+Implementation note: with no retry machinery in the system, the "attempt" counter shipped as
+`call N` (per-run LLM call index) — "attempt" would have implied retries that don't exist.
 
 Placement: **thin + thick** — a one-line activity strip always visible in Mission
 Control, and a full Engine Room view one keypress away.

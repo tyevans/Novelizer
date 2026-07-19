@@ -110,7 +110,8 @@ def vitals_line(state: LiveRunState, now: float) -> str:
     if state.status == "failed":
         return f"{state.agent_name} · crashed · {state.error}"
     if state.status == "finished":
-        return f"{state.agent_name} · finished"
+        return (f"{state.agent_name} · finished · "
+                f"{int(state.ended_at - state.started_at)}s · {_fmt_tokens(state.tokens)}")
     return "idle — waiting for the scheduler"
 
 

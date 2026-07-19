@@ -84,6 +84,14 @@ class EventStore:
         )
         return [_row_to_event(r) for r in await cur.fetchall()]
 
+    async def events_tail(self, limit: int) -> list[StoredEvent]:
+        """Last `limit` events in ascending sequence order."""
+        cur = await self._conn.execute(
+            f"SELECT {_COLS} FROM events ORDER BY sequence DESC LIMIT ?", (limit,)
+        )
+        rows = await cur.fetchall()
+        return [_row_to_event(r) for r in reversed(rows)]
+
     async def events_since(self, sequence: int, event_types: Optional[list[str]] = None) -> list[StoredEvent]:
         if event_types:
             placeholders = ",".join("?" for _ in event_types)

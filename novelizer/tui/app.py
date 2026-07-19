@@ -299,14 +299,14 @@ class NovelizerApp(App):
         strip.render_state(self._live_state, time.monotonic(), self._next_hint())
 
     def _refresh_trace(self) -> None:
-        rows = [(str(ev.sequence), trace_line(ev)) for ev in reversed(self._trace_events)]
+        rows = [(ev.id, trace_line(ev)) for ev in reversed(self._trace_events)]
         self.query_one("#engine_room", EngineRoom).set_trace_rows(rows)
 
     async def _telemetry_bus_loop(self) -> None:
         # Seed from the durable log first so a restart never shows a blank view.
         try:
-            recent = await self.runtime.telemetry_store.events_since(0)
-            self._trace_events.extend(recent[-200:])
+            recent = await self.runtime.telemetry_store.events_tail(200)
+            self._trace_events.extend(recent)
             self._live_state = seed_state(recent[-50:], time.monotonic())
             self._refresh_strip()
             self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
@@ -330,6 +330,7 @@ class NovelizerApp(App):
         while True:
             try:
                 self._refresh_strip()
+                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)
@@ -376,8 +377,8 @@ class NovelizerApp(App):
     async def on_data_table_row_selected(self, event) -> None:
         if event.data_table.id != "er_trace":
             return
-        seq = int(event.row_key.value)
-        ev = next((e for e in self._trace_events if e.sequence == seq), None)
+        key = event.row_key.value
+        ev = next((e for e in self._trace_events if e.id == key), None)
         if ev is None:
             return
         run_id = ev.payload.get("run_id")
