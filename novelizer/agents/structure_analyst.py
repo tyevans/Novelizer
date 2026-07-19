@@ -70,14 +70,14 @@ class StructureAnalyst(BaseAgent):
             await self._committer.commit(self.name, EventType.ANNOTATION_STRUCTURE_SCORED, score.chapter_id, payload)
         await self._remark(out.feed_note)
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
         out = await self.work(ctx)
         await self.commit(out, ctx)
 
 
-def build_structure_analyst_runner(settings):
+def build_structure_analyst_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens)
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)

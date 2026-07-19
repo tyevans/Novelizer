@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType
 from novelizer.canon.autonomy import Proposal
+from novelizer.run_context import current_run_id
 
 
 class Committer:
@@ -17,7 +18,7 @@ class Committer:
         self._events = event_store
 
     async def commit(self, agent_name: str, event_type: str, aggregate_id: str, payload: BaseModel) -> None:
-        await self._events.append(event_type, aggregate_id, payload)
+        await self._events.append(event_type, aggregate_id, payload, run_id=current_run_id.get())
 
 
 class GatingCommitter:
@@ -39,6 +40,7 @@ class GatingCommitter:
                 target_aggregate_id=aggregate_id,
                 payload=payload.model_dump(mode="json"),
             )
-            await self._events.append(EventType.PROPOSAL_CREATED, proposal.id, proposal)
+            await self._events.append(EventType.PROPOSAL_CREATED, proposal.id, proposal,
+                                      run_id=current_run_id.get())
             return
-        await self._events.append(event_type, aggregate_id, payload)
+        await self._events.append(event_type, aggregate_id, payload, run_id=current_run_id.get())

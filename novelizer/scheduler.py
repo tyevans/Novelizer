@@ -4,6 +4,9 @@ import logging
 import time
 from typing import Sequence
 from novelizer.store.models import SignalKind
+from novelizer.telemetry.events import (
+    TelemetryEventType, SchedulerPicked, SchedulerEligibilityChanged,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +19,19 @@ class Scheduler:
         tick_sleep: float = 1.0,
         clock=time.monotonic,
         max_concurrent_agents: int = 2,
+        telemetry=None,
     ) -> None:
         self._agents = list(agents)
         self._read = read_store
         self._tick_sleep = tick_sleep
         self._clock = clock
+        self._telemetry = telemetry
         self._running = False
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
         self._last_error: dict[str, str] = {}
+        self._eligibility: dict[str, tuple[bool, str]] = {}
+        self._last_completed: str | None = None
         # Incremented on every completed run (success or failure). Lets
         # callers (e.g. the TUI's error reporter) distinguish "still the same
         # stale error" from "the agent ran again and failed again" without
@@ -43,13 +50,16 @@ class Scheduler:
                 a.resume()
 
     def status(self) -> list:
+        now = self._clock()
         return [
             {
                 "name": a.name,
                 "paused": a.paused,
                 "running": a.name in self._in_flight,
                 "last_error": self._last_error.get(a.name),
+                "last_completed": a.name == self._last_completed,
                 "run_count": self._run_count.get(a.name, 0),
+                "next_ready_in": a.seconds_until_ready(now) if hasattr(a, "seconds_until_ready") else 0.0,
             }
             for a in self._agents
         ]
@@ -62,6 +72,9 @@ class Scheduler:
         now = self._clock()
         free_slots = self._max_concurrent - len(self._in_flight)
         if free_slots <= 0:
+            # Nothing can be dispatched, but paused/running/interval states
+            # are still cheap to evaluate — keep the eligibility trace honest.
+            await self._emit_eligibility(now, scores={})
             return []
         signals = await self._read.list_unconsumed_signals()
         override = next((s.target_agent for s in signals
@@ -71,6 +84,7 @@ class Scheduler:
             if not a.paused and a.name not in self._in_flight and a.ready_for_interval(now)
         ]
         if not eligible:
+            await self._emit_eligibility(now, scores={})
             return []
 
         to_dispatch: list = []
@@ -81,17 +95,25 @@ class Scheduler:
                     eligible = [x for x in eligible if x.name != override]
                     break
 
+        scores: dict[str, float] = {}
         if len(to_dispatch) < free_slots:
             scored = [(await a.readiness(), a) for a in eligible]
             scored.sort(key=lambda x: x[0], reverse=True)
+            scores = {a.name: s for s, a in scored}
             for score, a in scored:
                 if len(to_dispatch) >= free_slots:
                     break
                 if score > 0.0:
                     to_dispatch.append(a)
+        await self._emit_eligibility(now, scores)
 
         dispatched: list[str] = []
         for a in to_dispatch:
+            if self._telemetry is not None:
+                await self._telemetry.emit(
+                    TelemetryEventType.SCHEDULER_PICKED, a.name,
+                    SchedulerPicked(agent_name=a.name),
+                )
             task = asyncio.create_task(self._run(a, now))
             # A dispatched task's failure is recorded via _last_error inside
             # _run (see below) and re-raised within the task so drain_in_flight
@@ -103,6 +125,32 @@ class Scheduler:
             self._in_flight[a.name] = task
             dispatched.append(a.name)
         return dispatched
+
+    async def _emit_eligibility(self, now: float, scores: dict[str, float]) -> None:
+        """One eligibility_changed per agent per state *change* — quiet log,
+        not a per-tick heartbeat. Reasons mirror the predicates tick just
+        evaluated; an agent whose readiness was not scored this tick (pool
+        full, or the override consumed the free slots) reports the state its
+        cheap predicates imply."""
+        if self._telemetry is None:
+            return
+        for a in self._agents:
+            if a.paused:
+                state = (False, "paused")
+            elif a.name in self._in_flight:
+                state = (False, "running")
+            elif not a.ready_for_interval(now):
+                state = (False, "interval not elapsed")
+            elif a.name in scores and scores[a.name] <= 0.0:
+                state = (False, "readiness 0")
+            else:
+                state = (True, "ready")
+            if self._eligibility.get(a.name) != state:
+                self._eligibility[a.name] = state
+                await self._telemetry.emit(
+                    TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED, a.name,
+                    SchedulerEligibilityChanged(agent_name=a.name, eligible=state[0], reason=state[1]),
+                )
 
     async def drain_in_flight(self) -> None:
         """Await every currently in-flight dispatched task to completion.
@@ -132,6 +180,11 @@ class Scheduler:
             agent.mark_ran(now)
             self._in_flight.pop(agent.name, None)
             self._run_count[agent.name] = self._run_count.get(agent.name, 0) + 1
+            # Sticky display marker, distinct from the honest in-flight
+            # "running" flag: fast agents complete between status polls, so
+            # the TUI needs "who acted most recently" to have anything to
+            # show when the pool is momentarily empty.
+            self._last_completed = agent.name
 
     async def run(self) -> None:
         self._running = True

@@ -53,14 +53,14 @@ class WorldArchitect(BaseAgent):
             await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
         draft = await self.work(ctx)
         await self.commit(draft, ctx)
 
 
-def build_world_architect_runner(settings):
+def build_world_architect_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens)
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=WorldEntriesDraft)

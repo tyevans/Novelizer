@@ -210,6 +210,15 @@ class DirectorSignal(BaseModel):
     consumed: bool = False
 
 
+class ChatMessageRecord(BaseModel):
+    """One projected chat message. role is 'user' (the Director) or 'agent'."""
+
+    agent_name: str
+    role: str
+    text: str
+    message_id: str
+
+
 class HandStatus(StrEnum):
     active = "active"
     consumed = "consumed"

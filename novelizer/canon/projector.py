@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS causal_edges (
 CREATE TABLE IF NOT EXISTS structure_scores (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id TEXT PRIMARY KEY, agent_name TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS inspiration_hands (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
 );
@@ -110,7 +113,8 @@ class Projector:
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
-            "causal_edges", "themes", "inspiration_hands", "inspiration_uptake",
+            "causal_edges", "themes", "chat_messages", "inspiration_hands",
+            "inspiration_uptake",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -335,6 +339,12 @@ class Projector:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
                 (p["chapter_id"], data),
+            )
+        elif t == EventType.CHAT_USER_MESSAGED or t == EventType.CHAT_AGENT_REPLIED:
+            role = "user" if t == EventType.CHAT_USER_MESSAGED else "agent"
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO chat_messages (message_id, agent_name, role, text) VALUES (?,?,?,?)",
+                (p["message_id"], p["agent_name"], role, p.get("text", "")),
             )
         elif t == EventType.INSPIRATION_DRAWN:
             cur = await self._conn.execute("SELECT id FROM inspiration_hands WHERE id=?", (p["hand_id"],))

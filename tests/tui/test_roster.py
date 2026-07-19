@@ -42,3 +42,20 @@ def test_running_paused_and_error_compose():
     assert "● author" in summary
     assert "⏸ editor" in summary
     assert "⚠ continuity_checker: boom" in summary
+
+
+def test_roster_summary_falls_back_to_last_completed_when_pool_idle():
+    status = [
+        {"name": "author", "paused": False, "running": False, "last_completed": True},
+        {"name": "editor", "paused": False, "running": False, "last_completed": False},
+    ]
+    assert "◦ author" in roster_summary(status)
+
+
+def test_roster_summary_prefers_in_flight_over_last_completed():
+    status = [
+        {"name": "author", "paused": False, "running": False, "last_completed": True},
+        {"name": "editor", "paused": False, "running": True, "last_completed": False},
+    ]
+    out = roster_summary(status)
+    assert "● editor" in out and "◦" not in out

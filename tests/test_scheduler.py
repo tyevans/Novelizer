@@ -334,3 +334,116 @@ async def test_pool_size_1_reproduces_todays_serial_ordering_exactly():
     spans = {name: (start, end) for name, start, end in log}
     assert spans["a"][1] <= spans["b"][0]
     assert spans["b"][1] <= spans["c"][0]
+
+class CapturingRecorder:
+    def __init__(self):
+        self.emitted = []
+
+    async def emit(self, event_type, aggregate_id, payload):
+        self.emitted.append((event_type, payload))
+
+    def in_llm_call(self, run_id):
+        return False
+
+
+async def test_tick_emits_scheduler_picked_for_the_dispatched_agent():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
+    rec = CapturingRecorder()
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0,
+                      max_concurrent_agents=1, telemetry=rec)
+    assert await sched.tick() == ["b"]
+    await sched.drain_in_flight()
+    picked = [p for t, p in rec.emitted if t == TelemetryEventType.SCHEDULER_PICKED]
+    assert [p.agent_name for p in picked] == ["b"]
+
+
+async def test_eligibility_changes_emit_once_not_per_tick():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.9, interval=10)
+    rec = CapturingRecorder()
+    now = [1000.0]
+    sched = Scheduler([a], StubRead(), clock=lambda: now[0], telemetry=rec)
+    await sched.tick()             # a ready -> dispatched
+    await sched.drain_in_flight()  # run completes -> mark_ran consumes interval
+    now[0] = 1001.0
+    await sched.tick()   # a ineligible: "interval not elapsed"
+    now[0] = 1002.0
+    await sched.tick()   # still ineligible: same state -> NO new event
+    elig = [p for t, p in rec.emitted if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED]
+    assert [(p.agent_name, p.eligible, p.reason) for p in elig] == [
+        ("a", True, "ready"),
+        ("a", False, "interval not elapsed"),
+    ]
+
+
+async def test_paused_and_readiness_zero_reasons_are_reported():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.0)   # eligible by interval but readiness 0
+    b = StubAgent("b", 0.5)
+    b.pause()
+    rec = CapturingRecorder()
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    assert await sched.tick() == []  # nothing dispatched: a scores 0, b paused
+    elig = {p.agent_name: p for t, p in rec.emitted
+            if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
+    assert elig["a"].reason == "readiness 0" and elig["a"].eligible is False
+    assert elig["b"].reason == "paused" and elig["b"].eligible is False
+
+
+async def test_in_flight_agent_reports_running_reason():
+    from novelizer.telemetry.events import TelemetryEventType
+    log = []
+    slow = SlowAgent("slow", 0.9, delay=0.05, log=log)
+    rec = CapturingRecorder()
+    sched = Scheduler([slow], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    await sched.tick()   # dispatched, now in flight
+    await sched.tick()   # while running: eligibility flips to (False, "running")
+    await sched.drain_in_flight()
+    elig = [(p.eligible, p.reason) for t, p in rec.emitted
+            if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED and p.agent_name == "slow"]
+    assert elig[0] == (True, "ready")
+    assert (False, "running") in elig
+
+
+async def test_scheduler_without_telemetry_behaves_exactly_as_before():
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    assert await sched.tick() == ["b"]
+    await sched.drain_in_flight()
+    assert b.ran == 1 and a.ran == 0
+
+
+async def test_status_includes_next_ready_in_and_tolerates_stub_agents():
+    a = StubAgent("a", 0.9, interval=10)
+    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
+    st = sched.status()[0]
+    assert st["next_ready_in"] == 0.0  # StubAgent has no seconds_until_ready -> 0.0
+
+
+async def test_override_tick_still_reports_readiness_zero_for_other_agents():
+    from novelizer.store.models import DirectorSignal, SignalKind
+    from novelizer.telemetry.events import TelemetryEventType
+    zero = StubAgent("zero", 0.0)
+    target = StubAgent("target", 0.5)
+    sig = DirectorSignal(kind=SignalKind.override, body="", target_agent="target")
+    rec = CapturingRecorder()
+    sched = Scheduler([zero, target], StubRead([sig]), clock=lambda: 1000.0, telemetry=rec)
+    assert await sched.tick() == ["target"]
+    await sched.drain_in_flight()
+    elig = {p.agent_name: p for t, p in rec.emitted
+            if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
+    assert elig["zero"].reason == "readiness 0" and elig["zero"].eligible is False
+
+async def test_status_marks_last_completed_agent_sticky():
+    """Post-merge reconciliation: `running` is honest in-flight state (M5.3),
+    but the TUI's roster-in-statusbar (external 6790b2a) needs a sticky
+    who-acted-most-recently marker for fast agents that complete between
+    polls -- exposed as `last_completed`, distinct from `running`."""
+    agents = [StubAgent("a1", 0.9), StubAgent("a2", 0.5)]
+    sched = Scheduler(agents, StubRead(), max_concurrent_agents=1)
+    assert all(not s["last_completed"] for s in sched.status())
+    await sched.tick()
+    await _drain(sched)
+    completed = [s["name"] for s in sched.status() if s["last_completed"]]
+    assert completed == ["a1"]
