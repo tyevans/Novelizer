@@ -11,6 +11,7 @@ from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
 from novelizer.canon.themes import slugify_theme_name
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.store.models import RetconRequest, RetconStatus
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,7 @@ class BaseAgent:
         active_theme_ids: set[str],
         chapter_id: str = "",
         source: str = "declared",
+        embedding_store=None,
     ) -> None:
         """Turn agent-declared ThemeIntent entries into theme.* commits.
 
@@ -166,6 +168,18 @@ class BaseAgent:
         in `active_theme_ids` — an intent naming an unknown id is dropped
         with a logged warning and no event is committed. No-op on an empty
         list. Themes have no terminal state (M5.2 Locked decision 6).
+
+        `embedding_store` is an optional `novelizer.store.embeddings.
+        EmbeddingStore`; when provided, every successful `introduce` commit
+        is upserted into its themes collection and checked for a near-
+        duplicate via `novelizer.brain.theme_similarity.
+        suggest_near_duplicate_theme`. A near-duplicate never blocks or
+        merges the new theme.introduced commit -- it only files an Editor-
+        facing `retcon_request.created`, tagged `THEME_SIMILARITY_SOURCE_TAG`,
+        deduped against the open queue by description (same pattern as the
+        Editor's voice-drift flags). When `embedding_store` is None (the
+        default, and every existing call site that predates this), this is
+        a complete no-op -- behavior is unchanged.
         """
         for intent in intents:
             if intent.action == "introduce":
@@ -193,10 +207,40 @@ class BaseAgent:
                     "caller) the commit will be a projection no-op",
                     self.name, intent.title, theme_id,
                 )
+                if embedding_store is not None:
+                    from novelizer.brain.theme_similarity import (
+                        THEME_SIMILARITY_SOURCE_TAG, suggest_near_duplicate_theme,
+                    )
+                    from novelizer.store.models import ThemeRecord as _ThemeRecord
+                    new_theme = _ThemeRecord(id=theme_id, title=intent.title)
+                    duplicate_id = await suggest_near_duplicate_theme(embedding_store, new_theme)
                 await self._committer.commit(
                     self.name, EventType.THEME_INTRODUCED, theme_id,
                     ThemeIntroduced(id=theme_id, title=intent.title, chapter_id=chapter_id, note=intent.note, source=source),
                 )
+                if embedding_store is not None:
+                    await embedding_store.upsert_theme(new_theme)
+                    if duplicate_id is not None:
+                        existing = None
+                        get_theme = getattr(self._read, "get_theme", None)
+                        if get_theme is not None:
+                            existing = await get_theme(duplicate_id)
+                        existing_title = existing.title if existing is not None else duplicate_id
+                        description = (
+                            f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "
+                            f"may duplicate existing theme '{duplicate_id}' ('{existing_title}')"
+                        )
+                        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+                        seen_descriptions = {r.description for r in open_reqs}
+                        if description not in seen_descriptions:
+                            req = RetconRequest(
+                                description=description,
+                                conflicting_entry_ids=[theme_id, duplicate_id],
+                                proposed_resolution="",
+                            )
+                            await self._committer.commit(
+                                self.name, EventType.RETCON_REQUEST_CREATED, req.id, req
+                            )
                 continue
             if intent.id not in active_theme_ids:
                 logger.warning(

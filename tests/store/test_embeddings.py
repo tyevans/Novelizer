@@ -2,7 +2,8 @@ import os
 import pytest
 import tempfile
 from novelizer.store.embeddings import EmbeddingStore
-from novelizer.store.models import WorldEntry
+from novelizer.store.models import WorldEntry, ThemeRecord
+from tests.conftest import FakeEmbeddingFunction
 
 
 @pytest.fixture
@@ -12,6 +13,19 @@ async def store():
         s = EmbeddingStore(path=d, embed_model="nomic-embed-text", base_url=base_url)
         yield s
         s.close()
+
+
+def test_embedding_store_accepts_injectable_embedding_function(tmp_path):
+    store = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
+    store.close()
+
+
+async def test_upsert_and_query_themes_roundtrip(tmp_path):
+    store = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
+    await store.upsert_theme(ThemeRecord(id="loss", title="The Cost of Ambition"))
+    results = await store.query_themes("The Cost of Ambition")
+    assert results and results[0][0] == "loss"
+    store.close()
 
 
 @pytest.mark.live_llm
