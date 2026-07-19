@@ -15,6 +15,19 @@ from novelizer.store.models import RetconRequest, RetconStatus
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_id(raw: str) -> str:
+    """Canonicalize an agent- or LLM-supplied id for comparison/storage.
+
+    Canon ids are minted lowercase everywhere (every `slugify_*_name`
+    output), so a casing mismatch on a *citing* id (not a minting one) is a
+    correctness bug, not an unknown-id case. Applied only at
+    membership-check/payload-construction sites in the commit helpers below
+    -- never to minting logic.
+    """
+    return raw.strip().lower()
+
+
 _KNOWLEDGE_EVENT_BY_ACTION = {
     "learn": (EventType.SECRET_LEARNED, SecretLearned),
     "reveal": (EventType.SECRET_REVEALED, SecretRevealed),
@@ -137,7 +150,8 @@ class BaseAgent:
                     ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note, source=source),
                 )
                 continue
-            if intent.id not in active_thread_ids:
+            thread_id = _normalize_id(intent.id)
+            if thread_id not in active_thread_ids:
                 logger.warning(
                     "%s: dropped thread %s intent for unknown id %r", self.name, intent.action, intent.id
                 )
@@ -148,10 +162,10 @@ class BaseAgent:
                 "abandon": (ThreadAbandoned, EventType.THREAD_ABANDONED),
             }[intent.action]
             if payload_cls is ThreadAbandoned:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note)
             else:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source)
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source)
+            await self._committer.commit(self.name, event_type, thread_id, payload)
 
     async def _commit_theme_intents(
         self,
@@ -242,14 +256,15 @@ class BaseAgent:
                                 self.name, EventType.RETCON_REQUEST_CREATED, req.id, req
                             )
                 continue
-            if intent.id not in active_theme_ids:
+            theme_id = _normalize_id(intent.id)
+            if theme_id not in active_theme_ids:
                 logger.warning(
                     "%s: dropped theme %s intent for unknown id %r", self.name, intent.action, intent.id
                 )
                 continue
             await self._committer.commit(
-                self.name, EventType.THEME_DEVELOPED, intent.id,
-                ThemeDeveloped(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source),
+                self.name, EventType.THEME_DEVELOPED, theme_id,
+                ThemeDeveloped(id=theme_id, chapter_id=chapter_id, note=intent.note, source=source),
             )
 
     async def _commit_knowledge_intents(
@@ -303,7 +318,8 @@ class BaseAgent:
                     SecretCreated(id=secret_id, title=intent.title, chapter_id=chapter_id, note=intent.note),
                 )
                 continue
-            if intent.id not in active_secret_ids:
+            secret_id = _normalize_id(intent.id)
+            if secret_id not in active_secret_ids:
                 logger.warning(
                     "%s: dropped knowledge %s intent for unknown secret id %r", self.name, intent.action, intent.id
                 )
@@ -315,13 +331,13 @@ class BaseAgent:
                 continue
             event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
             if intent.action == "reveal":
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note)
             else:
                 payload = payload_cls(
-                    id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note,
-                    source=source,
+                    id=secret_id, character_id=_normalize_id(intent.character_id), chapter_id=chapter_id,
+                    note=intent.note, source=source,
                 )
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+            await self._committer.commit(self.name, event_type, secret_id, payload)
 
     async def _commit_causal_intents(
         self, intents: list[CausalIntent], valid_chapter_ids: set[str], source: str = "declared"
@@ -342,22 +358,24 @@ class BaseAgent:
         No-op on an empty list.
         """
         for intent in intents:
-            if intent.cause_chapter_id == intent.effect_chapter_id:
+            cause_id = _normalize_id(intent.cause_chapter_id)
+            effect_id = _normalize_id(intent.effect_chapter_id)
+            if cause_id == effect_id:
                 logger.warning(
                     "%s: dropped self-edge causal intent for chapter %r", self.name, intent.cause_chapter_id
                 )
                 continue
-            if intent.cause_chapter_id not in valid_chapter_ids or intent.effect_chapter_id not in valid_chapter_ids:
+            if cause_id not in valid_chapter_ids or effect_id not in valid_chapter_ids:
                 logger.warning(
                     "%s: dropped causal intent citing unknown chapter id(s) %r -> %r",
                     self.name, intent.cause_chapter_id, intent.effect_chapter_id,
                 )
                 continue
             await self._committer.commit(
-                self.name, EventType.CAUSAL_EDGE_DECLARED, intent.effect_chapter_id,
+                self.name, EventType.CAUSAL_EDGE_DECLARED, effect_id,
                 CausalEdgeDeclared(
-                    cause_chapter_id=intent.cause_chapter_id,
-                    effect_chapter_id=intent.effect_chapter_id,
+                    cause_chapter_id=cause_id,
+                    effect_chapter_id=effect_id,
                     note=intent.note,
                     source=source,
                 ),
