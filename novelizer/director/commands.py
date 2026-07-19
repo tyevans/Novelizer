@@ -1,9 +1,10 @@
 from __future__ import annotations
 import logging
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, InspirationHandSuperseded
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatus
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.proposal_service import ProposalService
+from novelizer.muse.report import muse_status_report
 from novelizer.settings.story_dir import StoryDirectory
 from novelizer.store.models import DirectorSignal, SignalKind
 
@@ -124,4 +125,22 @@ async def dispatch(runtime, line: str) -> str:
         return await _dispatch_decision(runtime, rest[0], "approve")
     if cmd == "reject" and rest:
         return await _dispatch_decision(runtime, rest[0], "reject")
+    if cmd == "muse":
+        if rest and rest[0].lower() == "reroll":
+            active = await runtime.read.get_active_hand()
+            if active is not None:
+                await runtime.events.append(
+                    EventType.INSPIRATION_HAND_SUPERSEDED, active.id,
+                    InspirationHandSuperseded(hand_id=active.id),
+                )
+            # Deal without waiting for the projector: deal_fresh_hand doesn't
+            # check for an active hand, and the projection sorts itself out
+            # (the superseded event lands before the new drawn event).
+            hand = await runtime.muse.deal_fresh_hand()
+            return f"Rerolled. New hand: {'; '.join(hand.names)}"
+        return muse_status_report(
+            await runtime.read.get_active_hand(),
+            await runtime.read.list_hands(),
+            await runtime.read.list_uptake(),
+        )
     return f"Unknown command: {line.strip()}"
