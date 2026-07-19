@@ -14,6 +14,17 @@
 #activity_strip { height: 1; background: $boost; color: $text; padding: 0 1; }
 #command { height: 1; padding: 0 1; }
 #body.room #right { display: none; }
+#engine_room { display: none; }
+#body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
+#body.engine #feed, #body.engine #roster, #body.engine #proposals,
+#body.engine #thread_board, #body.engine #story_shape,
+#body.engine #who_knows_what, #body.engine #causeway { display: none; }
+#er_vitals { height: 1; background: $boost; padding: 0 1; }
+#er_stream_scroll { height: 2fr; }
+#er_stream { height: auto; }
+#er_prompt { height: auto; max-height: 12; border: round $secondary; padding: 0 1; }
+#er_trace { height: 1fr; }
+#er_detail { height: auto; max-height: 14; border: round $secondary; padding: 0 1; }
 #settings_table { height: 1fr; }
 #settings_msg { height: 1; }
 #edit_value { height: 3; }

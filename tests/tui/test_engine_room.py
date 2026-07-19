@@ -83,3 +83,60 @@ async def test_strip_idle_shows_next_agent_hint(rt):
         await pilot.pause(0.8)
         text = str(app.query_one("#activity_strip", ActivityStrip).renderable)
         assert text.startswith("idle")
+
+
+async def test_engine_room_hidden_by_default_and_toggles_with_e(rt):
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)  # keys must reach app bindings, not a focused widget
+        body = app.query_one("#body")
+        assert not body.has_class("engine")
+        await pilot.press("e")
+        assert body.has_class("engine")
+        await pilot.press("e")
+        assert not body.has_class("engine")
+
+
+async def test_engine_room_streams_tokens_into_live_pane(rt):
+    from novelizer.tui.widgets.engine_room import EngineRoom
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="The sea rose."))
+        await pilot.pause(0.8)
+        room = app.query_one("#engine_room", EngineRoom)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "author" in vitals and "drafting" in vitals
+        assert "The sea rose." in room.stream_text()
+
+
+async def test_prompt_pane_off_by_default_and_p_toggles_it(rt):
+    from novelizer.telemetry.events import LlmCallStarted
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                                LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                               model="qwen", prompt="[system]\nWrite the chapter."))
+        await pilot.pause(0.8)
+        prompt_pane = app.query_one("#er_prompt")
+        assert prompt_pane.display is False  # off by default (spec)
+        await pilot.press("p")
+        assert prompt_pane.display is True
+        assert "Write the chapter." in str(prompt_pane.renderable)
+        await pilot.press("p")
+        assert prompt_pane.display is False
+
+
+async def test_p_outside_engine_view_does_nothing(rt):
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("p")  # engine view not open: must not crash or toggle
+        assert app.query_one("#er_prompt").display is False

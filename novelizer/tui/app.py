@@ -19,6 +19,7 @@ from novelizer.tui.widgets.story_shape import StoryShape
 from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
 from novelizer.tui.widgets.causeway import Causeway
 from novelizer.tui.widgets.activity_strip import ActivityStrip
+from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
     LiveRunState, apply_bus_item, seed_state,
 )
@@ -89,6 +90,8 @@ class NovelizerApp(App):
     BINDINGS = [
         ("ctrl+k", "focus_command", "Command"),
         ("r", "toggle_room", "Room"),
+        ("e", "toggle_engine", "Engine Room"),
+        ("p", "toggle_prompt", "Prompt"),
         ("q", "quit", "Quit"),
     ]
 
@@ -111,6 +114,7 @@ class NovelizerApp(App):
                 yield StoryShape("no chapters scored yet", id="story_shape")
                 yield WhoKnowsWhat("no secrets yet", id="who_knows_what")
                 yield Causeway("no causal edges yet", id="causeway")
+                yield EngineRoom(id="engine_room")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
@@ -301,6 +305,7 @@ class NovelizerApp(App):
             self._trace_events.extend(recent[-200:])
             self._live_state = seed_state(recent[-50:], time.monotonic())
             self._refresh_strip()
+            self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
         q = self.runtime.telemetry_bus.subscribe()
@@ -311,6 +316,7 @@ class NovelizerApp(App):
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                 self._refresh_strip()
+                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
 
@@ -327,6 +333,13 @@ class NovelizerApp(App):
 
     def action_toggle_room(self) -> None:
         self.query_one("#body").toggle_class("room")
+
+    def action_toggle_engine(self) -> None:
+        self.query_one("#body").toggle_class("engine")
+
+    def action_toggle_prompt(self) -> None:
+        if self.query_one("#body").has_class("engine"):
+            self.query_one("#engine_room", EngineRoom).toggle_prompt()
 
     async def _run_command(self, line: str) -> None:
         cmd = line.strip().lstrip(":").split(maxsplit=1)
