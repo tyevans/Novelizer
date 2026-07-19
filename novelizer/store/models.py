@@ -208,3 +208,48 @@ class DirectorSignal(BaseModel):
     target_agent: Optional[str] = None
     target_entity: str = ""
     consumed: bool = False
+
+
+class ChatMessageRecord(BaseModel):
+    """One projected chat message. role is 'user' (the Director) or 'agent'."""
+
+    agent_name: str
+    role: str
+    text: str
+    message_id: str
+
+
+class HandStatus(StrEnum):
+    active = "active"
+    consumed = "consumed"
+    superseded = "superseded"
+
+
+class InspirationHandRecord(BaseModel):
+    """Read-side row for one dealt Muse hand, built by the Projector from
+    inspiration.* events. `consumed` and `superseded` are both absorbing —
+    whichever is applied first while the hand is active wins.
+    """
+
+    id: str
+    seed: int
+    corpus_version: str
+    era: str
+    names: list[str] = Field(default_factory=list)
+    professions: list[str] = Field(default_factory=list)
+    settings: list[str] = Field(default_factory=list)
+    beats: list[str] = Field(default_factory=list)
+    status: HandStatus = HandStatus.active
+    consumed_chapter_id: str = ""
+
+
+class InspirationUptakeRecord(BaseModel):
+    """Read-side row for one inspiration.uptake_recorded event, deduped by
+    (hand_id, kind, item) at the projection so repeated mining runs never
+    inflate the uptake rate.
+    """
+
+    hand_id: str
+    kind: str
+    item: str
+    chapter_id: str = ""

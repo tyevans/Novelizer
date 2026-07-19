@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import (
-    ContinuityOutput, MinedFactsOutput, ThreadIntent, KnowledgeIntent, CausalIntent,
+    ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
 from novelizer.brain.context import open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
@@ -11,7 +11,7 @@ from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, 
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
-from novelizer.canon.events import EventType, ChapterMined
+from novelizer.canon.events import EventType, ChapterMined, InspirationUptakeRecorded
 from novelizer.store.models import RetconRequest, RetconStatus
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,10 @@ a secret, a secret being revealed, a thread being touched or paid off, or a caus
 Cite existing ids only -- set known_id=False if you cannot confidently match the fact to an existing
 secret/thread id. A character ACTING on a secret the prose never showed them learning is a 'uses' fact,
 not 'learn' -- report 'learn' only when the chapter shows the moment of learning on the page. Keep every
-note to one short sentence. Return empty lists if the prose shows nothing new."""
+note to one short sentence. Return empty lists if the prose shows nothing new.
+If the prompt lists dealt inspiration items for this chapter, also report inspiration_facts:
+each dealt item the prose visibly uses, with its kind and the item exactly as listed. Only
+items from the dealt list are legal; never invent inspiration_facts."""
 
 # Thread actions mined prose can report ("touch", "planted", "paid_off" -- see
 # MinedThreadFact) map onto ThreadIntent's authoring vocabulary ("touch",
@@ -80,6 +83,11 @@ class ContinuityChecker(BaseAgent):
             "secrets": await self._read.list_secrets(),
             "mined_chapters": [c for c in chapters if c.id not in already_mined],
             "thread_touch_pairs": thread_touch_log(thread_events),
+            "hands_by_chapter": {
+                h.consumed_chapter_id: h
+                for h in await self._read.list_hands(status="consumed")
+                if h.consumed_chapter_id
+            },
         }
 
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
@@ -130,12 +138,21 @@ class ContinuityChecker(BaseAgent):
         causal = "\n".join(
             f"{e.cause_chapter_id} -> {e.effect_chapter_id}" for e in ctx.get("causal_edges", [])
         ) or "None."
+        hand = ctx.get("hands_by_chapter", {}).get(chapter.id)
+        dealt = ""
+        if hand is not None:
+            dealt = (
+                f"\n\nDealt inspiration items for this chapter:\n"
+                f"professions: {', '.join(hand.professions) or '(none)'}\n"
+                f"settings: {', '.join(hand.settings) or '(none)'}\n"
+                f"beats: {', '.join(hand.beats) or '(none)'}"
+            )
         return (
             f"Chapter [{chapter.id}] {chapter.title}:\n{chapter.prose}\n\n"
             f"Active secret ids (the ONLY legal values for secret_facts ids; thread ids and "
             f"character names are never secret ids): {secret_ids}\n\n"
             f"Knowledge matrix:\n{matrix}\n\nSecret references:\n{secret_refs}\n\n"
-            f"Threads:\n{threads}\n\nCausal edges:\n{causal}"
+            f"Threads:\n{threads}\n\nCausal edges:\n{causal}{dealt}"
         )
 
     async def _commit_mined_facts(
@@ -244,6 +261,29 @@ class ContinuityChecker(BaseAgent):
             await self._commit_causal_intents(
                 [CausalIntent(cause_chapter_id=fact.cause_chapter_id, effect_chapter_id=fact.effect_chapter_id, note=fact.note)],
                 valid_chapter_ids, source="mined",
+            )
+
+        hand = ctx.get("hands_by_chapter", {}).get(chapter_id)
+        for fact in mined_out.inspiration_facts:
+            if hand is None:
+                logger.info(
+                    "%s: mined inspiration fact %r for chapter %r with no consumed hand, dropped",
+                    self.name, fact.item, chapter_id,
+                )
+                continue
+            dealt_pool = {"professions": hand.professions, "settings": hand.settings,
+                          "beats": hand.beats}[fact.kind]
+            match = next((d for d in dealt_pool if d.lower() == fact.item.strip().lower()), None)
+            if match is None:
+                logger.info(
+                    "%s: mined inspiration fact %r not in the dealt %s for chapter %r, dropped",
+                    self.name, fact.item, fact.kind, chapter_id,
+                )
+                continue
+            await self._committer.commit(
+                self.name, EventType.INSPIRATION_UPTAKE_RECORDED, hand.id,
+                InspirationUptakeRecorded(hand_id=hand.id, kind=fact.kind, item=match,
+                                          chapter_id=chapter_id),
             )
 
         await self._committer.commit(

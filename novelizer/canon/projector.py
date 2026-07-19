@@ -6,7 +6,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord
+from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus, InspirationHandRecord
 from novelizer.canon.threads import TERMINAL_STATES
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS causal_edges (
 CREATE TABLE IF NOT EXISTS structure_scores (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id TEXT PRIMARY KEY, agent_name TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inspiration_hands (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inspiration_uptake (
+    hand_id TEXT NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
+    chapter_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (hand_id, kind, item)
+);
 """
 
 
@@ -103,7 +113,8 @@ class Projector:
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
-            "causal_edges", "themes",
+            "causal_edges", "themes", "chat_messages", "inspiration_hands",
+            "inspiration_uptake",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -328,6 +339,53 @@ class Projector:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
                 (p["chapter_id"], data),
+            )
+        elif t == EventType.CHAT_USER_MESSAGED or t == EventType.CHAT_AGENT_REPLIED:
+            role = "user" if t == EventType.CHAT_USER_MESSAGED else "agent"
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO chat_messages (message_id, agent_name, role, text) VALUES (?,?,?,?)",
+                (p["message_id"], p["agent_name"], role, p.get("text", "")),
+            )
+        elif t == EventType.INSPIRATION_DRAWN:
+            cur = await self._conn.execute("SELECT id FROM inspiration_hands WHERE id=?", (p["hand_id"],))
+            existing = await cur.fetchone()
+            if existing is None:
+                record = InspirationHandRecord(
+                    id=p["hand_id"], seed=p["seed"], corpus_version=p["corpus_version"],
+                    era=p["era"], names=p.get("names", []), professions=p.get("professions", []),
+                    settings=p.get("settings", []), beats=p.get("beats", []),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                    (record.id, record.model_dump_json(), record.status.value),
+                )
+            # else: a hand id is minted exactly once — first-mint-wins, same
+            # rule as thread.planted/secret.created/theme.introduced.
+        elif t in (EventType.INSPIRATION_HAND_CONSUMED, EventType.INSPIRATION_HAND_SUPERSEDED):
+            cur = await self._conn.execute("SELECT data FROM inspiration_hands WHERE id=?", (p["hand_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = InspirationHandRecord.model_validate_json(row[0])
+                if record.status == HandStatus.active:
+                    if t == EventType.INSPIRATION_HAND_CONSUMED:
+                        updated = record.model_copy(update={
+                            "status": HandStatus.consumed,
+                            "consumed_chapter_id": p.get("chapter_id", ""),
+                        })
+                    else:
+                        updated = record.model_copy(update={"status": HandStatus.superseded})
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.status.value),
+                    )
+                # else: consumed/superseded are absorbing — the event is a fact
+                # in the log, but the projection does not change.
+            # else: no row for this id (shouldn't happen under correct Muse
+            # behavior) — nothing to project, no error raised.
+        elif t == EventType.INSPIRATION_UPTAKE_RECORDED:
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO inspiration_uptake (hand_id, kind, item, chapter_id) VALUES (?,?,?,?)",
+                (p["hand_id"], p["kind"], p["item"], p.get("chapter_id", "")),
             )
         elif t == EventType.AUTONOMY_CHANGED:
             await self._conn.execute(
