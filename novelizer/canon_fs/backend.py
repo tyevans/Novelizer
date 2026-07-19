@@ -167,22 +167,35 @@ class CanonBackend(BackendProtocol):
         matches = [
             FileInfo(path=p, is_dir=False)
             for p in sorted(snap.index)
-            if wcglob.globmatch(p.lstrip("/"), full, flags=wcglob.GLOBSTAR)
+            if wcglob.globmatch(
+                p.lstrip("/"), full, flags=wcglob.BRACE | wcglob.GLOBSTAR
+            )
         ]
         return GlobResult(matches=matches)
+
+    def _glob_ok(self, p: str, glob: str | None) -> bool:
+        if not glob:
+            return True
+        target = p.rsplit("/", 1)[-1] if "/" not in glob else p.lstrip("/")
+        return wcglob.globmatch(target, glob, flags=wcglob.BRACE | wcglob.GLOBSTAR)
 
     async def agrep(
         self, pattern: str, path: str | None = None, glob: str | None = None
     ) -> GrepResult:
         snap = await self._snapshot()
-        base = "/" + (path or "").strip("/")
-        prefix = "/" if base == "/" else base + "/"
+        norm = "/" + (path or "").strip("/")
         matches: list[GrepMatch] = []
-        for p in sorted(snap.index):
-            if not p.startswith(prefix):
-                continue
-            if glob and not wcglob.globmatch(p.lstrip("/"), glob, flags=wcglob.GLOBSTAR):
-                continue
+
+        if norm in snap.index:
+            candidates = [norm] if self._glob_ok(norm, glob) else []
+        else:
+            prefix = "/" if norm == "/" else norm + "/"
+            candidates = [
+                p for p in sorted(snap.index)
+                if p.startswith(prefix) and self._glob_ok(p, glob)
+            ]
+
+        for p in candidates:
             kind, record_id = snap.index[p]
             for line_no, text in enumerate(
                 self._render(snap, kind, record_id).splitlines(), start=1

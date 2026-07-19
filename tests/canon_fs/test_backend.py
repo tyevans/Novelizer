@@ -226,3 +226,32 @@ async def test_agrep_is_literal_not_regex(stack):
     backend = CanonBackend(read)
     result = await backend.agrep("b.ll")
     assert result.matches == []
+
+
+async def test_agrep_basename_glob_filters_by_filename(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.agrep("id:", glob="*.md")
+    assert {m["path"] for m in result.matches} == {
+        "/chapters/001-the-drowned-bell.md", "/characters/mara.md", "/world/bell-cult.md",
+        "/threads/bell-s-curse.md", "/secrets/the-scar.md", "/themes/drowning-as-memory.md",
+    }
+    scoped = await backend.agrep("id:", glob="mara.md")
+    assert {m["path"] for m in scoped.matches} == {"/characters/mara.md"}
+
+
+async def test_agrep_exact_file_path_greps_that_file(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.agrep("Mara", path="/characters/mara.md")
+    assert {m["path"] for m in result.matches} == {"/characters/mara.md"}
+
+
+async def test_aglob_brace_expansion(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.aglob("/secrets/*.{md,txt}")
+    assert [m["path"] for m in result.matches] == ["/secrets/the-scar.md"]
