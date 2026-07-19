@@ -47,6 +47,11 @@ async def rt(tmp_path):
     # Pause them all so tests drive telemetry by hand.
     for a in runtime.agents:
         a.pause()
+    # Pre-seed scheduler eligibility as already "paused" so the scheduler loop's
+    # first tick doesn't emit a SCHEDULER_ELIGIBILITY_CHANGED per agent (it only
+    # emits on state *change* — without this, tests would see unrelated noise
+    # in _trace_events, defeating "tests drive telemetry by hand" above).
+    runtime.scheduler._eligibility = {a.name: (False, "paused") for a in runtime.agents}
     yield runtime
     await runtime.close()
 
@@ -140,3 +145,65 @@ async def test_p_outside_engine_view_does_nothing(rt):
         app.set_focus(None)
         await pilot.press("p")  # engine view not open: must not crash or toggle
         assert app.query_one("#er_prompt").display is False
+
+
+async def test_trace_rows_appear_newest_first(rt):
+    from textual.widgets import DataTable
+    from novelizer.telemetry.events import AgentRunFinished
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_FINISHED, "r1",
+                                AgentRunFinished(run_id="r1", agent_name="author", duration_s=52.0))
+        await pilot.pause(0.8)
+        table = app.query_one("#er_trace", DataTable)
+        assert table.row_count == 2
+        first_row = table.get_row_at(0)
+        assert "✓" in first_row[0]  # newest (run finished) first
+
+
+async def test_selecting_a_trace_row_shows_detail_with_prompt_and_produced(rt):
+    from textual.widgets import DataTable
+    from novelizer.telemetry.events import LlmCallStarted
+    from novelizer.canon.events import EventType, AgentRemark
+    from novelizer.run_context import current_run_id
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        # A domain event stamped with the run, so detail can show "produced:"
+        token = current_run_id.set("r1")
+        try:
+            await rt.committer.commit("author", EventType.AGENT_REMARKED, "author",
+                                      AgentRemark(agent_name="author", note="done"))
+        finally:
+            current_run_id.reset(token)
+        await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                                LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                               model="qwen", prompt="[system]\nWrite it."))
+        await pilot.pause(0.8)
+        app.set_focus(None)
+        await pilot.press("e")
+        table = app.query_one("#er_trace", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause(0.3)
+        detail = app.query_one("#er_detail")
+        assert detail.display is True
+        text = str(detail.renderable)
+        assert "Write it." in text                       # stored prompt round-trips (C-in-D)
+        assert "produced: agent.remarked author" in text  # run_id join to domain log
+
+
+async def test_seeded_trace_survives_restart(rt):
+    from textual.widgets import DataTable
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    # A fresh app instance (a "restart") must show the persisted trace row.
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        assert app.query_one("#er_trace", DataTable).row_count == 1

@@ -21,7 +21,7 @@ from novelizer.tui.widgets.causeway import Causeway
 from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, seed_state,
+    LiveRunState, apply_bus_item, seed_state, trace_line, trace_detail,
 )
 
 _LABELS = {
@@ -298,6 +298,10 @@ class NovelizerApp(App):
         strip = self.query_one("#activity_strip", ActivityStrip)
         strip.render_state(self._live_state, time.monotonic(), self._next_hint())
 
+    def _refresh_trace(self) -> None:
+        rows = [(str(ev.sequence), trace_line(ev)) for ev in reversed(self._trace_events)]
+        self.query_one("#engine_room", EngineRoom).set_trace_rows(rows)
+
     async def _telemetry_bus_loop(self) -> None:
         # Seed from the durable log first so a restart never shows a blank view.
         try:
@@ -306,6 +310,7 @@ class NovelizerApp(App):
             self._live_state = seed_state(recent[-50:], time.monotonic())
             self._refresh_strip()
             self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+            self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
         q = self.runtime.telemetry_bus.subscribe()
@@ -315,6 +320,7 @@ class NovelizerApp(App):
                 self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
+                    self._refresh_trace()
                 self._refresh_strip()
                 self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             except Exception as e:
@@ -366,3 +372,14 @@ class NovelizerApp(App):
             return
         text = await detail_text(self.runtime.read, data["section"], data["id"])
         self.query_one("#detail", Static).update(text or "(no detail)")
+
+    async def on_data_table_row_selected(self, event) -> None:
+        if event.data_table.id != "er_trace":
+            return
+        seq = int(event.row_key.value)
+        ev = next((e for e in self._trace_events if e.sequence == seq), None)
+        if ev is None:
+            return
+        run_id = ev.payload.get("run_id")
+        produced = await self.runtime.events.events_for_run(run_id) if run_id else []
+        self.query_one("#engine_room", EngineRoom).show_detail(trace_detail(ev, produced))
