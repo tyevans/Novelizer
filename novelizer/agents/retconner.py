@@ -37,7 +37,7 @@ class Retconner(BaseAgent):
             return None
         conflicting = [e for e in ctx["world"] if e.id in req.conflicting_entry_ids]
         text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")

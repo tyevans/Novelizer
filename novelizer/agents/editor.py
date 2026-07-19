@@ -66,7 +66,7 @@ class Editor(BaseAgent):
             if self._casting_note
             else ""
         )
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         voices = await self._character_voices_block(ch.character_ids)
         pacing = pacing_flags_note(ctx["scores"], delta=self._sag_spike_delta)
         chapter_order = [c.id for c in ctx["chapters"]]

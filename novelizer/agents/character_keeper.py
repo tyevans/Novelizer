@@ -45,7 +45,7 @@ class CharacterKeeper(BaseAgent):
             return None
         chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"])
         chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")

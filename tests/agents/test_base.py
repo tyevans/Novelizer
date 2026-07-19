@@ -534,3 +534,11 @@ async def test_commit_causal_intents_normalizes_chapter_id_casing(stack, caplog)
     assert len(log) == 1
     assert log[0].payload["cause_chapter_id"] == "abc123"
     assert log[0].payload["effect_chapter_id"] == "def456"
+
+
+def test_guarded_line_returns_labeled_value_when_present():
+    assert BaseAgent._guarded_line("In character", "gruff and terse") == "\n\nIn character: gruff and terse"
+
+
+def test_guarded_line_returns_empty_when_value_falsy():
+    assert BaseAgent._guarded_line("In character", "") == ""

@@ -72,6 +72,11 @@ class BaseAgent:
         self.paused = False
         self._last_run = 0.0
 
+    @staticmethod
+    def _guarded_line(label: str, value: str) -> str:
+        """Return an optional "\n\n{label}: {value}" line, or "" if value is falsy."""
+        return f"\n\n{label}: {value}" if value else ""
+
     def pause(self) -> None:
         self.paused = True
 

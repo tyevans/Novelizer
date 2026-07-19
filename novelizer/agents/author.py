@@ -25,8 +25,8 @@ def _summarize(
     chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
     prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
-    voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
-    cast = f"\n\nIn character: {personality}" if personality else ""
+    voice = BaseAgent._guarded_line("Write in this prose voice", casting_note)
+    cast = BaseAgent._guarded_line("In character", personality)
     brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])

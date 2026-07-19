@@ -37,7 +37,7 @@ class WorldArchitect(BaseAgent):
     async def work(self, ctx: dict) -> WorldEntriesDraft | None:
         existing = "\n".join(f"- [{e.domain}] {e.title}: {e.body[:100]}" for e in ctx["entries"][:20]) or "The world is empty."
         seeds = "\n".join(f"Director seed: {s.body}" for s in ctx["signals"]) or "None."
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}{cast}\n\nGenerate new world entries."
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
