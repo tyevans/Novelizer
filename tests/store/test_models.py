@@ -41,6 +41,45 @@ def test_director_signal_defaults():
     assert s.target_agent is None
 
 
+def test_director_signal_accepts_persisted_revise_payload():
+    """Pin the exact shape the Editor persists for a revise verdict (captured
+    from a live story's director_signal.created event log). Persisted events
+    must stay readable forever."""
+    payload = {
+        "id": "f6007beb-6c64-45a2-849a-70f7a39c2ee8",
+        "created_at": "2026-07-19T21:17:37.923882Z",
+        "kind": "revise",
+        "body": "Fix the pacing in the second scene.",
+        "target_agent": "author",
+        "target_entity": "ad81bf27-b13b-416a-968b-d57c8dae4273",
+        "consumed": False,
+    }
+    s = DirectorSignal.model_validate(payload)
+    assert s.kind == SignalKind.revise
+    assert s.target_entity == "ad81bf27-b13b-416a-968b-d57c8dae4273"
+
+
+def test_director_signal_tolerates_unknown_kind():
+    """Event-sourced tolerant reader: a kind minted by a newer writer must not
+    make persisted signals unreadable (a closed enum here wedged the live
+    scheduler every cycle when readers lagged the writer's SignalKind)."""
+    s = DirectorSignal.model_validate({"kind": "tempo", "body": "slow down"})
+    assert s.kind == "tempo"
+    again = DirectorSignal.model_validate_json(s.model_dump_json())
+    assert again.kind == "tempo"
+
+
+def test_director_signal_known_kind_normalizes_to_enum():
+    s = DirectorSignal(kind="revise", body="x")
+    assert s.kind is SignalKind.revise
+    assert isinstance(DirectorSignal.model_validate_json(s.model_dump_json()).kind, SignalKind)
+
+
+def test_director_signal_non_string_kind_still_rejected():
+    with pytest.raises(ValidationError):
+        DirectorSignal(kind=3, body="x")
+
+
 def test_character_voice_defaults_to_empty_string():
     c = Character(name="Mira")
     assert c.voice == ""

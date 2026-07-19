@@ -41,6 +41,25 @@ async def test_unconsumed_signals_filtered_by_target(stack):
     assert {s.id for s in for_author} == {"s1"}  # broadcast only, not editor-targeted
 
 
+async def test_unconsumed_signals_survive_unknown_kind(stack):
+    """Regression: Scheduler.tick calls list_unconsumed_signals every cycle;
+    one persisted signal whose kind this model version does not know must not
+    raise (live incident: kind='revise' events wedged every tick for readers
+    whose SignalKind predated the member)."""
+    events, proj, read = stack
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.seed, body="broadcast"))
+    newer_writer_payload = DirectorSignal(
+        id="s2", kind=SignalKind.focus, body="from the future", target_agent="author"
+    ).model_dump(mode="json")
+    newer_writer_payload["kind"] = "tempo"  # a kind this reader has never heard of
+    await events.append_raw(EventType.DIRECTOR_SIGNAL_CREATED, "s2", newer_writer_payload)
+    await proj.catch_up()
+    sigs = await read.list_unconsumed_signals()
+    assert {s.id for s in sigs} == {"s1", "s2"}
+    assert next(s.kind for s in sigs if s.id == "s2") == "tempo"
+
+
 async def test_consumed_signal_disappears(stack):
     events, proj, read = stack
     sig = DirectorSignal(id="s1", kind=SignalKind.seed, body="x")
