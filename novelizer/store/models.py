@@ -2,8 +2,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Annotated, Optional
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 def _now() -> datetime:
@@ -200,10 +200,27 @@ class RetconRequest(BaseModel):
     resolved_by: Optional[str] = None
 
 
+def _tolerant_signal_kind(v: object) -> object:
+    """Normalize known kinds to SignalKind; pass unknown ones through raw.
+
+    Event sourcing: persisted director_signal events must stay readable
+    forever. A closed enum here poisons the read side the moment any writer
+    mints a kind this model version does not know — Scheduler.tick validates
+    every unconsumed signal each cycle, so one such event wedged the live
+    scheduler on every cycle (kind='revise' read by a pre-revise SignalKind).
+    """
+    try:
+        return SignalKind(v)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return v  # unknown kind from a newer/older writer: keep the raw value
+
+
 class DirectorSignal(BaseModel):
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)
-    kind: SignalKind
+    # SignalKind for every kind this version knows; raw str for kinds minted
+    # by other model versions (still a required, non-empty-typed field).
+    kind: Annotated[SignalKind | str, BeforeValidator(_tolerant_signal_kind)]
     body: str
     target_agent: Optional[str] = None
     target_entity: str = ""

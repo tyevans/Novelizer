@@ -113,6 +113,43 @@ async def test_proposals_banner_appears_and_approve_via_command_clears_it():
 
 
 @pytest.mark.asyncio
+async def test_proposals_banner_stays_hidden_in_engine_mode():
+    from textual.widgets import Static
+    from novelizer.canon.events import EventType
+    from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+    from novelizer.store.models import Chapter
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    try:
+        await rt.events.append(EventType.AUTONOMY_CHANGED, "singleton",
+                                AutonomyState(global_level=AutonomyLevel.gated_canon))
+        await rt.projector.catch_up()
+        ch = Chapter(id="c1", title="Pending One", prose="p")
+        await rt.committer.commit("author", EventType.CHAPTER_CREATED, ch.id, ch)
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.7)  # let _proposals_loop cycle
+            banner = app.query_one("#proposals_banner", Static)
+            assert banner.display, "banner must be visible while a proposal is open"
+            await pilot.press("e")
+            await pilot.pause(0.7)  # loop keeps running while the Engine Room is up
+            assert app.query_one("#body").has_class("engine")
+            assert not banner.display, "banner must not leak into Engine Room mode"
+            await pilot.press("e")
+            await pilot.pause(0.7)
+            assert banner.display, "banner must return when leaving Engine Room mode"
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_proposals_banner_hidden_on_a_quiet_story():
     from textual.widgets import Static
 

@@ -74,9 +74,9 @@ class NovelizerApp(App):
                 feed = RichLog(highlight=False, markup=False, id="feed")
                 feed.border_title = "THE ROOM"
                 yield feed
-                banner = Static(id="proposals_banner")
-                banner.display = False
-                yield banner
+                # hidden by default via the stylesheet; _proposals_loop toggles
+                # the .open class so mode rules (#body.engine) can still win
+                yield Static(id="proposals_banner")
                 brain = BrainPanel(id="brain")
                 brain.border_title = "STORY BRAIN"
                 yield brain
@@ -197,7 +197,7 @@ class NovelizerApp(App):
                 banner = self.query_one("#proposals_banner", Static)
                 if open_count:
                     banner.update(banner_line(open_count))
-                banner.display = bool(open_count)
+                banner.set_class(bool(open_count), "open")
             except Exception as e:
                 self._report_worker_error("proposals", e)
             await asyncio.sleep(0.5)
@@ -411,10 +411,10 @@ class NovelizerApp(App):
         if not data or not data.get("id"):
             return
         view = await detail_view(self.runtime.read, data["section"], data["id"])
-        if view.title:
-            self._update_detail(view.body, view.title)
-        else:
+        if view is None:
             self._update_detail("(no detail)")
+        else:
+            self._update_detail(view.body, view.title)
 
     def _update_detail(self, content, title: str = "") -> None:
         self.query_one("#detail", Static).update(content)
