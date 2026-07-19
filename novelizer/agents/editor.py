@@ -6,7 +6,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest
+from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest, RetconStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
@@ -105,13 +105,23 @@ class Editor(BaseAgent):
         await self._commit_knowledge_intents(verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id)
         valid_chapter_ids = {c.id for c in ctx["chapters"]}
         await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
-        for flag in verdict.voice_drift_flags:
-            description = (
-                f"{VOICE_SOURCE_TAG} {flag.trait_violated} violated by {flag.character_id}: \"{flag.line}\""
-                + (f" — {flag.note}" if flag.note else "")
-            )
-            req = RetconRequest(description=description, conflicting_entry_ids=[flag.character_id], proposed_resolution="")
-            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        if verdict.voice_drift_flags:
+            # The Editor re-targets the same draft chapter every cycle until it is
+            # revised, so an unchanged drift would re-file forever -- dedup by
+            # description against the open queue, same as the Continuity Checker's
+            # leak/paradox paths.
+            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+            seen_descriptions = {r.description for r in open_reqs}
+            for flag in verdict.voice_drift_flags:
+                description = (
+                    f"{VOICE_SOURCE_TAG} {flag.trait_violated} violated by {flag.character_id}: \"{flag.line}\""
+                    + (f" — {flag.note}" if flag.note else "")
+                )
+                if description in seen_descriptions:
+                    continue
+                seen_descriptions.add(description)
+                req = RetconRequest(description=description, conflicting_entry_ids=[flag.character_id], proposed_resolution="")
+                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
         await self._remark(verdict.feed_note)
 
     async def run_once(self) -> None:

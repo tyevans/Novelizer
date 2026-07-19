@@ -541,3 +541,35 @@ async def test_m5_2_done_when_mechanical_chain_voice_drift(stack):
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
     assert len(tagged) == 1
+
+
+async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
+    """Fix-wave regression (M5.2 branch review): the Editor re-reviews the same
+    draft chapter every cycle until it is revised, so re-flagging the same
+    drift must not file a second open retcon -- mirror the Continuity
+    Checker's dedup-by-description against the open queue.
+    """
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="revise",
+        notes="voice drift",
+        voice_drift_flags=[
+            VoiceDriftFlag(
+                character_id="mara",
+                line="I dunno, whatever.",
+                trait_violated="formal, clipped diction",
+                note="drops into casual slang",
+            )
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    second = Editor(FakeRunner(verdict), read, committer)
+    await second.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 1, f"expected the duplicate drift flag to dedup, got {len(tagged)} open voice retcons"
