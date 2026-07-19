@@ -112,7 +112,7 @@ class Runtime:
             self.world_architect, self.character_keeper, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
-        self.scheduler = Scheduler(self.agents, self.read)
+        self.scheduler = Scheduler(self.agents, self.read, max_concurrent_agents=s.max_concurrent_agents)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -137,6 +137,11 @@ class Runtime:
             elif key in interval_map:
                 for agent in interval_map[key]:
                     agent.interval = getattr(new, key)
+                applied.append(key)
+            elif key == "max_concurrent_agents":
+                # Read fresh per-tick, no cached construction to rebuild --
+                # applies live, same as cadence settings.
+                self.scheduler._max_concurrent = new.max_concurrent_agents
                 applied.append(key)
             else:
                 applied.append(key)

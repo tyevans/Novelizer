@@ -48,6 +48,8 @@ class EffectiveSettings(BaseModel):
     staleness_threshold_chapters: int = 3
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
     sag_spike_delta: float = 0.3
+    # Scheduler dispatch pool size: how many agents may run concurrently.
+    max_concurrent_agents: int = 2
 
     # Cadence (seconds)
     author_interval: int = 300

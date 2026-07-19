@@ -145,9 +145,24 @@ class NovelizerApp(App):
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:
+        # Dispatched agents now run concurrently as background tasks, so a
+        # crashing agent no longer raises synchronously out of tick() (that
+        # would defeat the whole point of not awaiting dispatch) -- it's
+        # recorded in Scheduler.status()'s last_error instead. Poll for newly
+        # completed failing runs each cycle and surface them the same way a
+        # direct tick() exception would have been reported before concurrency.
+        # Dedup by run_count, not error text: repeated identical failures
+        # (e.g. the same agent crashing the same way every cycle) must each
+        # still be reported once per completed run.
+        reported_run_count: dict[str, int] = {}
         while True:
             try:
                 await self.runtime.scheduler.tick()
+                for s in self.runtime.scheduler.status():
+                    err = s["last_error"]
+                    if err and reported_run_count.get(s["name"]) != s["run_count"]:
+                        reported_run_count[s["name"]] = s["run_count"]
+                        self._report_worker_error("scheduler", RuntimeError(f"{s['name']}: {err}"))
             except Exception as e:
                 self._report_worker_error("scheduler", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)

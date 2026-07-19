@@ -41,6 +41,7 @@ class GlobalConfig(BaseModel):
     prior_chapter_summary_chars: int | None = None
     staleness_threshold_chapters: int | None = None
     sag_spike_delta: float | None = None
+    max_concurrent_agents: int | None = None
 
 
 class StoryConfig(BaseModel):

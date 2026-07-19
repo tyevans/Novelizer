@@ -50,6 +50,11 @@ def test_llm_max_tokens_default_caps_generation():
     assert EffectiveSettings().llm_max_tokens == 4096
 
 
+def test_max_concurrent_agents_default_is_2():
+    assert EffectiveSettings().max_concurrent_agents == 2
+    assert "max_concurrent_agents" not in STORY_OVERRIDABLE_KEYS
+
+
 def test_prior_chapter_summary_chars_default_is_200():
     assert EffectiveSettings().prior_chapter_summary_chars == 200
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS

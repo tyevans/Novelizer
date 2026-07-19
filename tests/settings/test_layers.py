@@ -68,7 +68,7 @@ def test_story_config_fields_match_overridable_keys():
 def test_global_config_fields_match_overridable_plus_global_only_keys():
     assert set(GlobalConfig.model_fields) == STORY_OVERRIDABLE_KEYS | {
         "llm_base_url", "llm_api_key", "llm_max_tokens", "default_stories_dir", "last_opened_story",
-        "suppress_flat_migration_prompt",
+        "suppress_flat_migration_prompt", "max_concurrent_agents",
     }
 
 
@@ -85,6 +85,16 @@ def test_suppress_flat_migration_prompt_defaults_false():
 def test_parse_global_accepts_llm_max_tokens():
     cfg = parse_global({"llm_max_tokens": 2048}, source="g.toml")
     assert cfg.llm_max_tokens == 2048
+
+
+def test_parse_global_accepts_max_concurrent_agents():
+    cfg = parse_global({"max_concurrent_agents": 4}, source="g.toml")
+    assert cfg.max_concurrent_agents == 4
+
+
+def test_max_concurrent_agents_not_story_overridable():
+    assert "max_concurrent_agents" not in StoryConfig.model_fields
+    assert "max_concurrent_agents" not in STORY_OVERRIDABLE_KEYS
 
 
 def test_parse_global_accepts_prior_chapter_summary_chars():
