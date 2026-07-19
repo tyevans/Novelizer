@@ -21,6 +21,16 @@ milestone touches the write path.
 
 ## Status
 
+- **CPT-M4: delivered** (2026-07-19). Phase-a pull agents are live: Author
+  and Continuity Checker run with `CanonBackend` + `search_canon` when
+  `author_tools_enabled`/`checker_tools_enabled` are on (the default),
+  chapter-prose push replaced by an id/title/status/cast map plus a
+  retrieval instruction (byte-identical legacy prompts when flags are off),
+  and tool calls stream through telemetry into the Engine Room
+  (`⚒`-prefixed lines). deepagents auto-filters the `execute` tool for
+  non-sandbox backends, so no middleware surgery was needed; `write_todos`
+  scoping remains CPT-M6.
+
 - **CPT-M3: delivered** (2026-07-19). Incremental projector-side canon
   embedding index, backfill-on-`Runtime.start()`, `Runtime.index_catch_up()`
   (None-safe, never raises), the `search_canon` LangChain tool, and the TUI
