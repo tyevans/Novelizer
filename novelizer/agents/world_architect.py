@@ -50,7 +50,7 @@ class WorldArchitect(BaseAgent):
             await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
         draft = await self.work(ctx)
         await self.commit(draft, ctx)

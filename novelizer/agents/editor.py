@@ -102,7 +102,7 @@ class Editor(BaseAgent):
         await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
         await self._remark(verdict.feed_note)
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
         verdict = await self.work(ctx)
         await self.commit(verdict, ctx)

@@ -261,7 +261,7 @@ class ContinuityChecker(BaseAgent):
         for chapter_id, mined_out in (mined_facts or {}).items():
             await self._commit_mined_facts(chapter_id, mined_out, ctx)
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
         out, mined = await self.work(ctx)
         await self.commit(out, ctx, mined)

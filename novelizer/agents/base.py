@@ -1,5 +1,7 @@
 from __future__ import annotations
 import logging
+import time
+import uuid
 from typing import Protocol
 from pydantic import BaseModel, Field
 from novelizer.canon.events import (
@@ -9,6 +11,10 @@ from novelizer.canon.events import (
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent
+from novelizer.run_context import current_run_id, current_agent_name
+from novelizer.telemetry.events import (
+    TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,7 @@ class BaseAgent:
         self.personality = personality
         self.paused = False
         self._last_run = 0.0
+        self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
 
     def pause(self) -> None:
         self.paused = True
@@ -70,8 +77,45 @@ class BaseAgent:
     async def readiness(self) -> float:
         return 0.0
 
+    async def _run(self) -> None:
+        """Subclasses put their poll/work/commit body here (M-telemetry:
+        run_once became a final template that brackets _run with machinery
+        events and ambient run context)."""
+
     async def run_once(self) -> None:
-        pass
+        run_id = str(uuid.uuid4())
+        started = time.monotonic()
+        rid_token = current_run_id.set(run_id)
+        name_token = current_agent_name.set(self.name)
+        await self._emit_telemetry(
+            TelemetryEventType.AGENT_RUN_STARTED, run_id,
+            AgentRunStarted(run_id=run_id, agent_name=self.name),
+        )
+        try:
+            await self._run()
+        except Exception as e:
+            phase = "llm_call" if (self.telemetry and self.telemetry.in_llm_call(run_id)) else "agent"
+            await self._emit_telemetry(
+                TelemetryEventType.AGENT_RUN_FAILED, run_id,
+                AgentRunFailed(run_id=run_id, agent_name=self.name,
+                               error_type=type(e).__name__, error_message=str(e),
+                               phase=phase, duration_s=time.monotonic() - started),
+            )
+            raise
+        else:
+            await self._emit_telemetry(
+                TelemetryEventType.AGENT_RUN_FINISHED, run_id,
+                AgentRunFinished(run_id=run_id, agent_name=self.name,
+                                 duration_s=time.monotonic() - started),
+            )
+        finally:
+            current_run_id.reset(rid_token)
+            current_agent_name.reset(name_token)
+
+    async def _emit_telemetry(self, event_type: str, aggregate_id: str, payload) -> None:
+        if self.telemetry is None:
+            return
+        await self.telemetry.emit(event_type, aggregate_id, payload)
 
     async def _consume_signals(self, signals) -> None:
         for sig in signals:

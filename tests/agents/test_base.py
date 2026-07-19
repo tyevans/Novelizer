@@ -356,3 +356,101 @@ async def test_commit_causal_intents_accepts_explicit_source(stack):
     log = await events.events_since(0, event_types=[EventType.CAUSAL_EDGE_DECLARED])
     assert len(log) == 1
     assert log[0].payload["source"] == "mined"
+
+
+class _CapturingRecorder:
+    """Test double for TelemetryRecorder: records emits, tracks nothing."""
+
+    def __init__(self):
+        self.emitted = []  # list of (event_type, aggregate_id, payload)
+
+    async def emit(self, event_type, aggregate_id, payload):
+        self.emitted.append((event_type, aggregate_id, payload))
+
+    def in_llm_call(self, run_id):
+        return False
+
+
+async def test_run_once_emits_started_and_finished_with_one_run_id():
+    from novelizer.telemetry.events import TelemetryEventType
+
+    class Quiet(BaseAgent):
+        async def _run(self):
+            pass
+
+    agent = Quiet(runner=None, read_store=None, committer=None, interval=0, name="quiet")
+    rec = _CapturingRecorder()
+    agent.telemetry = rec
+    await agent.run_once()
+    types = [t for t, _, _ in rec.emitted]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FINISHED]
+    started, finished = rec.emitted[0][2], rec.emitted[1][2]
+    assert started.run_id == finished.run_id != ""
+    assert started.agent_name == "quiet"
+    assert finished.duration_s >= 0.0
+
+
+async def test_run_once_sets_ambient_run_context_during_run_and_resets_after():
+    from novelizer.run_context import current_run_id, current_agent_name
+
+    seen = {}
+
+    class Peek(BaseAgent):
+        async def _run(self):
+            seen["run_id"] = current_run_id.get()
+            seen["agent"] = current_agent_name.get()
+
+    agent = Peek(runner=None, read_store=None, committer=None, interval=0, name="peek")
+    await agent.run_once()  # works with telemetry=None too
+    assert seen["run_id"] is not None
+    assert seen["agent"] == "peek"
+    assert current_run_id.get() is None
+    assert current_agent_name.get() == ""
+
+
+async def test_run_once_crash_emits_run_failed_and_reraises():
+    from novelizer.telemetry.events import TelemetryEventType
+
+    class Boom(BaseAgent):
+        async def _run(self):
+            raise ValueError("kaboom")
+
+    agent = Boom(runner=None, read_store=None, committer=None, interval=0, name="boom")
+    rec = _CapturingRecorder()
+    agent.telemetry = rec
+    with pytest.raises(ValueError, match="kaboom"):
+        await agent.run_once()
+    types = [t for t, _, _ in rec.emitted]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FAILED]
+    failed = rec.emitted[1][2]
+    assert failed.error_type == "ValueError" and "kaboom" in failed.error_message
+    assert failed.phase == "agent"  # recorder reports no open LLM call
+
+
+async def test_run_once_crash_inside_open_llm_call_reports_llm_call_phase():
+    class InCall(_CapturingRecorder):
+        def in_llm_call(self, run_id):
+            return True
+
+    class Boom(BaseAgent):
+        async def _run(self):
+            raise ValueError("mid-call")
+
+    agent = Boom(runner=None, read_store=None, committer=None, interval=0, name="boom")
+    rec = InCall()
+    agent.telemetry = rec
+    with pytest.raises(ValueError):
+        await agent.run_once()
+    assert rec.emitted[1][2].phase == "llm_call"
+
+
+async def test_run_once_without_telemetry_is_silent_and_still_runs():
+    ran = []
+
+    class Quiet(BaseAgent):
+        async def _run(self):
+            ran.append(True)
+
+    agent = Quiet(runner=None, read_store=None, committer=None, interval=0, name="quiet")
+    await agent.run_once()
+    assert ran == [True]
