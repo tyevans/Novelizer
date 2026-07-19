@@ -145,6 +145,8 @@ class CanonBackend(BackendProtocol):
             return LsResult(
                 entries=[FileInfo(path=f"/{d}", is_dir=True) for d in KIND_DIRS]
             )
+        if norm in snap.index:
+            return LsResult(error=f"'{path}' is a file, not a directory. Read it instead.")
         if norm.lstrip("/") not in KIND_DIRS:
             valid = ", ".join(f"/{d}" for d in KIND_DIRS)
             return LsResult(error=f"Directory '{path}' not found. Top-level directories: {valid}")

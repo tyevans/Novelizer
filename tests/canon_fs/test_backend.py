@@ -151,3 +151,22 @@ async def test_als_unknown_directory_names_valid_ones(stack):
     result = await backend.als("/nope")
     assert result.entries is None
     assert "/chapters" in result.error and "not found" in result.error
+
+
+async def test_als_on_file_path_says_read_it(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.als("/chapters/001-the-drowned-bell.md")
+    assert result.entries is None
+    assert "is a file" in result.error and "Read it" in result.error
+
+
+async def test_als_empty_string_treated_as_root(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.als("")
+    assert [e["path"] for e in result.entries] == [
+        "/chapters", "/characters", "/world", "/threads", "/secrets", "/themes",
+    ]
