@@ -117,3 +117,8 @@ def test_parse_story_accepts_author_and_checker_tools_enabled():
     cfg = parse_story({"author_tools_enabled": False, "checker_tools_enabled": False}, source="s.toml")
     assert cfg.author_tools_enabled is False
     assert cfg.checker_tools_enabled is False
+
+
+def test_chat_tools_enabled_flows_through_layers():
+    assert GlobalConfig(chat_tools_enabled=False).chat_tools_enabled is False
+    assert StoryConfig(chat_tools_enabled=False).chat_tools_enabled is False
