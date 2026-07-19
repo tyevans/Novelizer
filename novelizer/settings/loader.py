@@ -49,6 +49,8 @@ class EnvOverrides(BaseSettings):
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
+    author_tools_enabled: bool | None = None
+    checker_tools_enabled: bool | None = None
 
 
 def build_effective(
