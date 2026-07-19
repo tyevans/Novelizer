@@ -8,13 +8,15 @@
 
 **Goal:** Replace the four stacked brain panes (`#thread_board`, `#story_shape`, `#who_knows_what`, `#causeway`) with **one tabbed Story Brain panel** (Textual `TabbedContent`, keys 1–4, border title `STORY BRAIN`): a real tension sparkline with titled sag/spike callouts, threads grouped by state with stale pinned on top, the knowledge matrix as an actual glyph matrix, a titled causeway with paradox alarms, a persistent one-line alarm summary strip, and designed one-line empty states. Names, never ids.
 
-**Architecture:** All new rendering logic is pure functions in **new** `novelizer/tui/widgets/brain_model.py` (same seam as `feed_model.py` / `browser_model.py`: records in → dataclasses of `rich.text.Text` out, no Textual imports, no I/O, unit-testable without a terminal). A thin `BrainPanel` widget (**new** `novelizer/tui/widgets/brain_panel.py`) composes `TabbedContent`/`TabPane`/`Sparkline`/`Static` and consumes the models. The four old widget files and their four polling loops are **deleted**; one `_brain_loop` in `app.py` polls `ReadStore` once per second and updates all four tabs plus the strip. Alarm/state detection is **never re-derived**: staleness, sag/spike, paradoxes, and knowledge cells come from the existing brain/canon functions. No new events, projections, or read-model changes. Rendering only — **no row selection/targeting inside tabs** (that is Phase 3); proposals/roster/statusbar/detail are untouched.
+**Architecture:** All new rendering logic is pure functions in **new** `novelizer/tui/widgets/brain_model.py` (same seam as `feed_model.py` / `browser_model.py`: records in → dataclasses of `rich.text.Text` out, no Textual imports, no I/O, unit-testable without a terminal). A thin `BrainPanel` widget (**new** `novelizer/tui/widgets/brain_panel.py`) composes `TabbedContent`/`TabPane`/`Sparkline`/`Static` and consumes the models. The four old widget files and their four polling loops are **deleted**; one `_brain_loop` in `app.py` polls `ReadStore` once per second, passes the M5.3 settings thresholds (`staleness_threshold_chapters`, `sag_spike_delta`) down as parameters, and updates all four tabs plus the strip. Alarm/state detection is **never re-derived**: staleness, sag/spike, paradoxes, and knowledge cells come from the existing brain/canon functions. No new events, projections, or read-model changes. Rendering only — **no row selection/targeting inside tabs** (that is Phase 3); proposals/statusbar (with its folded roster)/detail and the whole Engine Room surface (EngineRoom, ActivityStrip, telemetry loops, `e`/`p` keys) are untouched.
 
 **Tech Stack:** Python 3.13, uv, Textual 5.3.0 (`TabbedContent`, `TabPane`, `Sparkline`, `Static`, `Vertical`), `rich.text.Text`, pytest + pytest-asyncio pilot harness, Hypothesis for property tests.
 
 ## Global Constraints
 
-- **Single-sourcing of brain logic (non-negotiable):** staleness only via `novelizer/brain/staleness.py::is_thread_stale` and `chapters_elapsed_since` (threshold `STALENESS_THRESHOLD_CHAPTERS` stays theirs); sag/spike only via `novelizer/brain/sag_spike.py::detect_sag_spike` (`SAG_SPIKE_DELTA` stays its); paradoxes only via `novelizer/brain/paradoxes.py::find_paradoxes`; per-cell knowledge state only via `novelizer/canon/secrets.py::knowledge_cell_state`; terminal thread states only via `novelizer/canon/threads.py::TERMINAL_STATES`. `brain_model.py` imports these — it never re-types a threshold or re-implements a rule.
+- **Single-sourcing of brain logic (non-negotiable):** staleness only via `novelizer/brain/staleness.py::is_thread_stale(thread, chapters, threshold)` and `chapters_elapsed_since(chapter_id, chapters)`; sag/spike only via `novelizer/brain/sag_spike.py::detect_sag_spike(scores, delta)`; paradoxes only via `novelizer/brain/paradoxes.py::find_paradoxes`; per-cell knowledge state only via `novelizer/canon/secrets.py::knowledge_cell_state`; terminal thread states only via `novelizer/canon/threads.py::TERMINAL_STATES`. `brain_model.py` imports these — it never re-types a threshold or re-implements a rule.
+- **Thresholds always flow from settings (M5.3, non-negotiable):** the merged app already calls `ThreadBoard.refresh_from(read, threshold=self.runtime.settings.staleness_threshold_chapters)` and `StoryShape.refresh_from(read, delta=self.runtime.settings.sag_spike_delta)`; the Story Brain keeps that wiring intact. `_brain_loop` reads `self.runtime.settings.staleness_threshold_chapters` and `self.runtime.settings.sag_spike_delta` **every cycle** (so a settings-watch apply takes effect on the next poll) and passes them into `BrainPanel.refresh_from(read, threshold=..., delta=...)` (both keyword-only, no defaults — the app is the only caller); `refresh_from` passes `threshold` into `threads_tab` and `delta` into `shape_tab`, whose *defaults* are the imported `STALENESS_THRESHOLD_CHAPTERS` / `SAG_SPIKE_DELTA` constants. The literals `3` / `0.3` are never typed anywhere in the new code.
+- **EngineRoom / ActivityStrip / telemetry preserved untouched:** `yield EngineRoom(id="engine_room")` at the bottom of `#left`, `yield ActivityStrip("idle", id="activity_strip")` below the statusbar, the `("e", "toggle_engine", ...)` / `("p", "toggle_prompt", ...)` bindings and their actions, `_telemetry_bus_loop`, `_telemetry_refresh_loop`, `_refresh_strip`, `_refresh_trace`, `on_data_table_row_selected`, and every `#engine_room` / `#activity_strip` / `#er_*` / `#body.engine` tcss rule stay exactly as merged. The single permitted engine-rule edit: the `#body.engine … { display: none; }` member list swaps `#thread_board, #story_shape, #who_knows_what, #causeway` for `#brain` (engine mode must hide the new panel exactly as it hid the four old panes; the vestigial `#body.engine #roster` member stays verbatim). Keys `1`–`4` collide with nothing: app-level bindings are `ctrl+k r e p v q`, and SettingsScreen (`escape`/`t`), StoryPicker (`q`/`escape`), SetupWizard (`q`) are separate screens.
 - **Real cell states** (read from `knowledge_cell_state`): exactly `"unknown" | "known" | "revealed"`. There is **no** "suspected" state in the data (the spec's `◍` sketch has no backing state and is dropped). Glyph mapping, total over the codomain: `CELL_GLYPHS = {"known": "●", "unknown": "○", "revealed": "✓"}`. Revealed is secret-level, so `✓` never appears as a matrix cell — revealed secrets fold to the one dim line `✓ revealed (N)`.
 - **No ids on the dashboard.** Chapter/thread/secret/character *titles and names* only. Chapter number = 1-based position in `ReadStore.list_chapters()` order. The **only** permitted raw-id rendering is the causeway/callout fallback when a chapter id is not in `list_chapters()` (`chapter_label` returns the raw id string then).
 - **Alarm color** is `ALARM_STYLE` imported from `novelizer/tui/widgets/feed_model.py` (`"bold red"`) — never re-typed.
@@ -28,8 +30,8 @@
   - Secrets: `No secrets yet. The room is still honest.` (spec-given)
   - Causeway: `No causal edges yet — nothing has consequences until the Analyst says so.` (spec-given)
 - **Tabs and keys:** pane ids `tab_shape` / `tab_threads` / `tab_secrets` / `tab_causeway`; tab titles `1 Shape` / `2 Threads` / `3 Secrets` / `4 Cause`; app-level `BINDINGS` for keys `1`–`4` call `action_brain_tab(pane_id)`. Panel id `#brain`, `border_title = "STORY BRAIN"`. Keys only fire when no focused widget consumes them — typing digits in the `#command` Input must keep working (Input consumes printable keys; no `priority` bindings).
-- **Old surface removed in the same task that replaces it:** the four widget files, their four `on_mount` workers/loops, their four `compose()` blocks, their four tcss id rules, their four `tests/tui/test_*.py` files, and every cross-reference (`tests/tui/test_app_layout.py`, `tests/agents/test_author.py`, `tests/agents/test_continuity_checker.py`) — all in Task 5, never left dangling between tasks.
-- **`#body.room` / `#body.reading` CSS is not modified.** `#brain` lives inside `#left`, so reading mode ('v') hides it via the existing `#body.reading #left { display: none; }` rule and room mode ('r') keeps it; Task 5 pilot-tests both toggles against the new panel.
+- **Old surface removed in the same task that replaces it:** the four widget files, their four `on_mount` workers/loops, their four `compose()` blocks, their four tcss id rules (plus their four entries in the `#body.engine` hide rule and in the `border-title-color` list), their four `tests/tui/test_*.py` files, and every cross-reference (`tests/tui/test_app_layout.py`, `tests/agents/test_author.py`, `tests/agents/test_continuity_checker.py`) — all in Task 5, never left dangling between tasks.
+- **`#body.room` / `#body.reading` CSS is not modified.** `#brain` lives inside `#left`, so reading mode ('v') hides it via the existing `#body.reading #left { display: none; }` rule and room mode ('r') keeps it; engine mode ('e') hides it via the (member-swapped) `#body.engine` rule. Task 5 pilot-tests all three toggles against the new panel.
 - **`app.messages` untouched** — the brain panel never writes to the feed; worker errors from `_brain_loop` go through the existing `_report_worker_error("brain", e)` path.
 - Full suite must pass with `uv run pytest -q`, **zero warnings**, before the final commit.
 
@@ -37,16 +39,18 @@
 
 | Test | References | Fixed in |
 |---|---|---|
-| `tests/tui/test_thread_board.py` (3 tests on `thread_board_line`) | deleted widget | Task 5: file deleted; behavior covered by Task 2's `thread_line` tests |
-| `tests/tui/test_story_shape.py` (3 tests on `story_shape_line`) | deleted widget | Task 5: file deleted; behavior covered by Task 1's `shape_tab` tests |
+| `tests/tui/test_thread_board.py` (4 tests on `thread_board_line`, incl. M5.3's `test_thread_board_line_respects_explicit_threshold`) | deleted widget | Task 5: file deleted; behavior covered by Task 2's `thread_line`/`threads_tab` tests, incl. the explicit-`threshold` test |
+| `tests/tui/test_story_shape.py` (3 tests on `story_shape_line`) | deleted widget | Task 5: file deleted; behavior covered by Task 1's `shape_tab` tests, incl. the explicit-`delta` test |
 | `tests/tui/test_who_knows_what.py` (3 tests on `who_knows_what_line`) | deleted widget | Task 5: file deleted; behavior covered by Task 3's `secret_row`/`secrets_tab` tests |
 | `tests/tui/test_causeway.py` (2 tests on `causeway_line`) | deleted widget | Task 5: file deleted; behavior covered by Task 4's `causeway_tab` tests |
-| `tests/tui/test_app_layout.py::test_mission_control_shows_thread_board_and_story_shape_panes` | `#thread_board`, `#story_shape` | Task 5: rewritten as `test_story_brain_threads_and_shape_tabs_populate` |
-| `tests/tui/test_app_layout.py::test_mission_control_shows_who_knows_what_and_causeway_panes` | `#who_knows_what`, `#causeway` | Task 5: rewritten as `test_story_brain_secrets_matrix_and_causeway_tabs_populate` |
-| `tests/tui/test_app_layout.py::test_every_pane_has_its_border_title` | four pane titles | Task 5: four entries replaced with `"#brain": "STORY BRAIN"` |
-| `tests/agents/test_author.py::test_m3_done_when_...` (lines ~263–303) | imports `thread_board_line` | Task 5: switched to `brain_model.thread_line(...).plain`, asserts `"stale"` |
-| `tests/agents/test_continuity_checker.py::test_m4_3_done_when_...` (lines ~195–250) | imports `who_knows_what_line` | Task 5: switched to `brain_model.secret_row(...).plain`, asserts `"no one knows"` / no `●` |
-| `tests/tui/test_reading_mode.py`, `test_app_commands.py` room/reading toggles | `#body`/`#left` only | unaffected (CSS rules unchanged); Task 5 adds a brain-specific toggle test |
+| `tests/tui/test_app_layout.py::test_mission_control_shows_thread_board_and_story_shape_panes` (lines ~115–142) | `#thread_board`, `#story_shape` | Task 5: rewritten as `test_story_brain_threads_and_shape_tabs_populate` |
+| `tests/tui/test_app_layout.py::test_mission_control_shows_who_knows_what_and_causeway_panes` (lines ~145–176) | `#who_knows_what`, `#causeway` | Task 5: rewritten as `test_story_brain_secrets_matrix_and_causeway_tabs_populate` |
+| `tests/tui/test_app_layout.py::test_every_pane_has_its_border_title` (lines ~179–204) | four pane titles in `expected` | Task 5: the four entries replaced with `"#brain": "STORY BRAIN"` (8 entries → 5) |
+| `tests/tui/test_app_layout.py::test_mission_control_panes_present_and_populate`, `::test_approval_queue_pane_shows_pending_proposal_and_approve_via_command` | `#feed`/`#browser`/`#statusbar`/`#proposals` only | unaffected — not touched |
+| `tests/agents/test_author.py::test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stale` (lines ~310–357; import at ~320, asserts at ~331/~356) | imports `thread_board_line` | Task 5: switched to `brain_model.thread_line(...).plain`, asserts `"stale"` |
+| `tests/agents/test_continuity_checker.py::test_m4_3_done_when_...` (lines ~195–250; import at ~209, asserts at ~247–249) | imports `who_knows_what_line` | Task 5: switched to `brain_model.secret_row(...).plain`, asserts `"no one knows"` / no `●` |
+| `tests/tui/test_engine_room.py`, `test_engine_room_model.py`, `test_roster.py`, `test_story_picker.py` (added/kept by master) | engine room, statusbar roster summary, story picker only — zero references to the four replaced widgets (grep-verified) | not touched |
+| `tests/tui/test_reading_mode.py`, `test_app_commands.py` room/reading toggles | `#body`/`#left` only | unaffected (CSS rules unchanged); Task 5 adds a brain-specific toggle test covering `v`/`r`/`e` |
 | `novelizer/brain/context.py`, `novelizer/brain/paradoxes.py` docstrings naming the old widgets | prose only, no imports | not touched (no code dependency) |
 
 ---
@@ -58,13 +62,14 @@
 - Test: `tests/tui/test_brain_model.py` (new)
 
 **Interfaces:**
-- Consumes: `detect_sag_spike` (`novelizer.brain.sag_spike`), `ALARM_STYLE` (`novelizer.tui.widgets.feed_model`), `Chapter`, `StructureScore` (`novelizer.store.models`), `rich.text.Text`.
-- Produces: `DIM = "dim"`, the four `*_EMPTY` constants (all defined here once; Tasks 2–4 test theirs), `chapter_number(chapter_id: str, chapters: list[Chapter]) -> int | None`, `chapter_label(chapter_id: str, chapters: list[Chapter]) -> str`, `ShapeTab` (frozen dataclass: `tensions: list[float]`, `meta: Text`, `callouts: list[Text]`, `alarm_count: int`), `shape_tab(scores: list[StructureScore], chapters: list[Chapter]) -> ShapeTab`. Tasks 2–5 consume exactly these names.
+- Consumes: `detect_sag_spike`, `SAG_SPIKE_DELTA` (`novelizer.brain.sag_spike`), `ALARM_STYLE` (`novelizer.tui.widgets.feed_model`), `Chapter`, `StructureScore` (`novelizer.store.models`), `rich.text.Text`.
+- Produces: `DIM = "dim"`, the four `*_EMPTY` constants (all defined here once; Tasks 2–4 test theirs), `chapter_number(chapter_id: str, chapters: list[Chapter]) -> int | None`, `chapter_label(chapter_id: str, chapters: list[Chapter]) -> str`, `ShapeTab` (frozen dataclass: `tensions: list[float]`, `meta: Text`, `callouts: list[Text]`, `alarm_count: int`), `shape_tab(scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA) -> ShapeTab`. Tasks 2–5 consume exactly these names.
 
 Design decisions locked here:
 - **Sparkline order:** tensions follow chapter position, not score-append order. One score per chapter (the projection keys `structure_scores` by chapter id); if the list ever carries duplicates for a chapter, the last one wins. A score whose `chapter_id` is not a known chapter (shouldn't occur; defensive) keeps its data, appended after the ordered points in first-seen order — data is never dropped.
 - **Meta line:** `ch 1 ▸ ch {n}` axis (just `ch 1` when a single point) plus ` · pacing: {label}` from the **last chapter-ordered** score, omitted when that label is empty. Dim style.
-- **Callouts:** one `ALARM_STYLE` line per flagged chapter from `detect_sag_spike(scores)` (called with the raw score list — single-sourcing), in chapter order, format `⚠ {sag|spike}: {chapter_label(...)}`. `alarm_count = len(callouts)`.
+- **Callouts:** one `ALARM_STYLE` line per flagged chapter from `detect_sag_spike(scores, delta)` (called with the raw score list — single-sourcing), in chapter order, format `⚠ {sag|spike}: {chapter_label(...)}`. `alarm_count = len(callouts)`.
+- **Delta is a parameter (M5.3):** `shape_tab` takes `delta: float = SAG_SPIKE_DELTA` (the imported constant, never a re-typed `0.3`) and forwards it verbatim to `detect_sag_spike`. Task 5's `_brain_loop` feeds `settings.sag_spike_delta` through `BrainPanel.refresh_from` into this parameter — the same settings → pure-function-param flow the merged `StoryShape.refresh_from(read, delta=...)` already uses.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -154,6 +159,23 @@ def test_shape_tab_spike_callout():
     assert tab.callouts[0].plain == '⚠ spike: ch 3 "The Break"'
 
 
+def test_shape_tab_respects_explicit_delta():
+    # M5.3: the sag/spike delta always flows in as a parameter (the app
+    # passes settings.sag_spike_delta) — never re-typed inside brain_model.
+    chs = _chapters("One", "Two")
+    scores = [
+        StructureScore(chapter_id="c1", tension=0.6, pacing_label=""),
+        StructureScore(chapter_id="c2", tension=0.2, pacing_label=""),
+    ]
+    assert shape_tab(scores, chs).callouts == []  # default SAG_SPIKE_DELTA (0.3): quiet
+    tight = shape_tab(scores, chs, delta=0.1)     # ±0.2 from the mean now flags both
+    assert [c.plain for c in tight.callouts] == [
+        '⚠ spike: ch 1 "One"',
+        '⚠ sag: ch 2 "Two"',
+    ]
+    assert tight.alarm_count == 2
+
+
 def test_shape_tab_score_for_unknown_chapter_keeps_its_data_at_the_end():
     chs = _chapters("One")
     scores = [
@@ -202,7 +224,7 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
-from novelizer.brain.sag_spike import detect_sag_spike
+from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.store.models import Chapter, StructureScore
 from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
@@ -242,10 +264,14 @@ class ShapeTab:
     alarm_count: int
 
 
-def shape_tab(scores: list[StructureScore], chapters: list[Chapter]) -> ShapeTab:
+def shape_tab(
+    scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA
+) -> ShapeTab:
     """The Shape tab: tension-by-chapter sparkline data plus sag/spike
     callouts naming chapter TITLES. Flags come from detect_sag_spike over the
-    raw score list — never re-derived here."""
+    raw score list — never re-derived here. `delta` arrives from
+    settings.sag_spike_delta via the app's _brain_loop (M5.3 single-sourcing);
+    the default is the imported constant, never a re-typed literal."""
     if not scores:
         return ShapeTab([], Text(SHAPE_EMPTY, style=DIM), [], 0)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
@@ -253,7 +279,7 @@ def shape_tab(scores: list[StructureScore], chapters: list[Chapter]) -> ShapeTab
     ordered = [by_chapter[c.id] for c in chapters if c.id in by_chapter]
     ordered += [s for cid, s in by_chapter.items() if cid not in chapter_ids]
     tensions = [s.tension for s in ordered]
-    flags = detect_sag_spike(scores)
+    flags = detect_sag_spike(scores, delta)
     callouts = [
         Text(f"⚠ {flags[s.chapter_id]}: {chapter_label(s.chapter_id, chapters)}", style=ALARM_STYLE)
         for s in ordered
@@ -270,7 +296,7 @@ def shape_tab(scores: list[StructureScore], chapters: list[Chapter]) -> ShapeTab
 ```
 uv run pytest tests/tui/test_brain_model.py -v
 ```
-Expected: 9 passed (the Hypothesis test counts as one).
+Expected: 11 passed (the Hypothesis test counts as one).
 
 - [ ] **Step 5: Commit**
 
@@ -288,13 +314,14 @@ git commit -m "feat: brain_model — chapter-title helpers + Shape tab model (sp
 - Test: `tests/tui/test_brain_model.py` (append)
 
 **Interfaces:**
-- Consumes: `is_thread_stale`, `chapters_elapsed_since` (`novelizer.brain.staleness`); `TERMINAL_STATES` (`novelizer.canon.threads`); `ThreadRecord`, `ThreadState` (`novelizer.store.models`); Task 1's `chapter_number`, `THREADS_EMPTY`, `DIM`, `ALARM_STYLE`.
-- Produces: `thread_line(thread: ThreadRecord, chapters: list[Chapter]) -> Text`, `ThreadsTab` (frozen dataclass: `lines: list[Text]`, `alarm_count: int`), `threads_tab(threads: list[ThreadRecord], chapters: list[Chapter]) -> ThreadsTab`. Task 5 consumes `threads_tab`; the updated `tests/agents/test_author.py` consumes `thread_line` directly (the same seam its docstring already describes).
+- Consumes: `is_thread_stale`, `chapters_elapsed_since`, `STALENESS_THRESHOLD_CHAPTERS` (`novelizer.brain.staleness`); `TERMINAL_STATES` (`novelizer.canon.threads`); `ThreadRecord`, `ThreadState` (`novelizer.store.models`); Task 1's `chapter_number`, `THREADS_EMPTY`, `DIM`, `ALARM_STYLE`.
+- Produces: `thread_line(thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS) -> Text`, `ThreadsTab` (frozen dataclass: `lines: list[Text]`, `alarm_count: int`), `threads_tab(threads: list[ThreadRecord], chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS) -> ThreadsTab`. Task 5 consumes `threads_tab`; the updated `tests/agents/test_author.py` consumes `thread_line` directly (the same seam its docstring already describes; it uses the default threshold, like the `thread_board_line` call it replaces).
 
 Design decisions locked here:
 - ThreadRecord state vocabulary (from `novelizer/store/models.py::ThreadState`): `planted | touched | paid_off | abandoned`; "open" = not in `TERMINAL_STATES` (`{"paid_off", "abandoned"}`).
 - Grouping: stale first (each an `ALARM_STYLE` line), then live open threads in projection order, then one dim fold line for terminal threads (only when any exist). `alarm_count` = stale count.
 - `thread_line` also defines a dim `✓ {name} · {state}` rendering for a terminal thread so the helper is total, even though `threads_tab` folds terminals to a count instead of rendering them per-row.
+- **Threshold is a parameter (M5.3):** both functions take `threshold: int = STALENESS_THRESHOLD_CHAPTERS` (the imported constant, never a re-typed `3`) and forward it verbatim to `is_thread_stale(thread, chapters, threshold)`. Task 5's `_brain_loop` feeds `settings.staleness_threshold_chapters` through `BrainPanel.refresh_from` into this parameter — the same flow the merged `ThreadBoard.refresh_from(read, threshold=...)` already uses. The explicit-threshold test below carries forward M5.3's `test_thread_board_line_respects_explicit_threshold` (deleted with its file in Task 5).
 
 - [ ] **Step 1: Write the failing test** (append to `tests/tui/test_brain_model.py`)
 
@@ -359,6 +386,19 @@ def test_threads_tab_fold_line_omits_zero_parts():
     assert [line.plain for line in tab.lines] == ["✓ 1 paid off"]
 
 
+def test_thread_line_and_threads_tab_respect_explicit_threshold():
+    # M5.3: the staleness threshold always flows in as a parameter (the app
+    # passes settings.staleness_threshold_chapters) — never re-typed here.
+    # Carries forward test_thread_board_line_respects_explicit_threshold.
+    chs = _chapters("One", "Two", "Three")  # two chapters elapsed since c1
+    t = ThreadRecord(id="t", name="T", state=ThreadState.planted, last_chapter_id="c1")
+    assert "stale" not in thread_line(t, chs).plain        # default threshold (3)
+    assert "stale" in thread_line(t, chs, threshold=2).plain
+    tab = threads_tab([t], chs, threshold=2)
+    assert tab.alarm_count == 1
+    assert tab.lines[0].plain == "⚠ T · stale — last touched ch 1, 2 chapters ago"
+
+
 def test_threads_tab_empty_state():
     tab = threads_tab([], [])
     assert [line.plain for line in tab.lines] == [THREADS_EMPTY]
@@ -387,13 +427,17 @@ uv run pytest tests/tui/test_brain_model.py -v
 ```
 Expected: `ImportError: cannot import name 'thread_line' from 'novelizer.tui.widgets.brain_model'` (collection error); Task 1's tests still pass when run alone.
 
-- [ ] **Step 3: Write minimal implementation** (append to `novelizer/tui/widgets/brain_model.py`; extend the imports block with `from novelizer.brain.staleness import chapters_elapsed_since, is_thread_stale`, `from novelizer.canon.threads import TERMINAL_STATES`, and add `ThreadRecord, ThreadState` to the `novelizer.store.models` import)
+- [ ] **Step 3: Write minimal implementation** (append to `novelizer/tui/widgets/brain_model.py`; extend the imports block with `from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale`, `from novelizer.canon.threads import TERMINAL_STATES`, and add `ThreadRecord, ThreadState` to the `novelizer.store.models` import)
 
 ```python
-def thread_line(thread: ThreadRecord, chapters: list[Chapter]) -> Text:
+def thread_line(
+    thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
+) -> Text:
     """One Threads-tab row. Staleness comes from is_thread_stale /
-    chapters_elapsed_since — never re-derived. No slugs/ids anywhere."""
-    if is_thread_stale(thread, chapters):
+    chapters_elapsed_since — never re-derived; `threshold` arrives from
+    settings.staleness_threshold_chapters via the app's _brain_loop (M5.3
+    single-sourcing). No slugs/ids anywhere."""
+    if is_thread_stale(thread, chapters, threshold):
         elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
         n = chapter_number(thread.last_chapter_id, chapters)
         if n is None:
@@ -412,19 +456,21 @@ class ThreadsTab:
     alarm_count: int
 
 
-def threads_tab(threads: list[ThreadRecord], chapters: list[Chapter]) -> ThreadsTab:
+def threads_tab(
+    threads: list[ThreadRecord], chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
+) -> ThreadsTab:
     """Threads grouped by state: stale pinned first (alarms), then live open
     threads, terminal threads folded to one dim count line."""
     if not threads:
         return ThreadsTab([Text(THREADS_EMPTY, style=DIM)], 0)
-    stale = [t for t in threads if is_thread_stale(t, chapters)]
+    stale = [t for t in threads if is_thread_stale(t, chapters, threshold)]
     stale_ids = {t.id for t in stale}
     live = [
         t for t in threads
         if t.id not in stale_ids and t.state.value not in TERMINAL_STATES
     ]
     terminal = [t for t in threads if t.state.value in TERMINAL_STATES]
-    lines = [thread_line(t, chapters) for t in stale + live]
+    lines = [thread_line(t, chapters, threshold) for t in stale + live]
     if terminal:
         paid = sum(1 for t in terminal if t.state == ThreadState.paid_off)
         abandoned = len(terminal) - paid
@@ -440,7 +486,7 @@ def threads_tab(threads: list[ThreadRecord], chapters: list[Chapter]) -> Threads
 ```
 uv run pytest tests/tui/test_brain_model.py -v
 ```
-Expected: 17 passed.
+Expected: 20 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -663,7 +709,7 @@ def secrets_tab(
 ```
 uv run pytest tests/tui/test_brain_model.py -v
 ```
-Expected: 28 passed.
+Expected: 31 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -838,7 +884,7 @@ def alarm_strip(shape: int, threads: int, secrets: int, cause: int) -> Text:
 ```
 uv run pytest tests/tui/test_brain_model.py -v
 ```
-Expected: 38 passed.
+Expected: 41 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -863,11 +909,13 @@ git commit -m "feat: brain_model Causeway tab (titled edges, paradox alarms) + a
 - Delete: `tests/tui/test_thread_board.py`, `tests/tui/test_story_shape.py`, `tests/tui/test_who_knows_what.py`, `tests/tui/test_causeway.py`
 
 **Interfaces:**
-- Consumes: `shape_tab`, `threads_tab`, `secrets_tab`, `causeway_tab`, `alarm_strip` (Tasks 1–4); `ReadStore.list_chapters/list_threads/list_structure_scores/list_secrets/list_characters/knowledge_matrix/list_causal_edges` (existing signatures, no args except `list_chapters`' optional `status`, unused); Textual `TabbedContent(id=...)` / `TabPane(title, id=...)` / `Sparkline(data)` (`data` is a reactive `Sequence[float] | None`) / `Static` / `Vertical`.
-- Produces: `BrainPanel(Vertical)` with `compose()`, `async refresh_from(read) -> None`, `activate_tab(pane_id: str) -> None`; widget ids `#brain`, `#brain_tabs`, `#shape_spark`, `#shape_body`, `#threads_body`, `#secrets_body`, `#causeway_body`, `#brain_strip`; app additions `_brain_loop`, `action_brain_tab`.
+- Consumes: `shape_tab`, `threads_tab`, `secrets_tab`, `causeway_tab`, `alarm_strip` (Tasks 1–4); `ReadStore.list_chapters/list_threads/list_structure_scores/list_secrets/list_characters/knowledge_matrix/list_causal_edges` (existing signatures, no args except `list_chapters`' optional `status`, unused); `runtime.settings.staleness_threshold_chapters` / `runtime.settings.sag_spike_delta` (M5.3 `EffectiveSettings` fields, defaults 3 / 0.3 — read in `_brain_loop`, never inside widgets); Textual `TabbedContent(id=...)` / `TabPane(title, id=...)` / `Sparkline(data)` (`data` is a reactive `Sequence[float] | None`) / `Static` / `Vertical`.
+- Produces: `BrainPanel(Vertical)` with `compose()`, `async refresh_from(read, *, threshold: int, delta: float) -> None` (both keyword-only, no defaults — the app must pass settings), `activate_tab(pane_id: str) -> None`; widget ids `#brain`, `#brain_tabs`, `#shape_spark`, `#shape_body`, `#threads_body`, `#secrets_body`, `#causeway_body`, `#brain_strip`; app additions `_brain_loop`, `action_brain_tab`.
 
 Notes locked here:
 - One poll (`await asyncio.sleep(1.0)` loop, first refresh immediately on mount) updates **all four tabs and the strip** each cycle — hidden tabs stay current, so the strip can never lie.
+- `_brain_loop` re-reads `self.runtime.settings.staleness_threshold_chapters` and `self.runtime.settings.sag_spike_delta` **every cycle** (matching the merged `_thread_board_loop`/`_story_shape_loop` it replaces), so a `_settings_watch_loop` apply takes effect on the next poll with no extra wiring.
+- EngineRoom, ActivityStrip, the telemetry loops, and the `e`/`p` bindings are **preserved verbatim** (see Global Constraints); the only engine-mode change is the `#body.engine` hide rule's member swap to `#brain`.
 - `chapters` is fetched **once** per refresh and shared by shape/threads/causeway (consistent snapshot within a cycle).
 - The `Sparkline` is hidden (`display = False`) when there is no data (its empty render is a blank row, not a designed empty state) and shown otherwise; the empty-state line lives in `#shape_body` via `ShapeTab.meta`.
 - Multi-line `Static` content = `Text("\n").join(lines)`.
@@ -891,9 +939,9 @@ from novelizer.tui.widgets.brain_model import (
 )
 
 
-async def _app():
+async def _app(**settings_overrides):
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    settings = Settings(db_path=path, projector_interval=0.1)
+    settings = Settings(db_path=path, projector_interval=0.1, **settings_overrides)
     rt = Runtime(settings, runners={})
     await rt.start()
     for a in rt.scheduler.status():
@@ -962,29 +1010,37 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
 
 
 @pytest.mark.asyncio
-async def test_strip_flags_stale_thread_alarm_while_another_tab_is_open():
+async def test_strip_reflects_settings_thresholds_while_another_tab_is_open():
+    """M5.3 wiring proof: _brain_loop passes settings.staleness_threshold_chapters
+    and settings.sag_spike_delta through refresh_from into the pure models.
+    With the defaults (3 / 0.3) this fixture is completely quiet — only the
+    tightened settings below produce the alarms asserted here. The strip is
+    visible regardless of the active tab (Shape)."""
     from textual.widgets import Static
-    from novelizer.canon.events import EventType, ThreadPlanted
+    from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored
     from novelizer.store.models import Chapter
 
-    app, rt, path = await _app()
+    app, rt, path = await _app(staleness_threshold_chapters=2, sag_spike_delta=0.1)
     try:
         await rt.events.append(EventType.THREAD_PLANTED, "the-boys-gift",
                                ThreadPlanted(id="the-boys-gift", name="The Boy's Gift"))
-        for i in range(4):
+        for i, tension in enumerate([0.6, 0.2]):
             await rt.events.append(EventType.CHAPTER_CREATED, f"c{i}",
                                    Chapter(id=f"c{i}", title=f"Ch {i}", prose="p"))
+            await rt.events.append(EventType.ANNOTATION_STRUCTURE_SCORED, f"c{i}",
+                                   AnnotationStructureScored(chapter_id=f"c{i}", tension=tension, pacing_label=""))
         await rt.projector.catch_up()
         async with app.run_test() as pilot:
             await pilot.pause(0.5)
             strip = str(app.query_one("#brain_strip", Static).renderable)
-            assert "Threads ⚠1" in strip   # visible regardless of the active tab (Shape)
+            assert "Threads ⚠1" in strip   # 2 chapters untouched ≥ threshold 2 (default 3: quiet)
+            assert "Shape ⚠2" in strip     # ±0.2 from the mean ≥ delta 0.1 (default 0.3: quiet)
     finally:
         await rt.close(); os.unlink(path)
 
 
 @pytest.mark.asyncio
-async def test_brain_panel_hides_in_reading_mode_and_survives_room_mode():
+async def test_brain_panel_hides_in_reading_and_engine_modes_and_survives_room_mode():
     from textual.widgets import TabbedContent
 
     app, rt, path = await _app()
@@ -1002,6 +1058,13 @@ async def test_brain_panel_hides_in_reading_mode_and_survives_room_mode():
             await pilot.press("r")
             await pilot.pause()
             assert brain.region.width > 0        # room mode keeps the left column
+            await pilot.press("e")
+            await pilot.pause()
+            assert brain.region.width == 0       # engine mode hides #brain (member-swapped rule)
+            assert app.query_one("#engine_room").region.width > 0
+            await pilot.press("e")
+            await pilot.pause()
+            assert brain.region.width > 0        # engine off: panel is back
             await pilot.press("2")               # keys still switch tabs after toggling
             assert app.query_one("#brain_tabs", TabbedContent).active == "tab_threads"
     finally:
@@ -1097,7 +1160,7 @@ In `test_every_pane_has_its_border_title` (same file), replace the four brain en
             }
 ```
 
-In `tests/agents/test_author.py` (lines ~263–303):
+In `tests/agents/test_author.py` (`test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stale`, lines ~310–357):
 - change the import `from novelizer.tui.widgets.thread_board import thread_board_line` to `from novelizer.tui.widgets.brain_model import thread_line`
 - change `assert "STALE" in thread_board_line(thread_before, chapters)` to `assert "stale" in thread_line(thread_before, chapters).plain`
 - change `assert "STALE" not in thread_board_line(thread_after, chapters_after)` to `assert "stale" not in thread_line(thread_after, chapters_after).plain`
@@ -1182,10 +1245,14 @@ class BrainPanel(Vertical):
                 yield Static("", id="causeway_body")
         yield Static("", id="brain_strip")
 
-    async def refresh_from(self, read) -> None:
+    async def refresh_from(self, read, *, threshold: int, delta: float) -> None:
+        """threshold/delta arrive from the app's _brain_loop, which reads
+        settings.staleness_threshold_chapters / settings.sag_spike_delta
+        every cycle (M5.3 single-sourcing: settings -> pure-function params;
+        keyword-only with no defaults so the app cannot forget to pass them)."""
         chapters = await read.list_chapters()  # one snapshot shared by three tabs
-        shape = shape_tab(await read.list_structure_scores(), chapters)
-        threads = threads_tab(await read.list_threads(), chapters)
+        shape = shape_tab(await read.list_structure_scores(), chapters, delta)
+        threads = threads_tab(await read.list_threads(), chapters, threshold)
         secrets = secrets_tab(
             await read.list_secrets(), await read.list_characters(), await read.knowledge_matrix()
         )
@@ -1223,12 +1290,14 @@ and add in their place:
 from novelizer.tui.widgets.brain_panel import BrainPanel
 ```
 
-2. **BINDINGS** — replace the list with:
+2. **BINDINGS** — replace the list with (the `e` engine and `p` prompt bindings from master stay; keep the Textual-5.3.0 "colon" comment above the list as is):
 
 ```python
     BINDINGS = [
         ("ctrl+k", "focus_command", "Command"),
         ("r", "toggle_room", "Room"),
+        ("e", "toggle_engine", "Engine Room"),
+        ("p", "toggle_prompt", "Prompt"),
         ("v", "toggle_reading", "Reading"),
         ("1", "brain_tab('tab_shape')", "Shape"),
         ("2", "brain_tab('tab_threads')", "Threads"),
@@ -1238,7 +1307,7 @@ from novelizer.tui.widgets.brain_panel import BrainPanel
     ]
 ```
 
-3. **`compose()`** — replace the four brain-pane blocks (the `thread_board` / `story_shape` / `who_knows_what` / `causeway` widget constructions and yields, currently lines 75–84) with:
+3. **`compose()`** — replace the four brain-pane blocks (the `thread_board` / `story_shape` / `who_knows_what` / `causeway` widget constructions and yields, currently lines 86–97) with:
 
 ```python
                 brain = BrainPanel(id="brain")
@@ -1246,29 +1315,52 @@ from novelizer.tui.widgets.brain_panel import BrainPanel
                 yield brain
 ```
 
-4. **`on_mount()`** — replace the four workers
+   The `yield EngineRoom(id="engine_room")` that immediately follows (line 98), the `yield Static("AUTONOMY: loading…", id="statusbar")` / `yield ActivityStrip("idle", id="activity_strip")` pair, and the rest of `compose()` stay exactly as they are.
+
+4. **`on_mount()`** — the merged worker list is:
 
 ```python
+        self.run_worker(self._projector_loop(), exclusive=False)
+        self.run_worker(self._scheduler_loop(), exclusive=False)
+        self.run_worker(self._feed_loop(), exclusive=False)
+        self.run_worker(self._browser_loop(), exclusive=False)
+        self.run_worker(self._proposals_loop(), exclusive=False)
+        self.run_worker(self._statusbar_loop(), exclusive=False)
         self.run_worker(self._thread_board_loop(), exclusive=False)
         self.run_worker(self._story_shape_loop(), exclusive=False)
-        ...
+        self.run_worker(self._settings_watch_loop(), exclusive=False)
         self.run_worker(self._who_knows_what_loop(), exclusive=False)
         self.run_worker(self._causeway_loop(), exclusive=False)
+        self.run_worker(self._telemetry_bus_loop(), exclusive=False)
+        self.run_worker(self._telemetry_refresh_loop(), exclusive=False)
 ```
 
-with one (keep the other workers exactly as they are):
+   Delete only the four brain workers (`_thread_board_loop`, `_story_shape_loop`, `_who_knows_what_loop`, `_causeway_loop` lines) and add `self.run_worker(self._brain_loop(), exclusive=False)` in their place; `_settings_watch_loop` and **both telemetry workers stay exactly where they are**:
 
 ```python
+        self.run_worker(self._projector_loop(), exclusive=False)
+        self.run_worker(self._scheduler_loop(), exclusive=False)
+        self.run_worker(self._feed_loop(), exclusive=False)
+        self.run_worker(self._browser_loop(), exclusive=False)
+        self.run_worker(self._proposals_loop(), exclusive=False)
+        self.run_worker(self._statusbar_loop(), exclusive=False)
         self.run_worker(self._brain_loop(), exclusive=False)
+        self.run_worker(self._settings_watch_loop(), exclusive=False)
+        self.run_worker(self._telemetry_bus_loop(), exclusive=False)
+        self.run_worker(self._telemetry_refresh_loop(), exclusive=False)
 ```
 
-5. **Delete** the four methods `_thread_board_loop`, `_story_shape_loop`, `_who_knows_what_loop`, `_causeway_loop`; **add**:
+5. **Delete** the four methods `_thread_board_loop`, `_story_shape_loop`, `_who_knows_what_loop`, `_causeway_loop`; **add** (settings are read from `self.runtime.settings` every cycle, exactly like the two loops it replaces, so a settings-watch apply lands on the next poll):
 
 ```python
     async def _brain_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#brain", BrainPanel).refresh_from(self.runtime.read)
+                await self.query_one("#brain", BrainPanel).refresh_from(
+                    self.runtime.read,
+                    threshold=self.runtime.settings.staleness_threshold_chapters,
+                    delta=self.runtime.settings.sag_spike_delta,
+                )
             except Exception as e:
                 self._report_worker_error("brain", e)
             await asyncio.sleep(1.0)
@@ -1281,7 +1373,7 @@ with one (keep the other workers exactly as they are):
         self.query_one("#brain", BrainPanel).activate_tab(pane_id)
 ```
 
-Replace `novelizer/tui/app.tcss` in full with:
+Replace `novelizer/tui/app.tcss` in full with (only the brain lines change: the four `#thread_board`/`#story_shape`/`#who_knows_what`/`#causeway` id rules become the `#brain`/`#brain TabPane`/`#shape_spark`/`#brain_strip` rules, and the four ids are swapped for `#brain` in the `#body.engine` hide rule and the `border-title-color` list; every `#activity_strip`, `#engine_room`, `#body.engine`, and `#er_*` rule from master is preserved verbatim, including the vestigial `#body.engine #roster` member):
 
 ```
 #body { height: 1fr; }
@@ -1297,12 +1389,23 @@ Replace `novelizer/tui/app.tcss` in full with:
 #detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }
 #detail { height: auto; }
 #statusbar { height: 1; background: $panel; color: $text; }
+#activity_strip { height: 1; background: $boost; color: $text; padding: 0 1; }
 #command { height: 1; padding: 0 1; }
 #body.room #right { display: none; }
 #body.reading #left { display: none; }
 #body.reading #right { layout: horizontal; width: 1fr; }
 #body.reading #browser { width: 1fr; height: 1fr; }
 #body.reading #detail_scroll { width: 3fr; height: 1fr; }
+#engine_room { display: none; }
+#body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
+#body.engine #feed, #body.engine #roster, #body.engine #proposals,
+#body.engine #brain { display: none; }
+#er_vitals { height: 1; background: $boost; padding: 0 1; }
+#er_stream_scroll { height: 2fr; }
+#er_stream { height: auto; }
+#er_prompt { height: auto; max-height: 12; border: round $secondary; padding: 0 1; }
+#er_trace { height: 1fr; }
+#er_detail { height: auto; max-height: 14; border: round $secondary; padding: 0 1; }
 #settings_table { height: 1fr; }
 #settings_msg { height: 1; }
 #edit_value { height: 3; }
@@ -1324,7 +1427,7 @@ git rm novelizer/tui/widgets/thread_board.py novelizer/tui/widgets/story_shape.p
 ```
 uv run pytest tests/tui/ tests/agents/test_author.py tests/agents/test_continuity_checker.py -v
 ```
-Expected: all pass — including `test_brain_panel.py` (5), the rewritten `test_app_layout.py`, the untouched `test_reading_mode.py` / `test_app_commands.py` room-reading toggles, and the two migrated agents tests. No test anywhere still imports the deleted modules (`grep -rn "thread_board\|story_shape\|who_knows_what\|widgets.causeway" tests/ novelizer/` returns only docstring prose in `novelizer/brain/`).
+Expected: all pass — including `test_brain_panel.py` (5), the rewritten `test_app_layout.py`, the untouched `test_reading_mode.py` / `test_app_commands.py` room-reading toggles, the untouched engine-room/roster/story-picker tests (`test_engine_room.py`, `test_engine_room_model.py`, `test_roster.py`, `test_story_picker.py`), and the two migrated agents tests. No test anywhere still imports the deleted modules (`grep -rn "thread_board\|story_shape\|who_knows_what\|widgets.causeway" tests/ novelizer/` returns only docstring prose in `novelizer/brain/`).
 
 - [ ] **Step 5: Commit**
 
@@ -1379,8 +1482,17 @@ git commit -m "test: migrate remaining assertions to the Story Brain surface"
 
 - Spec Phase 2 item ↔ task map: sparkline + pacing + titled sag/spike callouts → Task 1; grouped threads with stale pinned + titled last-touch → Task 2; knowledge matrix with initials header, real cell-state glyphs, revealed fold → Task 3; titled causeway with `⚠ PARADOX` + alarm summary strip → Task 4; TabbedContent panel, keys 1–4, `STORY BRAIN` border title, one poll loop, old-pane deletion, tcss, and every cross-referencing test updated in the same task → Task 5; suite green, zero warnings → Task 6.
 - Names-not-ids checked per tab: shape callouts and causeway use `chapter_label` (title; raw id only for unknown chapter ids), thread rows use `thread.name`, matrix rows use `secret.title` + character initials; explicit "no id" assertions in Tasks 1, 2, 3 and both rewritten layout tests.
-- Single-sourcing checked: `brain_model.py` imports `is_thread_stale`, `chapters_elapsed_since`, `TERMINAL_STATES`, `detect_sag_spike`, `find_paradoxes`, `knowledge_cell_state`, `ALARM_STYLE`; no threshold constant or state rule is re-typed anywhere in the new code.
-- Type/name consistency verified across tasks: Task 5's `BrainPanel.refresh_from` consumes exactly `shape_tab(scores, chapters) -> ShapeTab(tensions, meta, callouts, alarm_count)`, `threads_tab(threads, chapters) -> ThreadsTab(lines, alarm_count)`, `secrets_tab(secrets, characters, matrix) -> SecretsTab(lines, alarm_count)`, `causeway_tab(edges, chapters) -> CausewayTab(lines, alarm_count)`, `alarm_strip(int, int, int, int) -> Text`; the agents tests consume exactly `thread_line(thread, chapters) -> Text` (Task 2) and `secret_row(secret, characters, matrix) -> Text` (Task 3).
+- Single-sourcing checked: `brain_model.py` imports `is_thread_stale`, `chapters_elapsed_since`, `STALENESS_THRESHOLD_CHAPTERS`, `TERMINAL_STATES`, `detect_sag_spike`, `SAG_SPIKE_DELTA`, `find_paradoxes`, `knowledge_cell_state`, `ALARM_STYLE`; no threshold constant or state rule is re-typed anywhere in the new code, and the runtime values flow settings → `_brain_loop` → `refresh_from(threshold=, delta=)` → `threads_tab`/`shape_tab` params (pinned by Task 1's explicit-`delta` test, Task 2's explicit-`threshold` test, and Task 5's `test_strip_reflects_settings_thresholds_while_another_tab_is_open`).
+- Type/name consistency verified across tasks: Task 5's `BrainPanel.refresh_from(read, *, threshold, delta)` consumes exactly `shape_tab(scores, chapters, delta) -> ShapeTab(tensions, meta, callouts, alarm_count)`, `threads_tab(threads, chapters, threshold) -> ThreadsTab(lines, alarm_count)`, `secrets_tab(secrets, characters, matrix) -> SecretsTab(lines, alarm_count)`, `causeway_tab(edges, chapters) -> CausewayTab(lines, alarm_count)`, `alarm_strip(int, int, int, int) -> Text`; the agents tests consume exactly `thread_line(thread, chapters) -> Text` (Task 2, default threshold) and `secret_row(secret, characters, matrix) -> Text` (Task 3).
 - The spec's `◍ suspected` cell has no backing state in `knowledge_cell_state` (`"unknown" | "known" | "revealed"` only) — deliberately dropped; documented in Global Constraints and pinned by `test_cell_glyphs_cover_exactly_the_real_cell_states`.
 - Room/reading interaction: no changes to `#body.room` / `#body.reading` rules; `#brain` inherits `#left`'s hide in reading mode; pilot-tested both directions plus key handling after toggles (Task 5).
 - `app.messages`, proposals pane, roster/statusbar, detail pane, and `format_event` are untouched — Phase 3 surfaces stay exactly as Phase 1 left them.
+
+## Post-merge revision notes
+
+Revised 2026-07-18 after master (M5.3 configurable thresholds, Engine Room telemetry, new-story form) was merged into this branch. Mechanical fixes (line numbers, worker lists, tcss regeneration from the merged file, test-inventory refresh, corrected expected test counts) were applied silently; the following changed a design decision:
+
+1. **Thresholds are now parameters, not module constants (M5.3).** The original plan pinned `STALENESS_THRESHOLD_CHAPTERS` / `SAG_SPIKE_DELTA` as fixed constants owned by the brain modules. Merged reality: `is_thread_stale(thread, chapters, threshold)` and `detect_sag_spike(scores, delta)` take parameters, and the app feeds `settings.staleness_threshold_chapters` / `settings.sag_spike_delta` into the old widgets' `refresh_from`. The plan now threads the same values through the new surface: `_brain_loop` (re-reading settings every cycle) → `BrainPanel.refresh_from(read, *, threshold, delta)` (keyword-only, no defaults) → `threads_tab`/`thread_line` (`threshold`) and `shape_tab` (`delta`), whose defaults are the imported constants. New tests pin the flow at all three levels (Task 1 delta test, Task 2 threshold test — carrying forward M5.3's `test_thread_board_line_respects_explicit_threshold` — and Task 5's settings-tightened strip test, which is quiet under the defaults by construction).
+2. **Engine mode hides the Story Brain.** Master's `#body.engine … { display: none; }` rule hides the four brain panes while the Engine Room is up; the panel inherits that behavior via a member swap to `#brain` (the one permitted engine-rule edit — everything else EngineRoom/ActivityStrip/telemetry is preserved verbatim, including the vestigial `#body.engine #roster` member). Task 5's mode-toggle pilot test grew `e`-key coverage and was renamed `test_brain_panel_hides_in_reading_and_engine_modes_and_survives_room_mode`.
+3. **Keys 1–4 sit alongside master's `e`/`p` bindings.** The BINDINGS replacement now includes `("e", "toggle_engine", ...)` and `("p", "toggle_prompt", ...)`; no collisions (screens own their own bindings: SettingsScreen `escape`/`t`, StoryPicker `q`/`escape`, SetupWizard `q`).
+4. **Task 5's strip test was repurposed** from a plain stale-thread check into the settings-wiring proof described in note 1 (the plain check is already covered by the rewritten `test_story_brain_threads_and_shape_tabs_populate` plus Task 2's unit tests), and `_app()` gained `**settings_overrides` to support it.
