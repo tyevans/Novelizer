@@ -15,7 +15,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "continuity_interval", "structure_analyst_interval", "projector_interval", "muse_interval",
     "prior_chapter_summary_chars", "staleness_threshold_chapters", "sag_spike_delta",
     "muse_era", "muse_exclusion_hands",
-    "author_tools_enabled", "checker_tools_enabled",
+    "author_tools_enabled", "checker_tools_enabled", "chat_tools_enabled",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -78,3 +78,4 @@ class EffectiveSettings(BaseModel):
     # Tool enablement: whether Author and Checker agents can use external tools.
     author_tools_enabled: bool = True
     checker_tools_enabled: bool = True
+    chat_tools_enabled: bool = True

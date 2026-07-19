@@ -74,3 +74,9 @@ def test_author_and_checker_tools_enabled_defaults():
     assert s.checker_tools_enabled is True
     assert "author_tools_enabled" in STORY_OVERRIDABLE_KEYS
     assert "checker_tools_enabled" in STORY_OVERRIDABLE_KEYS
+
+
+def test_chat_tools_enabled_default():
+    s = EffectiveSettings()
+    assert s.chat_tools_enabled is True
+    assert "chat_tools_enabled" in STORY_OVERRIDABLE_KEYS
