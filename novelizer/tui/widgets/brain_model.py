@@ -279,8 +279,9 @@ class CausewayTab:
 
 def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> CausewayTab:
     """Causal edges with chapter TITLES (raw id only when a chapter id is
-    unknown), sorted by chapter position; paradox edges — per find_paradoxes,
-    never re-derived — in alarm color with '⚠ PARADOX'."""
+    unknown), sorted by chapter position with paradox edges pinned first;
+    paradox edges — per find_paradoxes, never re-derived — in alarm color with
+    '⚠ PARADOX'; normal edges render their '──▶' arrow in dim style."""
     if not edges:
         return CausewayTab([Text(CAUSEWAY_EMPTY, style=DIM)], 0)
     order = [c.id for c in chapters]
@@ -293,19 +294,25 @@ def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> Caus
     ordered = sorted(
         edges,
         key=lambda e: (
+            (e.cause_chapter_id, e.effect_chapter_id) not in paradox_pairs,
             pos.get(e.cause_chapter_id, len(order)),
             pos.get(e.effect_chapter_id, len(order)),
         ),
     )
     for e in ordered:
-        body = f"{chapter_label(e.cause_chapter_id, chapters)} ──▶ {chapter_label(e.effect_chapter_id, chapters)}"
-        if e.note:
-            body += f": {e.note}"
+        cause = chapter_label(e.cause_chapter_id, chapters)
+        effect = chapter_label(e.effect_chapter_id, chapters)
+        note = f": {e.note}" if e.note else ""
         if (e.cause_chapter_id, e.effect_chapter_id) in paradox_pairs:
             alarms += 1
-            lines.append(Text(f"{body}  ⚠ PARADOX", style=ALARM_STYLE))
+            lines.append(
+                Text(f"{cause} ──▶ {effect}{note}  ⚠ PARADOX", style=ALARM_STYLE)
+            )
         else:
-            lines.append(Text(body))
+            line = Text(f"{cause} ")
+            line.append("──▶", style=DIM)
+            line.append(f" {effect}{note}")
+            lines.append(line)
     return CausewayTab(lines, alarms)
 
 

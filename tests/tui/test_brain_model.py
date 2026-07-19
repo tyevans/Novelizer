@@ -473,6 +473,25 @@ def test_causeway_empty_state():
     assert str(tab.lines[0].style) == "dim"
 
 
+def test_causeway_paradoxes_sort_above_normal_edges():
+    chs = _chapters("One", "Two", "Three")
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),   # normal, earliest
+        CausalEdgeRecord(cause_chapter_id="c3", effect_chapter_id="c2"),   # paradox, latest
+    ]
+    tab = causeway_tab(edges, chs)
+    assert "⚠ PARADOX" in tab.lines[0].plain
+    assert tab.lines[0].plain.startswith('ch 3 "Three"')
+    assert tab.lines[1].plain.startswith('ch 1 "One"')
+
+
+def test_causeway_normal_edge_arrow_is_dim():
+    chs = _chapters("One", "Two")
+    tab = causeway_tab([CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2")], chs)
+    spans = [(tab.lines[0].plain[s.start:s.end], str(s.style)) for s in tab.lines[0].spans]
+    assert ("──▶", "dim") in spans
+
+
 def test_alarm_strip_matches_spec_format():
     assert alarm_strip(1, 2, 0, 1).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1"
 
