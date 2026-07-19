@@ -1,0 +1,32 @@
+version = "2026.07"
+
+victorian = [
+  "Alma", "Augusta", "Bertha", "Chester", "Cordelia", "Dewey", "Edna", "Ephraim",
+  "Florence", "Gideon", "Harriet", "Hollis", "Ida", "Jasper", "Lavinia", "Lemuel",
+  "Mabel", "Millard", "Myrtle", "Nellie", "Obadiah", "Opal", "Orville", "Pearl",
+  "Rufus", "Selma", "Sylvester", "Thaddeus", "Ursula", "Vernon", "Wilhelmina", "Zeb",
+]
+interwar = [
+  "Bernice", "Clarence", "Delbert", "Doris", "Earl", "Eunice", "Ferdinand", "Gladys",
+  "Harold", "Hazel", "Homer", "Inez", "Irving", "June", "Lester", "Lois",
+  "Marion", "Maxine", "Norma", "Orval", "Phyllis", "Ralph", "Rosalie", "Roscoe",
+  "Sheldon", "Thelma", "Velma", "Wallace", "Wilma", "Woodrow", "Yetta", "Opaline",
+]
+midcentury = [
+  "Arlene", "Bruce", "Carol", "Dale", "Dennis", "Diane", "Donna", "Duane",
+  "Gary", "Gerald", "Glenn", "Janice", "Jerome", "Joan", "Judith", "Kenneth",
+  "Larry", "Linda", "Marcia", "Marvin", "Norman", "Pamela", "Randall", "Rita",
+  "Roger", "Roland", "Sandra", "Sharon", "Terrence", "Wanda", "Wayne", "Yvonne",
+]
+late20th = [
+  "Amber", "Brandon", "Chad", "Courtney", "Craig", "Crystal", "Damon", "Dana",
+  "Derek", "Erica", "Heather", "Jamal", "Jill", "Keith", "Kelly", "Kristen",
+  "Lance", "Latoya", "Melinda", "Misty", "Monique", "Regina", "Scott", "Shanna",
+  "Stacy", "Tamika", "Todd", "Tonya", "Travis", "Trevor", "Whitney", "Dwayne",
+]
+modern = [
+  "Aiden", "Alexis", "Brayden", "Brielle", "Camila", "Dakota", "Delaney", "Ezekiel",
+  "Genesis", "Harper", "Hudson", "Itzel", "Jaylen", "Kai", "Kinsley", "Landon",
+  "Leilani", "Malia", "Mateo", "Nevaeh", "Nolan", "Paisley", "Peyton", "Rowan",
+  "Santiago", "Savannah", "Sienna", "Tatum", "Xavier", "Yaretzi", "Zion", "Amaya",
+]

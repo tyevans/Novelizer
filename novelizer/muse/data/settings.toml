@@ -1,0 +1,13 @@
+version = "2026.07"
+entries = [
+  "grain elevator", "salvage yard", "county fairground", "subway maintenance depot",
+  "thrift store", "cannery", "quarry", "truck stop diner",
+  "cranberry bog", "rooftop apiary", "bowling alley", "hospice ward",
+  "greyhound track", "strip-mall dojo", "cold-storage warehouse", "community radio station",
+  "courthouse annex", "water treatment plant", "retirement high-rise", "roadside motel",
+  "gun range", "laundromat", "food court", "mushroom farm",
+  "slaughterhouse", "tannery district", "telephone exchange", "tent revival",
+  "union hall", "pawnshop", "stock auction barn", "night market",
+  "oil field man-camp", "prison visiting room", "megachurch parking lot", "county records basement",
+  "demolition derby pit", "hot spring resort", "mini-golf course", "bus depot",
+]

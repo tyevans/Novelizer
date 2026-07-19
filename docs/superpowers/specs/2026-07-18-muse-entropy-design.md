@@ -46,7 +46,7 @@ calls anywhere in this context.
 
 | Corpus | Source | Notes |
 |---|---|---|
-| Given names | SSA baby-name data (public domain) | Bucketed by decade with frequency weights; draws are era-coherent and skew real-but-not-top-10 |
+| Given names | SSA baby-name data (public domain) | bucketed by era (victorian/interwar/midcentury/late20th/modern); buckets are curated mid-frequency lists sampled uniformly — curation replaces runtime frequency weighting, keeping draws real-but-not-top-10 |
 | Surnames | US Census surname list (public domain) | Frequency-weighted |
 | Professions | Historical census occupation titles + modern list | e.g. "cordwainer", "linotype operator" |
 | Settings | Curated archetype list (~200 entries) | Deliberately far from the coastal-village attractor |
@@ -81,9 +81,8 @@ no LLM calls — poll the read projection, top up the hand, commit events.
 - **Anti-repetition:** draws exclude items appearing in the last 3 hands
   (configurable via settings), tracked from the event log, so "random" names
   don't recur across a novel.
-- **Era coherence:** the decade bucket for name draws comes from the story's
-  world lore / story config when one is stated; otherwise a default-modern
-  bucket is used.
+- **Era coherence:** the era bucket for name draws comes from the `muse_era`
+  story setting (story.toml-overridable); default is the modern bucket.
 - **Authority split:** the names draw is a binding casting pool; professions,
   settings, and beats are optional inspiration.
 
@@ -137,7 +136,7 @@ Red/green + property-based, per project principles:
   the event log reproduces every draw exactly.
 - **Property:** no item repeats within the exclusion window across
   consecutive hands.
-- **Property:** era-bucketed name draws respect the requested decade.
+- **Property:** era-bucketed name draws respect the requested era bucket.
 - **Unit:** prompt-block rendering (casting pool, inspiration hand,
   ban-list), hand consumption semantics, reroll supersession, uptake
   matching from `CHARACTER_CREATED`.

@@ -1,0 +1,12 @@
+version = "2026.07"
+entries = [
+  "typesetter", "cooper", "milliner", "wheelwright", "stevedore", "telegraph operator",
+  "linotype operator", "cordwainer", "glazier", "chandler", "farrier", "draper",
+  "tanner", "sexton", "switchboard operator", "projectionist", "stenographer", "ice cutter",
+  "furrier", "locksmith", "saddler", "apiarist", "taxidermist", "midwife",
+  "surveyor", "assayer", "teamster", "haberdasher", "ropemaker", "sailmaker",
+  "gunsmith", "distiller", "engraver", "bookbinder", "well digger", "actuary",
+  "dispatcher", "crane operator", "phlebotomist", "sommelier", "arborist", "auctioneer",
+  "bail bondsman", "court stenographer", "elevator mechanic", "mortician", "notary", "parole officer",
+  "pit boss", "roughneck", "welder", "wig maker",
+]

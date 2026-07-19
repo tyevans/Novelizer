@@ -1,0 +1,12 @@
+version = "2026.07"
+entries = [
+  "Abernathy", "Acevedo", "Ashworth", "Barlow", "Bautista", "Beckham", "Bellamy", "Boone",
+  "Bowden", "Burgos", "Calloway", "Carmichael", "Castellanos", "Chowdhury", "Cisneros", "Coble",
+  "Crenshaw", "Delacruz", "Dinh", "Dombrowski", "Eastman", "Escobedo", "Fairbanks", "Fujimoto",
+  "Galindo", "Gaskins", "Goldsmith", "Grimes", "Guzman", "Hearn", "Higginbotham", "Holloway",
+  "Hutchins", "Ibarra", "Jankowski", "Kimbrough", "Kowalczyk", "Lachance", "Landry", "Ledbetter",
+  "Lucero", "Maldonado", "McAllister", "Mercado", "Nakamura", "Nesbitt", "Okafor", "Okonkwo",
+  "Palumbo", "Pemberton", "Quezada", "Rafferty", "Renteria", "Saldana", "Sandoval", "Schofield",
+  "Singleton", "Stroud", "Tavares", "Thibodeaux", "Ueda", "Vann", "Villanueva", "Whitaker",
+  "Winfield", "Yoon", "Zavala", "Vasquez",
+]
