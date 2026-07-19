@@ -261,3 +261,37 @@ async def test_detail_border_title_follows_selection_and_resets():
             assert str(scroll.border_title) == "DETAIL"
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_projector_loop_tick_also_runs_index_catch_up():
+    # Pins that the app's periodic projector tick keeps canon embeddings
+    # current by also awaiting Runtime.index_catch_up() each cycle.
+    from tests.conftest import FakeEmbeddingFunction
+    from novelizer.store.embeddings import EmbeddingStore
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.05)
+    embed_store = EmbeddingStore(
+        str(tempfile.mkdtemp()), embedding_function=FakeEmbeddingFunction()
+    )
+    rt = Runtime(settings, runners=_runners(), embedding_store=embed_store)
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    calls = []
+    original = rt.index_catch_up
+
+    async def spy():
+        calls.append(1)
+        await original()
+
+    rt.index_catch_up = spy
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.pause(0.3)
+            assert calls, "app tick loop must await runtime.index_catch_up()"
+    finally:
+        await rt.close(); os.unlink(path)

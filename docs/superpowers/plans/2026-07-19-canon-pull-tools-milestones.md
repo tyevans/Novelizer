@@ -18,3 +18,12 @@ then plan the next milestone. Plans live beside this file as
 Standing rules: all test runs in a worktree (never the main checkout);
 writes to canon stay on the event-sourced intent path throughout — no
 milestone touches the write path.
+
+## Status
+
+- **CPT-M3: delivered** (2026-07-19). Incremental projector-side canon
+  embedding index, backfill-on-`Runtime.start()`, `Runtime.index_catch_up()`
+  (None-safe, never raises), the `search_canon` LangChain tool, and the TUI
+  tick hook (`_projector_loop` now also awaits `index_catch_up()` each cycle
+  so embeddings stay current during a live session) are all in place and
+  pinned by tests.

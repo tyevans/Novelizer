@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from dataclasses import dataclass
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
@@ -41,28 +42,39 @@ class EmbeddingStore:
 
     async def upsert_world_entry(self, entry: WorldEntry) -> None:
         text = f"{entry.title}\n{entry.body}"
-        self._world.upsert(ids=[entry.id], documents=[text], metadatas=[{"title": entry.title}])
+        await asyncio.to_thread(
+            self._world.upsert, ids=[entry.id], documents=[text], metadatas=[{"title": entry.title}]
+        )
 
     async def upsert_character(self, char: Character) -> None:
         text = f"{char.name}\n{char.traits}\n{char.backstory}"
-        self._chars.upsert(ids=[char.id], documents=[text], metadatas=[{"name": char.name}])
+        await asyncio.to_thread(
+            self._chars.upsert, ids=[char.id], documents=[text], metadatas=[{"name": char.name}]
+        )
 
     async def upsert_chapter(self, chapter: Chapter) -> None:
-        self._chapters.upsert(
+        await asyncio.to_thread(
+            self._chapters.upsert,
             ids=[chapter.id],
             documents=[chapter.prose],
             metadatas=[{"title": chapter.title}],
         )
 
     async def upsert_theme(self, theme: ThemeRecord) -> None:
-        self._themes.upsert(ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}])
+        await asyncio.to_thread(
+            self._themes.upsert, ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}]
+        )
 
     async def upsert_thread(self, thread: ThreadRecord) -> None:
         text = f"{thread.name}\n{thread.last_note}" if thread.last_note else thread.name
-        self._threads.upsert(ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}])
+        await asyncio.to_thread(
+            self._threads.upsert, ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}]
+        )
 
     async def upsert_secret(self, secret: SecretRecord) -> None:
-        self._secrets.upsert(ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}])
+        await asyncio.to_thread(
+            self._secrets.upsert, ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}]
+        )
 
     async def delete(self, entity_id: str, collection: str) -> None:
         col = {
@@ -73,7 +85,12 @@ class EmbeddingStore:
             "threads": self._threads,
             "secrets": self._secrets,
         }[collection]
-        col.delete(ids=[entity_id])
+        # Offload to a thread: this is a synchronous chromadb/HTTP call that
+        # would otherwise block the whole asyncio loop (see upsert_* -- same
+        # reasoning: CPT-M3 now runs catch-up every TUI tick, so a blocking
+        # call here freezes rendering each cycle whenever the embed endpoint
+        # is unreachable, not just once at startup).
+        await asyncio.to_thread(col.delete, ids=[entity_id])
 
     async def query_world_entries(self, query: str, n: int = 5) -> list[WorldEntry]:
         if self._world.count() == 0:
