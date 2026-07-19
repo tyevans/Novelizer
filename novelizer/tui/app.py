@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
@@ -105,7 +105,8 @@ class NovelizerApp(App):
                 yield Causeway("no causal edges yet", id="causeway")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
-                yield Static("Select an item to view details.", id="detail")
+                with VerticalScroll(id="detail_scroll"):
+                    yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: loading…", id="statusbar")
         # compact=True drops Input's default tall border, which would consume
         # both edges of the single row #command gets and leave 0 content lines.
@@ -299,4 +300,10 @@ class NovelizerApp(App):
         if not data or not data.get("id"):
             return
         text = await detail_text(self.runtime.read, data["section"], data["id"])
-        self.query_one("#detail", Static).update(text or "(no detail)")
+        self._update_detail(text or "(no detail)")
+
+    def _update_detail(self, text: str) -> None:
+        self.query_one("#detail", Static).update(text)
+        # New selection: start reading at the top, not wherever the previous
+        # entry was scrolled to.
+        self.query_one("#detail_scroll", VerticalScroll).scroll_home(animate=False)

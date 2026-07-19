@@ -9,7 +9,8 @@
 #who_knows_what { height: auto; max-height: 8; border: round $secondary; }
 #causeway { height: auto; max-height: 8; border: round $secondary; }
 #browser { height: 2fr; border: round $primary; }
-#detail { height: 1fr; border: round $secondary; padding: 0 1; }
+#detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }
+#detail { height: auto; }
 #statusbar { height: 1; background: $panel; color: $text; }
 #command { height: 1; padding: 0 1; }
 #body.room #right { display: none; }
