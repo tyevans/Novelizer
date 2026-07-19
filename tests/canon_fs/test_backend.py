@@ -120,3 +120,34 @@ async def test_aread_offset_limit_slices_lines(stack):
     all_lines = full.file_data["content"].splitlines()
     window = await backend.aread("/chapters/001-the-drowned-bell.md", offset=2, limit=3)
     assert window.file_data["content"].splitlines() == all_lines[2:5]
+
+
+async def test_als_root_lists_kind_directories(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.als("/")
+    assert result.error is None
+    assert [e["path"] for e in result.entries] == [
+        "/chapters", "/characters", "/world", "/threads", "/secrets", "/themes",
+    ]
+    assert all(e["is_dir"] for e in result.entries)
+
+
+async def test_als_kind_directory_lists_files(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.als("/chapters")
+    assert [e["path"] for e in result.entries] == ["/chapters/001-the-drowned-bell.md"]
+    trailing = await backend.als("/chapters/")
+    assert [e["path"] for e in trailing.entries] == ["/chapters/001-the-drowned-bell.md"]
+
+
+async def test_als_unknown_directory_names_valid_ones(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.als("/nope")
+    assert result.entries is None
+    assert "/chapters" in result.error and "not found" in result.error

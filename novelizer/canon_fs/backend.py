@@ -6,6 +6,7 @@ from deepagents.backends.protocol import (
     BackendProtocol,
     EditResult,
     FileDownloadResponse,
+    FileInfo,
     FileUploadResponse,
     GlobResult,
     GrepResult,
@@ -25,6 +26,8 @@ READ_ONLY_ERROR = (
     "Canon is read-only. To change the story record, declare intents "
     "in your structured response."
 )
+
+KIND_DIRS = ("chapters", "characters", "world", "threads", "secrets", "themes")
 
 
 @dataclass
@@ -134,3 +137,18 @@ class CanonBackend(BackendProtocol):
         if isinstance(sliced, ReadResult):
             return sliced
         return ReadResult(file_data=create_file_data(sliced))
+
+    async def als(self, path: str) -> LsResult:
+        snap = await self._snapshot()
+        norm = "/" + path.strip("/")
+        if norm == "/":
+            return LsResult(
+                entries=[FileInfo(path=f"/{d}", is_dir=True) for d in KIND_DIRS]
+            )
+        if norm.lstrip("/") not in KIND_DIRS:
+            valid = ", ".join(f"/{d}" for d in KIND_DIRS)
+            return LsResult(error=f"Directory '{path}' not found. Top-level directories: {valid}")
+        prefix = norm + "/"
+        return LsResult(entries=[
+            FileInfo(path=p, is_dir=False) for p in sorted(snap.index) if p.startswith(prefix)
+        ])
