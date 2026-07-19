@@ -434,3 +434,16 @@ async def test_override_tick_still_reports_readiness_zero_for_other_agents():
     elig = {p.agent_name: p for t, p in rec.emitted
             if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
     assert elig["zero"].reason == "readiness 0" and elig["zero"].eligible is False
+
+async def test_status_marks_last_completed_agent_sticky():
+    """Post-merge reconciliation: `running` is honest in-flight state (M5.3),
+    but the TUI's roster-in-statusbar (external 6790b2a) needs a sticky
+    who-acted-most-recently marker for fast agents that complete between
+    polls -- exposed as `last_completed`, distinct from `running`."""
+    agents = [StubAgent("a1", 0.9), StubAgent("a2", 0.5)]
+    sched = Scheduler(agents, StubRead(), max_concurrent_agents=1)
+    assert all(not s["last_completed"] for s in sched.status())
+    await sched.tick()
+    await _drain(sched)
+    completed = [s["name"] for s in sched.status() if s["last_completed"]]
+    assert completed == ["a1"]
