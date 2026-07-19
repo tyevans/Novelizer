@@ -13,11 +13,12 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
+from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import Chapter, Character, SecretRecord, StructureScore, ThreadRecord, ThreadState
+from novelizer.store.models import CausalEdgeRecord, Chapter, Character, SecretRecord, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
@@ -205,3 +206,57 @@ def secrets_tab(
     if revealed:
         lines.append(Text(f"✓ revealed ({revealed})", style=DIM))
     return SecretsTab(lines, 0)
+
+
+@dataclass(frozen=True)
+class CausewayTab:
+    lines: list[Text]
+    alarm_count: int
+
+
+def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> CausewayTab:
+    """Causal edges with chapter TITLES (raw id only when a chapter id is
+    unknown), sorted by chapter position; paradox edges — per find_paradoxes,
+    never re-derived — in alarm color with '⚠ PARADOX'."""
+    if not edges:
+        return CausewayTab([Text(CAUSEWAY_EMPTY, style=DIM)], 0)
+    order = [c.id for c in chapters]
+    pos = {cid: i for i, cid in enumerate(order)}
+    paradox_pairs = {
+        (p.cause_chapter_id, p.effect_chapter_id) for p in find_paradoxes(edges, order)
+    }
+    lines: list[Text] = []
+    alarms = 0
+    ordered = sorted(
+        edges,
+        key=lambda e: (
+            pos.get(e.cause_chapter_id, len(order)),
+            pos.get(e.effect_chapter_id, len(order)),
+        ),
+    )
+    for e in ordered:
+        body = f"{chapter_label(e.cause_chapter_id, chapters)} ──▶ {chapter_label(e.effect_chapter_id, chapters)}"
+        if e.note:
+            body += f": {e.note}"
+        if (e.cause_chapter_id, e.effect_chapter_id) in paradox_pairs:
+            alarms += 1
+            lines.append(Text(f"{body}  ⚠ PARADOX", style=ALARM_STYLE))
+        else:
+            lines.append(Text(body))
+    return CausewayTab(lines, alarms)
+
+
+def alarm_strip(shape: int, threads: int, secrets: int, cause: int) -> Text:
+    """The panel's persistent one-line summary of every tab's alarm state,
+    so nothing is missed while another tab is open:
+    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1'."""
+    strip = Text()
+    for i, (label, count) in enumerate(
+        [("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause)]
+    ):
+        if i:
+            strip.append(" · ", style=DIM)
+        strip.append(label, style=DIM)
+        if count:
+            strip.append(f" ⚠{count}", style=ALARM_STYLE)
+    return strip

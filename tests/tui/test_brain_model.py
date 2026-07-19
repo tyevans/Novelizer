@@ -214,11 +214,14 @@ def test_threads_tab_alarm_count_matches_alarm_lines_and_stale_pinned_first(stat
     assert alarm_flags == sorted(alarm_flags, reverse=True)
 
 
-from novelizer.store.models import Character, SecretRecord
+from novelizer.store.models import CausalEdgeRecord, Character, SecretRecord
 from novelizer.tui.widgets.brain_model import (
     CELL_GLYPHS,
+    CAUSEWAY_EMPTY,
     SECRETS_EMPTY,
     TITLE_WIDTH,
+    alarm_strip,
+    causeway_tab,
     char_initials,
     matrix_header,
     secret_row,
@@ -318,3 +321,76 @@ def test_matrix_rows_cover_every_secret_by_character_pair(n_secrets, n_chars):
     assert len(rows) == n_secrets
     for row in rows:
         assert row.plain.count("○") + row.plain.count("●") == n_chars
+
+
+def test_causeway_line_uses_chapter_titles_and_arrow_never_ids():
+    chs = _chapters("The Gift", "The Price")
+    edges = [CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2", note="sets up the reveal")]
+    tab = causeway_tab(edges, chs)
+    assert tab.lines[0].plain == 'ch 1 "The Gift" ──▶ ch 2 "The Price": sets up the reveal'
+    assert tab.alarm_count == 0
+    assert "c1" not in tab.lines[0].plain and "c2" not in tab.lines[0].plain
+
+
+def test_causeway_edge_without_note_has_no_colon():
+    chs = _chapters("One", "Two")
+    tab = causeway_tab([CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2")], chs)
+    assert tab.lines[0].plain == 'ch 1 "One" ──▶ ch 2 "Two"'
+
+
+def test_causeway_ordering_paradox_edge_is_alarm_with_marker():
+    chs = _chapters("One", "Two")
+    tab = causeway_tab(
+        [CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c1", note="the fall")], chs
+    )
+    assert tab.lines[0].plain == 'ch 2 "Two" ──▶ ch 1 "One": the fall  ⚠ PARADOX'
+    assert str(tab.lines[0].style) == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_causeway_cycle_paradox_flags_both_directions():
+    chs = _chapters("One", "Two", "Three")
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),
+        CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c1"),
+    ]
+    tab = causeway_tab(edges, chs)
+    assert tab.alarm_count == 2
+    assert all("⚠ PARADOX" in line.plain for line in tab.lines)
+
+
+def test_causeway_unknown_chapter_id_falls_back_to_raw_id():
+    chs = _chapters("One")
+    tab = causeway_tab([CausalEdgeRecord(cause_chapter_id="ghost", effect_chapter_id="c1")], chs)
+    assert tab.lines[0].plain == 'ghost ──▶ ch 1 "One"'
+
+
+def test_causeway_sorts_by_chapter_position():
+    chs = _chapters("One", "Two", "Three")
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c3"),
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),
+    ]
+    tab = causeway_tab(edges, chs)
+    assert tab.lines[0].plain.startswith('ch 1 "One"')
+    assert tab.lines[1].plain.startswith('ch 2 "Two"')
+
+
+def test_causeway_empty_state():
+    tab = causeway_tab([], [])
+    assert [line.plain for line in tab.lines] == [CAUSEWAY_EMPTY]
+    assert str(tab.lines[0].style) == "dim"
+
+
+def test_alarm_strip_matches_spec_format():
+    assert alarm_strip(1, 2, 0, 1).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1"
+
+
+def test_alarm_strip_quiet_shows_bare_labels():
+    assert alarm_strip(0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause"
+
+
+def test_alarm_strip_alarm_segments_are_alarm_styled():
+    strip = alarm_strip(1, 0, 0, 0)
+    spans = [(strip.plain[s.start:s.end], str(s.style)) for s in strip.spans]
+    assert (" ⚠1", ALARM_STYLE) in spans
