@@ -92,6 +92,19 @@ class CanonIndexer:
             record = entries.get(aggregate_id)
             if record is not None:
                 await self._emb.upsert_world_entry(record)
+                supersedes_id = getattr(record, "supersedes_id", None)
+                if supersedes_id:
+                    # Real retconner convention: WORLD_ENTRY_SUPERSEDED is
+                    # committed with aggregate_id = the NEW entry (found
+                    # active above), while supersedes_id names the RETIRING
+                    # entry. That entry stays active-list-absent-blind (it
+                    # was never itself the aggregate_id of this event), so
+                    # its stale embedding must be deleted here explicitly.
+                    try:
+                        await self._emb.delete(supersedes_id, "world_entries")
+                    except Exception as e:
+                        logger.debug("superseded world entry %s not present in index to delete (%s: %s)",
+                                     supersedes_id, type(e).__name__, e)
             else:  # superseded out of the active list
                 try:
                     await self._emb.delete(aggregate_id, "world_entries")

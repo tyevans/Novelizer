@@ -110,3 +110,16 @@ async def test_superseded_world_entry_removed_from_index(stack):
     await indexer.catch_up()
 
     assert store._world.get(ids=["w1"])["ids"] == []
+
+
+async def test_supersede_via_real_retconner_convention_removes_old_embedding(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+    assert store._world.get(ids=["w1"])["ids"] == ["w1"]
+    new = WorldEntry(id="w2", title="Bell Cult, Revised", body="They ring at dawn.", supersedes_id="w1")
+    await events.append(EventType.WORLD_ENTRY_SUPERSEDED, "w2", new)
+    await proj.catch_up()
+    await indexer.catch_up()
+    assert store._world.get(ids=["w1"])["ids"] == []
+    assert store._world.get(ids=["w2"])["ids"] == ["w2"]
