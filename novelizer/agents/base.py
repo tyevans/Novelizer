@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 # back for this many intervals instead of one, freeing dispatch slots.
 PASS_BACKOFF_MULTIPLIER = 3
 DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."
+PASS_PROMPT_INSTRUCTION = (
+    "\nIf nothing needs your attention, set no_action=true, leave every list empty, "
+    "and give a one-line feed_note in character saying you're standing aside so the "
+    "story can continue."
+)
 
 
 class ChapterDraft(BaseModel):

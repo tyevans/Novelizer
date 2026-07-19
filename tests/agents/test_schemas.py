@@ -221,3 +221,9 @@ def test_theme_intent_rejects_terminal_actions():
     from novelizer.agents.schemas import ThemeIntent
     with pytest.raises(pydantic.ValidationError):
         ThemeIntent(action="pay_off", id="t1")
+
+
+def test_no_action_defaults_false_on_pass_capable_outputs():
+    assert KeeperOutput().no_action is False
+    assert WorldEntriesDraft().no_action is False
+    assert ContinuityOutput().no_action is False

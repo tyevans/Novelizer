@@ -25,6 +25,7 @@ class WorldEntryDraft(BaseModel):
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
     feed_note: str = ""
+    no_action: bool = False
 
 
 class NewCharacter(BaseModel):
@@ -134,6 +135,7 @@ class KeeperOutput(BaseModel):
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     feed_note: str = ""
+    no_action: bool = False
 
 
 class VoiceDriftFlag(BaseModel):
@@ -163,6 +165,7 @@ class EditorVerdict(BaseModel):
 class ContinuityOutput(BaseModel):
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
     feed_note: str = ""
+    no_action: bool = False
 
 
 class RetconAmendments(BaseModel):
