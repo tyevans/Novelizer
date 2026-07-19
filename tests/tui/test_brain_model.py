@@ -212,3 +212,109 @@ def test_threads_tab_alarm_count_matches_alarm_lines_and_stale_pinned_first(stat
     assert tab.alarm_count == sum(alarm_flags)
     # every alarm line precedes every non-alarm line
     assert alarm_flags == sorted(alarm_flags, reverse=True)
+
+
+from novelizer.store.models import Character, SecretRecord
+from novelizer.tui.widgets.brain_model import (
+    CELL_GLYPHS,
+    SECRETS_EMPTY,
+    TITLE_WIDTH,
+    char_initials,
+    matrix_header,
+    secret_row,
+    secrets_tab,
+)
+
+
+def test_cell_glyphs_cover_exactly_the_real_cell_states():
+    # knowledge_cell_state's actual codomain — there is no "suspected" state.
+    assert CELL_GLYPHS == {"known": "●", "unknown": "○", "revealed": "✓"}
+
+
+def test_char_initials_short_names_from_words():
+    assert char_initials("Elara") == "E"
+    assert char_initials("The Boy") == "TB"
+    assert char_initials("Mara Vane Kestrel") == "MV"
+    assert char_initials("") == "?"
+
+
+def test_matrix_header_aligns_initials_after_title_gutter():
+    header = matrix_header([Character(id="elara", name="Elara"), Character(id="boy", name="The Boy")])
+    assert header.plain == " " * TITLE_WIDTH + "E  TB"
+    assert str(header.style) == "dim"
+
+
+def test_secret_row_glyph_cells_align_under_header_and_count_knowers():
+    chars = [Character(id="elara", name="Elara"), Character(id="boy", name="The Boy")]
+    secret = SecretRecord(id="the-heir-lives", title="The Heir Lives")
+    matrix = {"the-heir-lives": {"revealed": False, "known_by": {"elara"}}}
+    row = secret_row(secret, chars, matrix)
+    assert row.plain == "The Heir Lives".ljust(TITLE_WIDTH) + "●  ○" + "   1 knows"
+    assert "the-heir-lives" not in row.plain
+
+
+def test_secret_row_known_to_no_one():
+    secret = SecretRecord(id="s", title="The Map Is Forged")
+    matrix = {"s": {"revealed": False, "known_by": set()}}
+    row = secret_row(secret, [Character(id="k", name="Kestrel")], matrix)
+    assert row.plain.endswith("no one knows")
+    assert "●" not in row.plain and "○" in row.plain
+
+
+def test_secret_row_plural_summary_matches_spec_sketch():
+    chars = [Character(id="a", name="Ana"), Character(id="b", name="Bram"), Character(id="c", name="Cole")]
+    secret = SecretRecord(id="s", title="The Tide Debt")
+    matrix = {"s": {"revealed": False, "known_by": {"a", "b"}}}
+    assert secret_row(secret, chars, matrix).plain.endswith("2 know")
+
+
+def test_secret_row_clips_long_titles():
+    secret = SecretRecord(id="s", title="A" * 40)
+    row = secret_row(secret, [], {"s": {"revealed": False, "known_by": set()}})
+    assert row.plain.startswith("A" * (TITLE_WIDTH - 1) + "…")
+
+
+def test_secrets_tab_folds_revealed_and_renders_matrix_for_unrevealed():
+    chars = [Character(id="elara", name="Elara")]
+    secrets = [
+        SecretRecord(id="s1", title="The Heir Lives"),
+        SecretRecord(id="s2", title="The Map Is Forged", revealed=True),
+        SecretRecord(id="s3", title="The Tide Debt", revealed=True),
+    ]
+    matrix = {
+        "s1": {"revealed": False, "known_by": {"elara"}},
+        "s2": {"revealed": True, "known_by": set()},
+        "s3": {"revealed": True, "known_by": set()},
+    }
+    tab = secrets_tab(secrets, chars, matrix)
+    plains = [line.plain for line in tab.lines]
+    assert plains[0] == " " * TITLE_WIDTH + "E"
+    assert plains[1].startswith("The Heir Lives")
+    assert plains[2] == "✓ revealed (2)"
+    assert len(plains) == 3
+    assert tab.alarm_count == 0
+    assert str(tab.lines[2].style) == "dim"
+
+
+def test_secrets_tab_all_revealed_is_just_the_fold_line():
+    secrets = [SecretRecord(id="s", title="Old News", revealed=True)]
+    tab = secrets_tab(secrets, [], {"s": {"revealed": True, "known_by": set()}})
+    assert [line.plain for line in tab.lines] == ["✓ revealed (1)"]
+
+
+def test_secrets_tab_empty_state():
+    tab = secrets_tab([], [], {})
+    assert [line.plain for line in tab.lines] == [SECRETS_EMPTY]
+    assert str(tab.lines[0].style) == "dim"
+
+
+@given(n_secrets=st.integers(0, 5), n_chars=st.integers(0, 5))
+def test_matrix_rows_cover_every_secret_by_character_pair(n_secrets, n_chars):
+    chars = [Character(id=f"ch{i}", name=f"N{i}") for i in range(n_chars)]
+    secrets = [SecretRecord(id=f"s{i}", title=f"S{i}") for i in range(n_secrets)]
+    matrix = {s.id: {"revealed": False, "known_by": set()} for s in secrets}
+    tab = secrets_tab(secrets, chars, matrix)
+    rows = [line for line in tab.lines if line.plain.startswith("S")]
+    assert len(rows) == n_secrets
+    for row in rows:
+        assert row.plain.count("○") + row.plain.count("●") == n_chars

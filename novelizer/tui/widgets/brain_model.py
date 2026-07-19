@@ -15,8 +15,9 @@ from rich.text import Text
 
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
+from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import Chapter, StructureScore, ThreadRecord, ThreadState
+from novelizer.store.models import Chapter, Character, SecretRecord, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
@@ -131,3 +132,76 @@ def threads_tab(
         )
         lines.append(Text("✓ " + " · ".join(parts), style=DIM))
     return ThreadsTab(lines, len(stale))
+
+
+# Glyphs cover knowledge_cell_state's exact codomain. "revealed" is
+# secret-level state and never appears as a matrix cell in practice —
+# revealed secrets fold to the "✓ revealed (N)" line — but the mapping is
+# total so secret_row can render any state the canon function returns.
+CELL_GLYPHS: dict[str, str] = {"known": "●", "unknown": "○", "revealed": "✓"}
+TITLE_WIDTH = 24
+_COL = 2  # every matrix column is 2 cells wide (initials cap at 2 chars)
+
+
+def char_initials(name: str) -> str:
+    """Column header: first letter of up to the first two words of the name
+    ('Elara' -> 'E', 'The Boy' -> 'TB'); '?' for an empty name."""
+    words = [w for w in name.split() if w]
+    return "".join(w[0].upper() for w in words[:2]) or "?"
+
+
+def _clip_title(title: str, width: int = TITLE_WIDTH) -> str:
+    return title if len(title) <= width else title[: width - 1] + "…"
+
+
+def matrix_header(characters: list[Character]) -> Text:
+    """Dim column-header row: a TITLE_WIDTH gutter, then one 2-cell column
+    of initials per character, in list_characters() order."""
+    cells = " ".join(char_initials(c.name).ljust(_COL) for c in characters)
+    return Text(" " * TITLE_WIDTH + cells.rstrip(), style=DIM)
+
+
+def secret_row(secret: SecretRecord, characters: list[Character], matrix: dict[str, dict]) -> Text:
+    """One matrix row: clipped secret TITLE, one glyph cell per character
+    (state from knowledge_cell_state — never re-derived), dim who-knows
+    summary. No ids anywhere."""
+    row = Text(_clip_title(secret.title).ljust(TITLE_WIDTH))
+    known = 0
+    cells = []
+    for c in characters:
+        state = knowledge_cell_state(matrix, secret.id, c.id)
+        known += state == "known"
+        cells.append(CELL_GLYPHS[state].ljust(_COL))
+    row.append(" ".join(cells).rstrip())
+    if known == 0:
+        summary = "no one knows"
+    elif known == 1:
+        summary = "1 knows"
+    else:
+        summary = f"{known} know"
+    row.append(f"   {summary}", style=DIM)
+    return row
+
+
+@dataclass(frozen=True)
+class SecretsTab:
+    lines: list[Text]
+    alarm_count: int  # always 0 — leak alarms live in the feed/retcon queue
+
+
+def secrets_tab(
+    secrets: list[SecretRecord], characters: list[Character], matrix: dict[str, dict]
+) -> SecretsTab:
+    """The knowledge matrix: header of character initials, one row per
+    unrevealed secret, revealed secrets folded to one dim count line."""
+    if not secrets:
+        return SecretsTab([Text(SECRETS_EMPTY, style=DIM)], 0)
+    unrevealed = [s for s in secrets if not s.revealed]
+    revealed = len(secrets) - len(unrevealed)
+    lines: list[Text] = []
+    if unrevealed and characters:
+        lines.append(matrix_header(characters))
+    lines += [secret_row(s, characters, matrix) for s in unrevealed]
+    if revealed:
+        lines.append(Text(f"✓ revealed ({revealed})", style=DIM))
+    return SecretsTab(lines, 0)
