@@ -9,6 +9,7 @@ _CANON_EVENTS = _RETCON_EVENTS | {
     EventType.CHARACTER_UPDATED,
     EventType.CHAPTER_CREATED,
     EventType.CHAPTER_STATUS_CHANGED,
+    EventType.CHAPTER_REVISED,
     EventType.SECRET_REVEALED,
 }
 _NEVER_GATED = {
@@ -25,6 +26,8 @@ _NEVER_GATED = {
     EventType.SECRET_REFERENCED,
     EventType.CAUSAL_EDGE_DECLARED,
     EventType.CHAPTER_MINED,
+    EventType.THEME_INTRODUCED,
+    EventType.THEME_DEVELOPED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

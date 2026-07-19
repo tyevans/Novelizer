@@ -7,16 +7,32 @@ from pydantic import BaseModel, Field
 from novelizer.canon.events import (
     EventType, AgentRemark, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
+    ThemeIntroduced, ThemeDeveloped,
 )
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent
+from novelizer.canon.themes import slugify_theme_name
+from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.store.models import RetconRequest, RetconStatus
 from novelizer.run_context import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_id(raw: str) -> str:
+    """Canonicalize an agent- or LLM-supplied id for comparison/storage.
+
+    Canon ids are minted lowercase everywhere (every `slugify_*_name`
+    output), so a casing mismatch on a *citing* id (not a minting one) is a
+    correctness bug, not an unknown-id case. Applied only at
+    membership-check/payload-construction sites in the commit helpers below
+    -- never to minting logic.
+    """
+    return raw.strip().lower()
+
 
 _KNOWLEDGE_EVENT_BY_ACTION = {
     "learn": (EventType.SECRET_LEARNED, SecretLearned),
@@ -33,6 +49,7 @@ class ChapterDraft(BaseModel):
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
+    theme_intents: list[ThemeIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):
@@ -61,6 +78,11 @@ class BaseAgent:
         self.paused = False
         self._last_run = 0.0
         self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
+
+    @staticmethod
+    def _guarded_line(label: str, value: str) -> str:
+        """Return an optional "\n\n{label}: {value}" line, or "" if value is falsy."""
+        return f"\n\n{label}: {value}" if value else ""
 
     def pause(self) -> None:
         self.paused = True
@@ -180,7 +202,8 @@ class BaseAgent:
                     ThreadPlanted(id=thread_id, name=intent.name, chapter_id=chapter_id, note=intent.note, source=source),
                 )
                 continue
-            if intent.id not in active_thread_ids:
+            thread_id = _normalize_id(intent.id)
+            if thread_id not in active_thread_ids:
                 logger.warning(
                     "%s: dropped thread %s intent for unknown id %r", self.name, intent.action, intent.id
                 )
@@ -191,10 +214,110 @@ class BaseAgent:
                 "abandon": (ThreadAbandoned, EventType.THREAD_ABANDONED),
             }[intent.action]
             if payload_cls is ThreadAbandoned:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note)
             else:
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source)
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+                payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source)
+            await self._committer.commit(self.name, event_type, thread_id, payload)
+
+    async def _commit_theme_intents(
+        self,
+        intents: list[ThemeIntent],
+        active_theme_ids: set[str],
+        chapter_id: str = "",
+        source: str = "declared",
+        embedding_store=None,
+    ) -> None:
+        """Turn agent-declared ThemeIntent entries into theme.* commits.
+
+        `introduce` mints a new id via slugify_theme_name(intent.title) and is
+        dropped only if the title is blank. `develop` must cite an id present
+        in `active_theme_ids` — an intent naming an unknown id is dropped
+        with a logged warning and no event is committed. No-op on an empty
+        list. Themes have no terminal state (M5.2 Locked decision 6).
+
+        `embedding_store` is an optional `novelizer.store.embeddings.
+        EmbeddingStore`; when provided, every successful `introduce` commit
+        is upserted into its themes collection and checked for a near-
+        duplicate via `novelizer.brain.theme_similarity.
+        suggest_near_duplicate_theme`. A near-duplicate never blocks or
+        merges the new theme.introduced commit -- it only files an Editor-
+        facing `retcon_request.created`, tagged `THEME_SIMILARITY_SOURCE_TAG`,
+        deduped against the open queue by description (same pattern as the
+        Editor's voice-drift flags). When `embedding_store` is None (the
+        default, and every existing call site that predates this), this is
+        a complete no-op -- behavior is unchanged.
+        """
+        for intent in intents:
+            if intent.action == "introduce":
+                if not intent.title.strip():
+                    logger.warning("%s: dropped theme introduce intent with empty title", self.name)
+                    continue
+                theme_id = slugify_theme_name(intent.title)
+                if theme_id in active_theme_ids:
+                    # A theme id is minted exactly once, at theme.introduced. This
+                    # introduce collides with an id that's already live, so the agent
+                    # clearly means "this theme is live" — downgrade to a develop
+                    # instead of committing an introduced event the projection would
+                    # just no-op.
+                    logger.info(
+                        "%s: introduce %r collides with active theme id %r, downgrading to develop",
+                        self.name, intent.title, theme_id,
+                    )
+                    await self._committer.commit(
+                        self.name, EventType.THEME_DEVELOPED, theme_id,
+                        ThemeDeveloped(id=theme_id, chapter_id=chapter_id, note=intent.note, source=source),
+                    )
+                    continue
+                logger.warning(
+                    "%s: introduce %r mints id %r; if this id already exists (unknown to the "
+                    "caller) the commit will be a projection no-op",
+                    self.name, intent.title, theme_id,
+                )
+                if embedding_store is not None:
+                    from novelizer.brain.theme_similarity import (
+                        THEME_SIMILARITY_SOURCE_TAG, suggest_near_duplicate_theme,
+                    )
+                    from novelizer.store.models import ThemeRecord as _ThemeRecord
+                    new_theme = _ThemeRecord(id=theme_id, title=intent.title)
+                    duplicate_id = await suggest_near_duplicate_theme(embedding_store, new_theme)
+                await self._committer.commit(
+                    self.name, EventType.THEME_INTRODUCED, theme_id,
+                    ThemeIntroduced(id=theme_id, title=intent.title, chapter_id=chapter_id, note=intent.note, source=source),
+                )
+                if embedding_store is not None:
+                    await embedding_store.upsert_theme(new_theme)
+                    if duplicate_id is not None:
+                        existing = None
+                        get_theme = getattr(self._read, "get_theme", None)
+                        if get_theme is not None:
+                            existing = await get_theme(duplicate_id)
+                        existing_title = existing.title if existing is not None else duplicate_id
+                        description = (
+                            f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "
+                            f"may duplicate existing theme '{duplicate_id}' ('{existing_title}')"
+                        )
+                        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+                        seen_descriptions = {r.description for r in open_reqs}
+                        if description not in seen_descriptions:
+                            req = RetconRequest(
+                                description=description,
+                                conflicting_entry_ids=[theme_id, duplicate_id],
+                                proposed_resolution="",
+                            )
+                            await self._committer.commit(
+                                self.name, EventType.RETCON_REQUEST_CREATED, req.id, req
+                            )
+                continue
+            theme_id = _normalize_id(intent.id)
+            if theme_id not in active_theme_ids:
+                logger.warning(
+                    "%s: dropped theme %s intent for unknown id %r", self.name, intent.action, intent.id
+                )
+                continue
+            await self._committer.commit(
+                self.name, EventType.THEME_DEVELOPED, theme_id,
+                ThemeDeveloped(id=theme_id, chapter_id=chapter_id, note=intent.note, source=source),
+            )
 
     async def _commit_knowledge_intents(
         self,
@@ -247,7 +370,8 @@ class BaseAgent:
                     SecretCreated(id=secret_id, title=intent.title, chapter_id=chapter_id, note=intent.note),
                 )
                 continue
-            if intent.id not in active_secret_ids:
+            secret_id = _normalize_id(intent.id)
+            if secret_id not in active_secret_ids:
                 logger.warning(
                     "%s: dropped knowledge %s intent for unknown secret id %r", self.name, intent.action, intent.id
                 )
@@ -259,13 +383,13 @@ class BaseAgent:
                 continue
             event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
             if intent.action == "reveal":
-                payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note)
+                payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note)
             else:
                 payload = payload_cls(
-                    id=intent.id, character_id=intent.character_id, chapter_id=chapter_id, note=intent.note,
-                    source=source,
+                    id=secret_id, character_id=_normalize_id(intent.character_id), chapter_id=chapter_id,
+                    note=intent.note, source=source,
                 )
-            await self._committer.commit(self.name, event_type, intent.id, payload)
+            await self._committer.commit(self.name, event_type, secret_id, payload)
 
     async def _commit_causal_intents(
         self, intents: list[CausalIntent], valid_chapter_ids: set[str], source: str = "declared"
@@ -286,22 +410,24 @@ class BaseAgent:
         No-op on an empty list.
         """
         for intent in intents:
-            if intent.cause_chapter_id == intent.effect_chapter_id:
+            cause_id = _normalize_id(intent.cause_chapter_id)
+            effect_id = _normalize_id(intent.effect_chapter_id)
+            if cause_id == effect_id:
                 logger.warning(
                     "%s: dropped self-edge causal intent for chapter %r", self.name, intent.cause_chapter_id
                 )
                 continue
-            if intent.cause_chapter_id not in valid_chapter_ids or intent.effect_chapter_id not in valid_chapter_ids:
+            if cause_id not in valid_chapter_ids or effect_id not in valid_chapter_ids:
                 logger.warning(
                     "%s: dropped causal intent citing unknown chapter id(s) %r -> %r",
                     self.name, intent.cause_chapter_id, intent.effect_chapter_id,
                 )
                 continue
             await self._committer.commit(
-                self.name, EventType.CAUSAL_EDGE_DECLARED, intent.effect_chapter_id,
+                self.name, EventType.CAUSAL_EDGE_DECLARED, effect_id,
                 CausalEdgeDeclared(
-                    cause_chapter_id=intent.cause_chapter_id,
-                    effect_chapter_id=intent.effect_chapter_id,
+                    cause_chapter_id=cause_id,
+                    effect_chapter_id=effect_id,
                     note=intent.note,
                     source=source,
                 ),

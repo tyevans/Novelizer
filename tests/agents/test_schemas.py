@@ -12,6 +12,26 @@ def test_world_entries_draft_roundtrip():
     assert again.entries[0].domain == "physical"
 
 
+def test_world_entry_draft_coerces_unknown_domain_to_other():
+    # Regression: the live retconner looped forever because the LLM answered
+    # domain="character", which passed this draft schema and then blew up the
+    # store-side Domain enum in Retconner.commit.
+    assert WorldEntryDraft(title="T", body="B", domain="character").domain == "other"
+
+
+def test_world_entry_draft_preserves_known_domains():
+    for d in ("physical", "social", "metaphysical", "historical", "other"):
+        assert WorldEntryDraft(title="T", body="B", domain=d).domain == d
+
+
+def test_world_entry_draft_domains_match_store_domain_enum():
+    # The LLM-facing schema must enumerate exactly the store's legal domains,
+    # so the model is told the choices instead of guessing free text.
+    from novelizer.store.models import Domain
+    schema = WorldEntryDraft.model_json_schema()
+    assert set(schema["properties"]["domain"]["enum"]) == {d.value for d in Domain}
+
+
 def test_keeper_output_defaults_empty():
     k = KeeperOutput()
     assert k.updated_characters == [] and k.retcon_requests == []
@@ -182,3 +202,22 @@ def test_mined_causal_fact_has_no_known_id_field():
     from novelizer.agents.schemas import MinedCausalFact
     f = MinedCausalFact(cause_chapter_id="c1", effect_chapter_id="c2")
     assert not hasattr(f, "known_id")
+
+
+def test_theme_intent_introduce_action():
+    from novelizer.agents.schemas import ThemeIntent
+    intent = ThemeIntent(action="introduce", title="The Weight of Secrets")
+    assert intent.action == "introduce" and intent.id == ""
+
+
+def test_theme_intent_develop_action_cites_id():
+    from novelizer.agents.schemas import ThemeIntent
+    intent = ThemeIntent(action="develop", id="the-weight-of-secrets", note="revisited in ch3")
+    assert intent.action == "develop" and intent.id == "the-weight-of-secrets"
+
+
+def test_theme_intent_rejects_terminal_actions():
+    import pydantic
+    from novelizer.agents.schemas import ThemeIntent
+    with pytest.raises(pydantic.ValidationError):
+        ThemeIntent(action="pay_off", id="t1")

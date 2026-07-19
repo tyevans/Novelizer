@@ -1,18 +1,24 @@
 from __future__ import annotations
-from textual.widgets import Static
+
+_ERROR_SNIPPET_LEN = 40
 
 
-def roster_line(status_row: dict) -> str:
-    name = status_row["name"]
-    if status_row.get("paused"):
-        return f"· {name}  paused"
-    if status_row.get("running"):
-        return f"● {name}  running"
-    if status_row.get("last_error"):
-        return f"⚠ {name}  error: {status_row['last_error']}"
-    return f"· {name}  idle"
-
-
-class AgentRoster(Static):
-    def update_from(self, status: list) -> None:
-        self.update("\n".join(roster_line(s) for s in status) or "no agents")
+def roster_summary(status: list) -> str:
+    """One-line agent summary for the status bar. Idle agents collapse to a
+    count; only running/paused/errored agents are named."""
+    if not status:
+        return "no agents"
+    parts: list[str] = []
+    running = [s["name"] for s in status if s.get("running")]
+    if running:
+        parts.append(f"● {', '.join(running)}")
+    paused = [s["name"] for s in status if s.get("paused")]
+    if paused:
+        parts.append(f"⏸ {', '.join(paused)}")
+    for s in status:
+        err = s.get("last_error")
+        if err:
+            parts.append(f"⚠ {s['name']}: {err[:_ERROR_SNIPPET_LEN]}")
+    if not parts:
+        return f"{len(status)} agents idle"
+    return "  ".join(parts)

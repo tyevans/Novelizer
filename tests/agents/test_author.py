@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, ThreadPlanted
+from novelizer.canon.events import EventType, ThreadPlanted, ThemeIntroduced
 from novelizer.agents.author import Author, ChapterDraft
-from novelizer.agents.schemas import ThreadIntent
+from novelizer.agents.schemas import ThreadIntent, ThemeIntent
 from novelizer.store.models import Chapter, DirectorSignal, SignalKind
 
 
@@ -52,6 +52,59 @@ async def test_run_once_consumes_targeted_signals(stack):
                         DirectorSignal(id="s1", kind=SignalKind.seed, body="a storm is coming"))
     await proj.catch_up()
     author = Author(FakeRunner(ChapterDraft(title="T", prose="P")), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    assert await read.list_unconsumed_signals(target_agent="author") == []
+
+
+async def test_author_revise_signal_commits_chapter_revised_not_chapter_created(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(title="One", prose="fixed prose")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    chapters = await read.list_chapters()
+    assert len(chapters) == 1  # chapter count unchanged
+    revised = await read.get_chapter("c1")
+    assert revised.prose == "fixed prose"
+
+
+async def test_author_revise_signal_still_commits_thread_intents(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="One", prose="fixed prose",
+        thread_intents=[ThreadIntent(action="plant", id="", name="A new thread")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    threads = await read.list_threads()
+    assert len(threads) == 1
+    assert threads[0].name == "A new thread"
+
+
+async def test_author_revise_signal_is_consumed(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(title="One", prose="fixed prose")
+    author = Author(FakeRunner(draft), read, committer)
     await author.run_once()
     await proj.catch_up()
     assert await read.list_unconsumed_signals(target_agent="author") == []
@@ -200,6 +253,19 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_commits_theme_introduce_intent(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="T", prose="P",
+        theme_intents=[ThemeIntent(action="introduce", title="Loss")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    theme = await read.get_theme("loss")
+    assert theme is not None and theme.title == "Loss"
 
 
 async def test_author_prompt_includes_stale_threads_note_when_present(stack):
@@ -393,6 +459,102 @@ async def test_author_prompt_omits_known_secrets_note_when_no_secrets(stack):
 
 
 async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    expected = (
+        "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+    )
+    assert sent == expected
+
+
+def test_summarize_uses_configured_prior_chapter_chars():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
+        "themes": [], "causal_edges": [],
+    }
+    out = _summarize(ctx, prior_chapter_chars=50)
+    assert "x" * 51 not in out
+    assert "x" * 50 in out
+
+
+def test_summarize_default_prior_chapter_chars_is_200():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
+        "themes": [], "causal_edges": [],
+    }
+    out = _summarize(ctx)
+    assert "x" * 200 in out and "x" * 201 not in out
+
+
+async def test_author_constructor_threads_prior_chapter_summary_chars_through(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 500))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T2", prose="P"))
+    author = Author(runner, read, committer, prior_chapter_summary_chars=10)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "x" * 11 not in sent
+    assert "x" * 10 in sent
+
+
+async def test_author_constructor_threads_staleness_threshold_through(stack):
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, staleness_threshold_chapters=1)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" in sent and "the-locket" in sent
+
+
+from novelizer.canon.events import CausalEdgeDeclared
+
+
+def test_summarize_omits_causal_flags_block_when_no_edges():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [], "chapters": [], "signals": [],
+        "threads": [], "secrets": [], "knowledge_matrix": {}, "themes": [], "causal_edges": [],
+    }
+    out = _summarize(ctx)
+    assert "Causal flags:" not in out
+
+
+async def test_author_prompt_includes_causal_flags_when_edges_flagged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c1",
+                        CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c1"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Causal flags:" in sent
+    assert "c2" in sent and "c1" in sent and "ordering" in sent
+
+
+async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(stack):
     events, proj, read, committer = stack
     runner = FakeRunner(ChapterDraft(title="T", prose="P"))
     author = Author(runner, read, committer)

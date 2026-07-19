@@ -222,8 +222,9 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
             rt.scheduler.pause_agent(name)
         for _ in range(10):
             ran = await rt.scheduler.tick()
+            await rt.scheduler.drain_in_flight()
             await rt.projector.catch_up()
-            if ran == "continuity_checker" and await rt.read.list_retcon_requests(status="open"):
+            if "continuity_checker" in ran and await rt.read.list_retcon_requests(status="open"):
                 break
         open_retcons = await rt.read.list_retcon_requests(status="open")
         assert len(open_retcons) == 1, "scheduler did not drive ContinuityChecker to file a retcon"
@@ -235,8 +236,9 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
         rt.scheduler.resume_agent("retconner")
         for _ in range(10):
             ran = await rt.scheduler.tick()
+            await rt.scheduler.drain_in_flight()
             await rt.projector.catch_up()
-            if ran == "retconner" and await rt.read.list_retcon_requests(status="resolved"):
+            if "retconner" in ran and await rt.read.list_retcon_requests(status="resolved"):
                 break
 
         # Real, non-vacuous assertions: the retcon actually resolved, and the world

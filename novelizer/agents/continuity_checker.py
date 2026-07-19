@@ -4,6 +4,7 @@ from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
+from novelizer.brain.context import open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are the Continuity Checker for a living fictional world. Review the given world
 entries, characters, and chapter excerpts for contradictions, anachronisms, or logical inconsistencies.
 Return retcon_requests, each with a description (what contradicts what), conflicting_entry_ids (the ids
-of the conflicting records), and a proposed_resolution. Return an empty list if you find nothing."""
+of the conflicting records), and a proposed_resolution. You may also be shown retcon requests already
+filed and still open: do not re-report those issues, even reworded. Return an empty list if you find
+nothing new."""
 
 MINING_SYSTEM_PROMPT = """You are the prose-mining pass of the Continuity Checker for a living fictional
 world. Read one chapter's prose plus the current knowledge matrix, active secret/thread ids, and causal
@@ -65,6 +68,7 @@ class ContinuityChecker(BaseAgent):
                              EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
         )
         return {
+            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
             "chapters": chapters[-10:],
@@ -82,8 +86,9 @@ class ContinuityChecker(BaseAgent):
         world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
         chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
         chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
+        cast = self._guarded_line("In character", self.personality)
+        retcons = open_retcons_note(ctx.get("open_retcons", []))
+        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         out = result.get("structured_response")
 
@@ -110,6 +115,10 @@ class ContinuityChecker(BaseAgent):
         return out, mined
 
     def _mining_prompt(self, chapter, ctx: dict) -> str:
+        # The secret namespace must be stated outright: shown only implicitly
+        # (via matrix lines), the live miner cited thread ids and character
+        # names as secret ids (a-dress-for-doug, 2026-07-19).
+        secret_ids = ", ".join(s.id for s in ctx.get("secrets", [])) or "(none exist yet)"
         matrix = "\n".join(
             f"[{sid}] revealed={cell['revealed']} known_by={sorted(cell['known_by'])}"
             for sid, cell in ctx.get("knowledge_matrix", {}).items()
@@ -123,11 +132,15 @@ class ContinuityChecker(BaseAgent):
         ) or "None."
         return (
             f"Chapter [{chapter.id}] {chapter.title}:\n{chapter.prose}\n\n"
+            f"Active secret ids (the ONLY legal values for secret_facts ids; thread ids and "
+            f"character names are never secret ids): {secret_ids}\n\n"
             f"Knowledge matrix:\n{matrix}\n\nSecret references:\n{secret_refs}\n\n"
             f"Threads:\n{threads}\n\nCausal edges:\n{causal}"
         )
 
-    async def _commit_mined_facts(self, chapter_id: str, mined_out: MinedFactsOutput, ctx: dict) -> None:
+    async def _commit_mined_facts(
+        self, chapter_id: str, mined_out: MinedFactsOutput, ctx: dict, seen_descriptions: set[str],
+    ) -> None:
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
         active_thread_ids = {t.id for t in ctx.get("threads", [])}
         matrix = ctx.get("knowledge_matrix", {})
@@ -138,6 +151,27 @@ class ContinuityChecker(BaseAgent):
 
         for fact in mined_out.secret_facts:
             if not fact.known_id or fact.id not in active_secret_ids:
+                if fact.id in active_thread_ids:
+                    # Namespace confusion, not a new fact: the cited "secret" is
+                    # an active thread (live: 'the-boy-s-gift', 'the-name-of-the-sea').
+                    # The recoverable meaning — the prose engages that thread — is
+                    # a mined touch, same downgrade precedent as plant-collision
+                    # → touch. Never a retcon: the Retconner can't act on it.
+                    if (fact.id, chapter_id) in thread_touches:
+                        logger.info(
+                            "%s: mined secret %s fact cites active thread id %r already touched "
+                            "in chapter %r, skipped", self.name, fact.action, fact.id, chapter_id,
+                        )
+                        continue
+                    logger.info(
+                        "%s: mined secret %s fact cites active thread id %r in chapter %r, "
+                        "redirected to a mined thread touch", self.name, fact.action, fact.id, chapter_id,
+                    )
+                    await self._commit_thread_intents(
+                        [ThreadIntent(action="touch", id=fact.id, note=fact.note)],
+                        active_thread_ids, chapter_id=chapter_id, source="mined",
+                    )
+                    continue
                 logger.warning(
                     "%s: mined secret %s fact citing unrecognized/unknown secret id %r for "
                     "character %r in chapter %r escalated to retcon",
@@ -147,6 +181,7 @@ class ContinuityChecker(BaseAgent):
                     f"mined secret {fact.action} fact citing unrecognized/unknown secret id "
                     f"'{fact.id}' for character '{fact.character_id}' in chapter '{chapter_id}'",
                     [fact.id, fact.character_id, chapter_id],
+                    seen_descriptions,
                 )
                 continue
             if fact.action == "uses" and (fact.id, fact.character_id) in secret_refs:
@@ -175,6 +210,7 @@ class ContinuityChecker(BaseAgent):
             await self._file_mined_retcon(
                 f"mined secret reveal fact citing id '{fact.id}' in chapter '{chapter_id}'",
                 [fact.id, chapter_id],
+                seen_descriptions,
             )
 
         for fact in mined_out.thread_facts:
@@ -187,6 +223,7 @@ class ContinuityChecker(BaseAgent):
                     f"mined thread {fact.action} fact citing unrecognized/unknown thread id "
                     f"'{fact.id}' in chapter '{chapter_id}'",
                     [fact.id, chapter_id],
+                    seen_descriptions,
                 )
                 continue
             if (fact.id, chapter_id) in thread_touches:
@@ -213,9 +250,21 @@ class ContinuityChecker(BaseAgent):
             self.name, EventType.CHAPTER_MINED, chapter_id, ChapterMined(chapter_id=chapter_id)
         )
 
-    async def _file_mined_retcon(self, detail: str, conflicting_entry_ids: list[str]) -> None:
+    async def _file_mined_retcon(
+        self, detail: str, conflicting_entry_ids: list[str], seen_descriptions: set[str],
+    ) -> None:
+        """File a mined-fact escalation retcon, deduped by description against
+        `seen_descriptions` — the open queue plus everything filed this cycle.
+        The live miner emitted the same fact twice in one output and both were
+        filed; a crash before the chapter.mined stamp re-files on the next pass.
+        """
+        description = f"{MINED_SOURCE_TAG} {detail}"
+        if description in seen_descriptions:
+            logger.info("%s: skipped duplicate mined retcon %r", self.name, description)
+            return
+        seen_descriptions.add(description)
         req = RetconRequest(
-            description=f"{MINED_SOURCE_TAG} {detail}",
+            description=description,
             conflicting_entry_ids=conflicting_entry_ids,
             proposed_resolution="Review the mined fact and add a covering event, or dismiss if not applicable.",
         )
@@ -229,6 +278,9 @@ class ContinuityChecker(BaseAgent):
 
         if out is not None:
             for r in out.retcon_requests:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
                 req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
                                     proposed_resolution=r.proposed_resolution)
                 await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
@@ -259,7 +311,7 @@ class ContinuityChecker(BaseAgent):
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
 
         for chapter_id, mined_out in (mined_facts or {}).items():
-            await self._commit_mined_facts(chapter_id, mined_out, ctx)
+            await self._commit_mined_facts(chapter_id, mined_out, ctx, seen_descriptions)
 
     async def _run(self) -> None:
         ctx = await self.poll()

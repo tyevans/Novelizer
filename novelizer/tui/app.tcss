@@ -2,18 +2,22 @@
 #left { width: 3fr; }
 #right { width: 2fr; }
 #feed { height: 3fr; border: round $primary; }
-#roster { height: 1fr; border: round $secondary; }
 #proposals { height: auto; max-height: 6; border: round $secondary; }
 #thread_board { height: auto; max-height: 8; border: round $secondary; }
 #story_shape { height: auto; max-height: 8; border: round $secondary; }
 #who_knows_what { height: auto; max-height: 8; border: round $secondary; }
 #causeway { height: auto; max-height: 8; border: round $secondary; }
 #browser { height: 2fr; border: round $primary; }
-#detail { height: 1fr; border: round $secondary; padding: 0 1; }
+#detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }
+#detail { height: auto; }
 #statusbar { height: 1; background: $panel; color: $text; }
 #activity_strip { height: 1; background: $boost; color: $text; padding: 0 1; }
 #command { height: 1; padding: 0 1; }
 #body.room #right { display: none; }
+#body.reading #left { display: none; }
+#body.reading #right { layout: horizontal; width: 1fr; }
+#body.reading #browser { width: 1fr; height: 1fr; }
+#body.reading #detail_scroll { width: 3fr; height: 1fr; }
 #engine_room { display: none; }
 #body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
 #body.engine #feed, #body.engine #roster, #body.engine #proposals,

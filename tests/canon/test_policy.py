@@ -24,6 +24,7 @@ GATED_CASES = [
     (AutonomyLevel.gated_canon, EventType.CHARACTER_UPDATED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_STATUS_CHANGED, True),
+    (AutonomyLevel.gated_canon, EventType.CHAPTER_REVISED, True),
     (AutonomyLevel.gated_canon, EventType.RETCON_REQUEST_RESOLVED, True),
     (AutonomyLevel.gated_all, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_all, EventType.RETCON_REQUEST_CREATED, True),
@@ -104,3 +105,15 @@ async def test_secret_revealed_is_not_gated_under_full_auto_or_gated_retcons():
 async def test_chapter_mined_is_never_gated(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("continuity_checker", EventType.CHAPTER_MINED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+async def test_theme_introduced_is_never_gated(level):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("author", EventType.THEME_INTRODUCED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+async def test_theme_developed_is_never_gated(level):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("editor", EventType.THEME_DEVELOPED) is False

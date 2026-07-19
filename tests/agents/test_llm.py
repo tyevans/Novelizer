@@ -23,6 +23,7 @@ from novelizer.settings.models import EffectiveSettings
     ("character_keeper", "build_character_keeper_runner"),
     ("editor", "build_editor_runner"),
     ("continuity_checker", "build_continuity_checker_runner"),
+    ("continuity_checker", "build_continuity_mining_runner"),
     ("retconner", "build_retconner_runner"),
     ("structure_analyst", "build_structure_analyst_runner"),
 ])

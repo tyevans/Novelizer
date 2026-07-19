@@ -40,23 +40,25 @@ async def test_mission_control_panes_present_and_populate():
             from textual.widgets import RichLog, Tree, Static
             assert app.query_one("#feed", RichLog) is not None
             assert app.query_one("#browser", Tree) is not None
-            assert app.query_one("#roster", Static) is not None
             assert app.query_one("#statusbar", Static) is not None
+            # the roster pane is gone: agent state lives in the status bar now
+            assert not app.query("#roster")
             import time
             deadline = time.monotonic() + 5.0
-            roster_text = ""
+            statusbar_text = ""
             all_labels = []
             while time.monotonic() < deadline:
                 await pilot.pause(0.2)
-                roster_text = str(app.query_one("#roster", Static).renderable)
+                statusbar_text = str(app.query_one("#statusbar", Static).renderable)
                 tree = app.query_one("#browser", Tree)
                 all_labels = [str(n.label) for n in tree.root.children] + [str(c.label) for n in tree.root.children for c in n.children]
-                if "author" in roster_text and (
+                if "author" in statusbar_text and (
                     any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
                 ):
                     break
-            # roster shows agent names; browser shows the authored chapter
-            assert "author" in roster_text
+            # status bar shows the active agent; browser shows the authored chapter
+            assert "author" in statusbar_text
+            assert "AUTONOMY" in statusbar_text
             assert any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
     finally:
         await rt.close(); os.unlink(path)

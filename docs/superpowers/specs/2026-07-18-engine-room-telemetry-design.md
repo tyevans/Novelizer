@@ -36,6 +36,12 @@ Concurrency assumption: the scheduler runs agents strictly one at a time
 (`scheduler.py` awaits `agent.run_once()` sequentially), so the live view handles
 exactly one stream in flight. If the scheduler ever goes concurrent, the live pane
 needs a multiplexing revisit — noted as out of scope.
+Implementation note (post-merge with M5.3): the scheduler DID go concurrent
+(`max_concurrent_agents`, default 2, dispatch pool). Correlation survives unchanged
+(run context is per-asyncio-task), the trace records every run faithfully, and
+eligibility gained a `"running"` reason for in-flight agents — but the single-stream
+live pane now follows the most recently *started* run and drops token deltas from
+any other in-flight run. The multiplexed live view remains the flagged follow-up.
 
 ## Architecture
 

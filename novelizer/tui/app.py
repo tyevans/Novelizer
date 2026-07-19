@@ -4,13 +4,13 @@ import time
 from collections import deque
 from pathlib import Path
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
-from novelizer.tui.widgets.roster import AgentRoster
+from novelizer.tui.widgets.roster import roster_summary
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
@@ -92,6 +92,7 @@ class NovelizerApp(App):
         ("r", "toggle_room", "Room"),
         ("e", "toggle_engine", "Engine Room"),
         ("p", "toggle_prompt", "Prompt"),
+        ("v", "toggle_reading", "Reading"),
         ("q", "quit", "Quit"),
     ]
 
@@ -108,7 +109,6 @@ class NovelizerApp(App):
         with Horizontal(id="body"):
             with Vertical(id="left"):
                 yield RichLog(highlight=False, markup=False, id="feed")
-                yield AgentRoster(id="roster")
                 yield Static("no pending proposals", id="proposals")
                 yield ThreadBoard("no threads yet", id="thread_board")
                 yield StoryShape("no chapters scored yet", id="story_shape")
@@ -117,7 +117,8 @@ class NovelizerApp(App):
                 yield EngineRoom(id="engine_room")
             with Vertical(id="right"):
                 yield StoryBrowser("Story", id="browser")
-                yield Static("Select an item to view details.", id="detail")
+                with VerticalScroll(id="detail_scroll"):
+                    yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: loading…", id="statusbar")
         yield ActivityStrip("idle", id="activity_strip")
         # compact=True drops Input's default tall border, which would consume
@@ -129,7 +130,6 @@ class NovelizerApp(App):
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
-        self.run_worker(self._roster_loop(), exclusive=False)
         self.run_worker(self._browser_loop(), exclusive=False)
         self.run_worker(self._proposals_loop(), exclusive=False)
         self.run_worker(self._statusbar_loop(), exclusive=False)
@@ -159,9 +159,24 @@ class NovelizerApp(App):
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:
+        # Dispatched agents now run concurrently as background tasks, so a
+        # crashing agent no longer raises synchronously out of tick() (that
+        # would defeat the whole point of not awaiting dispatch) -- it's
+        # recorded in Scheduler.status()'s last_error instead. Poll for newly
+        # completed failing runs each cycle and surface them the same way a
+        # direct tick() exception would have been reported before concurrency.
+        # Dedup by run_count, not error text: repeated identical failures
+        # (e.g. the same agent crashing the same way every cycle) must each
+        # still be reported once per completed run.
+        reported_run_count: dict[str, int] = {}
         while True:
             try:
                 await self.runtime.scheduler.tick()
+                for s in self.runtime.scheduler.status():
+                    err = s["last_error"]
+                    if err and reported_run_count.get(s["name"]) != s["run_count"]:
+                        reported_run_count[s["name"]] = s["run_count"]
+                        self._report_worker_error("scheduler", RuntimeError(f"{s['name']}: {err}"))
             except Exception as e:
                 self._report_worker_error("scheduler", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
@@ -179,14 +194,6 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)
-
-    async def _roster_loop(self) -> None:
-        while True:
-            try:
-                self.query_one("#roster", AgentRoster).update_from(self.runtime.scheduler.status())
-            except Exception as e:
-                self._report_worker_error("roster", e)
-            await asyncio.sleep(0.5)
 
     async def _browser_loop(self) -> None:
         while True:
@@ -209,7 +216,8 @@ class NovelizerApp(App):
         while True:
             try:
                 state = await self.runtime.read.get_autonomy_state()
-                self.query_one("#statusbar", Static).update(_status_line(state))
+                agents = roster_summary(self.runtime.scheduler.status())
+                self.query_one("#statusbar", Static).update(f"{agents}   |   {_status_line(state)}")
             except Exception as e:
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
@@ -217,7 +225,9 @@ class NovelizerApp(App):
     async def _thread_board_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#thread_board", ThreadBoard).refresh_from(self.runtime.read)
+                await self.query_one("#thread_board", ThreadBoard).refresh_from(
+                    self.runtime.read, threshold=self.runtime.settings.staleness_threshold_chapters
+                )
             except Exception as e:
                 self._report_worker_error("thread_board", e)
             await asyncio.sleep(1.0)
@@ -225,7 +235,9 @@ class NovelizerApp(App):
     async def _story_shape_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#story_shape", StoryShape).refresh_from(self.runtime.read)
+                await self.query_one("#story_shape", StoryShape).refresh_from(
+                    self.runtime.read, delta=self.runtime.settings.sag_spike_delta
+                )
             except Exception as e:
                 self._report_worker_error("story_shape", e)
             await asyncio.sleep(1.0)
@@ -339,7 +351,16 @@ class NovelizerApp(App):
         self.set_focus(self.query_one("#command", Input))
 
     def action_toggle_room(self) -> None:
-        self.query_one("#body").toggle_class("room")
+        # Room and reading are mutually exclusive: room hides #right, reading
+        # hides #left — both at once would blank the whole body.
+        body = self.query_one("#body")
+        body.remove_class("reading")
+        body.toggle_class("room")
+
+    def action_toggle_reading(self) -> None:
+        body = self.query_one("#body")
+        body.remove_class("room")
+        body.toggle_class("reading")
 
     def action_toggle_engine(self) -> None:
         self.query_one("#body").toggle_class("engine")
@@ -372,7 +393,13 @@ class NovelizerApp(App):
         if not data or not data.get("id"):
             return
         text = await detail_text(self.runtime.read, data["section"], data["id"])
-        self.query_one("#detail", Static).update(text or "(no detail)")
+        self._update_detail(text or "(no detail)")
+
+    def _update_detail(self, text: str) -> None:
+        self.query_one("#detail", Static).update(text)
+        # New selection: start reading at the top, not wherever the previous
+        # entry was scrolled to.
+        self.query_one("#detail_scroll", VerticalScroll).scroll_home(animate=False)
 
     async def on_data_table_row_selected(self, event) -> None:
         if event.data_table.id != "er_trace":

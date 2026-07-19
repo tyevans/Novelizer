@@ -1,19 +1,30 @@
 from __future__ import annotations
+import logging
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import KeeperOutput
+from novelizer.brain.context import open_retcons_note
+from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.store.models import RetconRequest
+from novelizer.store.models import Character, RetconRequest, RetconStatus
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world.
-You receive characters (with traits and arcs) and recent prose chapters. Your tasks:
-1. Update each character's arc_status to reflect what recent chapters show.
-2. Flag behavioral contradictions between a character's defined traits and their actions.
-3. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
+You receive the current cast (with traits and arcs) and recent prose chapters. Your tasks:
+1. Report new_characters: named characters who appear in the chapters but are missing from
+   the cast. Give each a name exactly as the prose spells it, plus any traits, motivations,
+   backstory, arc_status, and voice the prose shows. Never re-report a character already
+   in the cast, even under a nickname or variant spelling.
+2. Update each existing character's arc_status to reflect what recent chapters show.
+3. Flag behavioral contradictions between a character's defined traits and their actions.
+4. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
    in their lines, and revise it as their voice evolves across chapters.
-Return updated_characters (id + revised arc_status, and any corrected traits/motivations/backstory/voice)
-and retcon_requests (description, conflicting_entry_ids, proposed_resolution)."""
+Return new_characters, updated_characters (id + revised arc_status, and any corrected
+traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
+proposed_resolution). You may also be shown retcon requests already filed and still open:
+do not re-report those issues, even reworded."""
 
 
 class CharacterKeeper(BaseAgent):
@@ -30,6 +41,10 @@ class CharacterKeeper(BaseAgent):
     async def readiness(self) -> float:
         chars = await self._read.list_characters()
         chapters = await self._read.list_chapters()
+        if chapters and not chars:
+            # Prose exists but the cast is empty: bootstrapping the cast is
+            # the Keeper's most urgent work — nothing else mints characters.
+            return 0.8
         return 0.5 if (chars and chapters) else 0.2
 
     async def poll(self) -> dict:
@@ -38,21 +53,44 @@ class CharacterKeeper(BaseAgent):
             "characters": await self._read.list_characters(),
             "recent": chapters[-5:],
             "secrets": await self._read.list_secrets(),
+            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
         }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
-        if not ctx["characters"]:
+        if not ctx["characters"] and not ctx["recent"]:
             return None
-        chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"])
+        chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"]) or "None yet."
         chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
+        cast = self._guarded_line("In character", self.personality)
+        retcons = open_retcons_note(ctx.get("open_retcons", []))
+        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
     async def commit(self, out: KeeperOutput | None, ctx: dict) -> None:
         if out is None:
             return
+        # Re-read the cast at commit time (not from ctx): the LLM call in
+        # work() is slow enough that a concurrent cycle may have minted
+        # a character meanwhile; a slug is minted exactly once.
+        seen_ids = {c.id for c in await self._read.list_characters()}
+        for new in out.new_characters:
+            if not new.name.strip():
+                logger.warning("%s: dropped new character with empty name", self.name)
+                continue
+            char_id = slugify_character_name(new.name)
+            if char_id in seen_ids:
+                logger.info(
+                    "%s: new character %r collides with existing id %r, dropped",
+                    self.name, new.name, char_id,
+                )
+                continue
+            seen_ids.add(char_id)
+            character = Character(
+                id=char_id, name=new.name.strip(), traits=new.traits, motivations=new.motivations,
+                backstory=new.backstory, arc_status=new.arc_status, voice=new.voice,
+            )
+            await self._committer.commit(self.name, EventType.CHARACTER_CREATED, char_id, character)
         for upd in out.updated_characters:
             current = await self._read.get_character(upd.id)
             if current is None:
@@ -64,10 +102,18 @@ class CharacterKeeper(BaseAgent):
                     fields[f] = v
             updated = current.model_copy(update=fields)
             await self._committer.commit(self.name, EventType.CHARACTER_UPDATED, updated.id, updated)
-        for r in out.retcon_requests:
-            req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
-                                proposed_resolution=r.proposed_resolution)
-            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        if out.retcon_requests:
+            # Re-read the queue at commit time (not from ctx): the LLM call in
+            # work() is slow enough that another agent may have filed meanwhile.
+            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+            seen_descriptions = {r.description for r in open_reqs}
+            for r in out.retcon_requests:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
+                req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
+                                    proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
         await self._commit_knowledge_intents(
             out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})

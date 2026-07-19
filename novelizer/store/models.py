@@ -45,6 +45,7 @@ class SignalKind(StrEnum):
     focus = "focus"
     override = "override"
     note = "note"
+    revise = "revise"
 
 
 class ThreadState(StrEnum):
@@ -96,6 +97,20 @@ class ThreadRecord(BaseModel):
     id: str
     name: str
     state: ThreadState = ThreadState.planted
+    touch_count: int = 0
+    last_note: str = ""
+    last_chapter_id: str = ""
+
+
+class ThemeRecord(BaseModel):
+    """Read-side row for a theme/motif, built and rebuilt by the Projector
+    from the theme.* event log (see novelizer/canon/projector.py). Unlike
+    ThreadRecord, themes have no terminal state (M5.2 Locked decision 6) --
+    a theme can be developed indefinitely, so there is no `state` field.
+    """
+
+    id: str
+    title: str
     touch_count: int = 0
     last_note: str = ""
     last_chapter_id: str = ""
@@ -191,4 +206,5 @@ class DirectorSignal(BaseModel):
     kind: SignalKind
     body: str
     target_agent: Optional[str] = None
+    target_entity: str = ""
     consumed: bool = False
