@@ -440,3 +440,104 @@ async def test_editor_no_voice_drift_flags_commits_no_extra_retcon(stack):
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
     assert tagged == []
+
+
+async def test_m5_2_done_when_mechanical_chain_themes(stack):
+    """M5.2 done-when (a), theme half, traced clause by clause -- see
+    docs/submilestones/M5-finish.md's M5.2 done-when cell and
+    docs/superpowers/plans/2026-07-18-novelizer-m5.2-themes-voice.md Task 9."""
+    from novelizer.agents.author import Author, ChapterDraft
+    from novelizer.tui.widgets.browser_model import browser_sections
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    # --- Clause 1a: a declared theme_intents entry (action="introduce") via
+    # Author commits a theme.introduced event.
+    draft = ChapterDraft(
+        title="Two", prose="P",
+        theme_intents=[ThemeIntent(action="introduce", title="Loss")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    introduced = [e for e in log if e.event_type == EventType.THEME_INTRODUCED]
+    assert len(introduced) == 1 and introduced[0].payload["title"] == "Loss"
+
+    # --- Clause 2: list_themes() after catch_up() reflects it.
+    themes = await read.list_themes()
+    assert any(t.id == "loss" and t.title == "Loss" for t in themes)
+
+    # --- Clause 3: a subsequent theme_intents entry (action="develop")
+    # citing that id commits theme.developed and increments touch_count.
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        theme_intents=[ThemeIntent(action="develop", id="loss")],
+    )
+    editor = Editor(FakeRunner(verdict), read, committer)
+    await editor.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    developed = [e for e in log if e.event_type == EventType.THEME_DEVELOPED]
+    assert len(developed) == 1 and developed[0].payload["id"] == "loss"
+    theme = await read.get_theme("loss")
+    assert theme.touch_count == 1
+
+    # --- Clause 4: monotonic-appending -- no event type reset touch_count
+    # or removed the record; the theme is still present with its
+    # accumulated touch_count, and both prior events remain in the log.
+    assert theme is not None
+    assert theme.touch_count == 1
+    assert len([e for e in log if e.event_type == EventType.THEME_INTRODUCED]) == 1
+
+    # --- browser-visible clause: the theme shows up in browser_sections().
+    sections = await browser_sections(read)
+    themes_section = next(s for s in sections if s["key"] == "themes")
+    assert any(item["id"] == "loss" and item["label"] == "Loss" for item in themes_section["items"])
+
+
+async def test_m5_2_done_when_mechanical_chain_voice_drift(stack):
+    """M5.2 done-when (a), voice-drift half, traced clause by clause -- see
+    docs/submilestones/M5-finish.md's M5.2 done-when cell and
+    docs/superpowers/plans/2026-07-18-novelizer-m5.2-themes-voice.md Task 9."""
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    # --- Clause 1: a FakeRunner EditorVerdict carrying a voice_drift_flags
+    # entry is returned from Editor.work().
+    verdict = EditorVerdict(
+        verdict="approve",
+        notes="clean",
+        voice_drift_flags=[
+            VoiceDriftFlag(
+                character_id="mara",
+                line="I dunno, whatever.",
+                trait_violated="formal, clipped diction",
+                note="drops into casual slang",
+            )
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    ctx = await agent.poll()
+    result = await agent.work(ctx)
+    assert result.voice_drift_flags and result.voice_drift_flags[0].character_id == "mara"
+
+    # --- Clause 2: Editor.commit() produces a retcon_request.created event.
+    await agent.commit(result, ctx)
+    await proj.catch_up()
+    log = await events.events_since(0)
+    created = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    assert len(created) == 1
+
+    # --- Clause 3: its description is tagged with VOICE_SOURCE_TAG.
+    assert created[0].payload["description"].startswith(VOICE_SOURCE_TAG)
+
+    # --- Clause 4: it lands in the open retcon queue.
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 1
