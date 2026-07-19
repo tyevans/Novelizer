@@ -95,6 +95,7 @@ async def _run_pass(out: KeeperOutput) -> None:
         assert await read.list_retcon_requests(status=RetconStatus.open) == []
         log = await events.events_since(0)
         assert {e.event_type for e in log} <= {EventType.CHAPTER_CREATED, EventType.AGENT_REMARKED}
+        assert sum(1 for e in log if e.event_type == EventType.AGENT_REMARKED) <= 1
 
         await read.close()
         await proj.close()
