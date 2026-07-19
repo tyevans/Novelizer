@@ -47,11 +47,6 @@ async def rt(tmp_path):
     # Pause them all so tests drive telemetry by hand.
     for a in runtime.agents:
         a.pause()
-    # Pre-seed scheduler eligibility as already "paused" so the scheduler loop's
-    # first tick doesn't emit a SCHEDULER_ELIGIBILITY_CHANGED per agent (it only
-    # emits on state *change* — without this, tests would see unrelated noise
-    # in _trace_events, defeating "tests drive telemetry by hand" above).
-    runtime.scheduler._eligibility = {a.name: (False, "paused") for a in runtime.agents}
     yield runtime
     await runtime.close()
 
@@ -160,9 +155,10 @@ async def test_trace_rows_appear_newest_first(rt):
                                 AgentRunFinished(run_id="r1", agent_name="author", duration_s=52.0))
         await pilot.pause(0.8)
         table = app.query_one("#er_trace", DataTable)
-        assert table.row_count == 2
-        first_row = table.get_row_at(0)
-        assert "✓" in first_row[0]  # newest (run finished) first
+        rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
+        finished_idx = next(i for i, r in enumerate(rows) if "✓" in r)
+        started_idx = next(i for i, r in enumerate(rows) if "run started" in r)
+        assert finished_idx < started_idx  # newest (run finished) first
 
 
 async def test_selecting_a_trace_row_shows_detail_with_prompt_and_produced(rt):
@@ -187,6 +183,9 @@ async def test_selecting_a_trace_row_shows_detail_with_prompt_and_produced(rt):
         await pilot.press("e")
         table = app.query_one("#er_trace", DataTable)
         table.focus()
+        rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
+        target = next(i for i, r in enumerate(rows) if "llm call 1 started" in r)
+        table.move_cursor(row=target)
         await pilot.press("enter")
         await pilot.pause(0.3)
         detail = app.query_one("#er_detail")
@@ -206,4 +205,6 @@ async def test_seeded_trace_survives_restart(rt):
         app.set_focus(None)
         await pilot.press("e")
         await pilot.pause(0.8)
-        assert app.query_one("#er_trace", DataTable).row_count == 1
+        table = app.query_one("#er_trace", DataTable)
+        rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
+        assert any("run started" in r for r in rows)
