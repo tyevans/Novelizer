@@ -7,8 +7,23 @@ run manually (too slow/networked for every CI run).
 """
 import os
 import tempfile
+
+import pytest
 from click.testing import CliRunner
+
 from novelizer.director.cli import cli
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_cwd(monkeypatch, tmp_path_factory):
+    """Run every smoke test from a throwaway cwd.
+
+    With no global config, the CLI resolves its story location relative to the
+    working directory (NOVELIZER_DB_PATH is not an env override), so invoking
+    it from the repo root silently creates a real `stories/default/world.db`
+    in the checkout. Same incident class as tests/director/conftest.py.
+    """
+    monkeypatch.chdir(tmp_path_factory.mktemp("install-smoke"))
 
 
 def _env(xdg_config_home, db_path=None):
