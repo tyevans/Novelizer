@@ -14,7 +14,9 @@ from dataclasses import dataclass
 from rich.text import Text
 
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
-from novelizer.store.models import Chapter, StructureScore
+from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
+from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.store.models import Chapter, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
@@ -78,3 +80,54 @@ def shape_tab(
     pacing = ordered[-1].pacing_label
     meta = Text(f"{axis} · pacing: {pacing}" if pacing else axis, style=DIM)
     return ShapeTab(tensions, meta, callouts, len(callouts))
+
+
+def thread_line(
+    thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
+) -> Text:
+    """One Threads-tab row. Staleness comes from is_thread_stale /
+    chapters_elapsed_since — never re-derived; `threshold` arrives from
+    settings.staleness_threshold_chapters via the app's _brain_loop (M5.3
+    single-sourcing). No slugs/ids anywhere."""
+    if is_thread_stale(thread, chapters, threshold):
+        elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
+        n = chapter_number(thread.last_chapter_id, chapters)
+        if n is None:
+            detail = f"stale — untouched for {elapsed} chapters"
+        else:
+            detail = f"stale — last touched ch {n}, {elapsed} chapters ago"
+        return Text(f"⚠ {thread.name} · {detail}", style=ALARM_STYLE)
+    if thread.state.value in TERMINAL_STATES:
+        return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
+    return Text(f"· {thread.name} · {thread.state.value}")
+
+
+@dataclass(frozen=True)
+class ThreadsTab:
+    lines: list[Text]
+    alarm_count: int
+
+
+def threads_tab(
+    threads: list[ThreadRecord], chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
+) -> ThreadsTab:
+    """Threads grouped by state: stale pinned first (alarms), then live open
+    threads, terminal threads folded to one dim count line."""
+    if not threads:
+        return ThreadsTab([Text(THREADS_EMPTY, style=DIM)], 0)
+    stale = [t for t in threads if is_thread_stale(t, chapters, threshold)]
+    stale_ids = {t.id for t in stale}
+    live = [
+        t for t in threads
+        if t.id not in stale_ids and t.state.value not in TERMINAL_STATES
+    ]
+    terminal = [t for t in threads if t.state.value in TERMINAL_STATES]
+    lines = [thread_line(t, chapters, threshold) for t in stale + live]
+    if terminal:
+        paid = sum(1 for t in terminal if t.state == ThreadState.paid_off)
+        abandoned = len(terminal) - paid
+        parts = ([f"{paid} paid off"] if paid else []) + (
+            [f"{abandoned} abandoned"] if abandoned else []
+        )
+        lines.append(Text("✓ " + " · ".join(parts), style=DIM))
+    return ThreadsTab(lines, len(stale))
