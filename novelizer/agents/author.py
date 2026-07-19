@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
 from novelizer.brain.context import known_secrets_note, stale_threads_note
+from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -13,14 +14,20 @@ Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear."""
 
 
-def _summarize(ctx: dict, casting_note: str = "", personality: str = "") -> str:
+def _summarize(
+    ctx: dict,
+    casting_note: str = "",
+    personality: str = "",
+    prior_chapter_chars: int = 200,
+    staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
+) -> str:
     world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
     chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
-    prev = "\n".join(f"- '{c.title}': {c.prose[:200]}" for c in ctx["previous"]) or "None yet."
+    prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
     voice = f"\n\nWrite in this prose voice: {casting_note}" if casting_note else ""
     cast = f"\n\nIn character: {personality}" if personality else ""
-    brain = stale_threads_note(ctx["threads"], ctx["chapters"])
+    brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
@@ -38,10 +45,14 @@ class Author(BaseAgent):
         casting_note: str = "",
         personality: str = "",
         provenance: dict | None = None,
+        prior_chapter_summary_chars: int = 200,
+        staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
         self.provenance = provenance
+        self._prior_chapter_summary_chars = prior_chapter_summary_chars
+        self._staleness_threshold_chapters = staleness_threshold_chapters
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status="draft"))
@@ -62,7 +73,11 @@ class Author(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
-        content = _summarize(ctx, self._casting_note, self.personality)
+        content = _summarize(
+            ctx, self._casting_note, self.personality,
+            prior_chapter_chars=self._prior_chapter_summary_chars,
+            staleness_threshold_chapters=self._staleness_threshold_chapters,
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
 

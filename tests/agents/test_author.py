@@ -417,3 +417,55 @@ async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
         "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
     )
     assert sent == expected
+
+
+def test_summarize_uses_configured_prior_chapter_chars():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
+        "themes": [],
+    }
+    out = _summarize(ctx, prior_chapter_chars=50)
+    assert "x" * 51 not in out
+    assert "x" * 50 in out
+
+
+def test_summarize_default_prior_chapter_chars_is_200():
+    from novelizer.agents.author import _summarize
+
+    ctx = {
+        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
+        "themes": [],
+    }
+    out = _summarize(ctx)
+    assert "x" * 200 in out and "x" * 201 not in out
+
+
+async def test_author_constructor_threads_prior_chapter_summary_chars_through(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 500))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T2", prose="P"))
+    author = Author(runner, read, committer, prior_chapter_summary_chars=10)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "x" * 11 not in sent
+    assert "x" * 10 in sent
+
+
+async def test_author_constructor_threads_staleness_threshold_through(stack):
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, staleness_threshold_chapters=1)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Stale threads" in sent and "the-locket" in sent

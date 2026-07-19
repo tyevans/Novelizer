@@ -78,6 +78,8 @@ class Runtime:
             self._runner_for("author", build_author_runner), self.read, self.committer,
             interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
             provenance=provenance,
+            prior_chapter_summary_chars=s.prior_chapter_summary_chars,
+            staleness_threshold_chapters=s.staleness_threshold_chapters,
         )
         self.world_architect = WorldArchitect(
             self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
@@ -90,6 +92,7 @@ class Runtime:
         self.editor = Editor(
             self._runner_for("editor", build_editor_runner), self.read, self.committer,
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
+            sag_spike_delta=s.sag_spike_delta,
         )
         self.continuity_checker = ContinuityChecker(
             self._runner_for("continuity_checker", build_continuity_checker_runner),

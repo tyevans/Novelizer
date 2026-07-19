@@ -13,6 +13,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "author_temperature", "agent_temperature",
     "author_interval", "default_agent_interval",
     "continuity_interval", "structure_analyst_interval", "projector_interval",
+    "prior_chapter_summary_chars", "staleness_threshold_chapters", "sag_spike_delta",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -41,6 +42,12 @@ class EffectiveSettings(BaseModel):
     # (especially with server-side reasoning enabled) can generate past a
     # proxy's request timeout, so no request ever completes.
     llm_max_tokens: int = 4096
+    # Chars of prior-chapter prose shown to the Author as context.
+    prior_chapter_summary_chars: int = 200
+    # Chapters elapsed since a thread's last touch before it's flagged stale.
+    staleness_threshold_chapters: int = 3
+    # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
+    sag_spike_delta: float = 0.3
 
     # Cadence (seconds)
     author_interval: int = 300

@@ -85,3 +85,14 @@ def test_suppress_flat_migration_prompt_defaults_false():
 def test_parse_global_accepts_llm_max_tokens():
     cfg = parse_global({"llm_max_tokens": 2048}, source="g.toml")
     assert cfg.llm_max_tokens == 2048
+
+
+def test_parse_global_accepts_prior_chapter_summary_chars():
+    cfg = parse_global({"prior_chapter_summary_chars": 100}, source="g.toml")
+    assert cfg.prior_chapter_summary_chars == 100
+
+
+def test_parse_story_accepts_staleness_and_sag_spike_settings():
+    cfg = parse_story({"staleness_threshold_chapters": 5, "sag_spike_delta": 0.2}, source="s.toml")
+    assert cfg.staleness_threshold_chapters == 5
+    assert cfg.sag_spike_delta == 0.2
