@@ -4,15 +4,17 @@ from novelizer.brain.context import causal_flags_note, known_secrets_note, stale
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, InspirationHandConsumed
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.events import ChapterRevised
+from novelizer.muse.prompts import AI_TELL_BAN_NOTE, casting_pool_note, inspiration_note
 from novelizer.store.models import Chapter, SignalKind
 
 AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write the next prose chapter.
 You receive world lore, active characters, previous chapter summaries, and director notes.
 Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
-Return a title, the full prose, and the ids of characters who appear."""
+Return a title, the full prose, and the ids of characters who appear.
+""" + AI_TELL_BAN_NOTE
 
 
 def _summarize(
@@ -31,9 +33,11 @@ def _summarize(
     brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])
+    pool = casting_pool_note(ctx.get("hand"))
+    sparks = inspiration_note(ctx.get("hand"))
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
+        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
     )
 
 
@@ -87,6 +91,7 @@ class Author(BaseAgent):
             "knowledge_matrix": await self._read.knowledge_matrix(),
             "themes": await self._read.list_themes(),
             "causal_edges": await self._read.list_causal_edges(),
+            "hand": await self._read.get_active_hand(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -124,6 +129,12 @@ class Author(BaseAgent):
             await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
             chapter_id = chapter.id
             valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}
+            hand = ctx.get("hand")
+            if hand is not None:
+                await self._committer.commit(
+                    self.name, EventType.INSPIRATION_HAND_CONSUMED, hand.id,
+                    InspirationHandConsumed(hand_id=hand.id, chapter_id=chapter.id),
+                )
         active_thread_ids = {
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
