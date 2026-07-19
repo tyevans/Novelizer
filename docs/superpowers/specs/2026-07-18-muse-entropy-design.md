@@ -47,10 +47,10 @@ calls anywhere in this context.
 | Corpus | Source | Notes |
 |---|---|---|
 | Given names | SSA baby-name data (public domain) | bucketed by era (victorian/interwar/midcentury/late20th/modern); buckets are curated mid-frequency lists sampled uniformly — curation replaces runtime frequency weighting, keeping draws real-but-not-top-10 |
-| Surnames | US Census surname list (public domain) | Frequency-weighted |
+| Surnames | US Census surname list (public domain) | Curated mid-frequency list, sampled uniformly |
 | Professions | Historical census occupation titles + modern list | e.g. "cordwainer", "linotype operator" |
-| Settings | Curated archetype list (~200 entries) | Deliberately far from the coastal-village attractor |
-| Beat cards | Curated complication deck (~100 entries, written by us) | Oblique-strategies style: "someone's stated motive is false", "an object changes hands unnoticed" |
+| Settings | Curated archetype list (40 curated entries) | Deliberately far from the coastal-village attractor |
+| Beat cards | Curated complication deck (40 curated entries, written by us) | Oblique-strategies style: "someone's stated motive is false", "an object changes hands unnoticed" |
 
 Each corpus file carries a version identifier recorded in every draw event.
 

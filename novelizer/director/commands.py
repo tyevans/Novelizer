@@ -136,6 +136,10 @@ async def dispatch(runtime, line: str) -> str:
             # Deal without waiting for the projector: deal_fresh_hand doesn't
             # check for an active hand, and the projection sorts itself out
             # (the superseded event lands before the new drawn event).
+            # Note: if the Author already holds the old hand mid-draft when a
+            # reroll fires, that chapter's eventual consumption no-ops against
+            # the (now superseded) hand and its uptake goes untracked. This is
+            # an accepted, human-triggered edge case.
             hand = await runtime.muse.deal_fresh_hand()
             return f"Rerolled. New hand: {'; '.join(hand.names)}"
         return muse_status_report(

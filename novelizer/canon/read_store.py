@@ -182,6 +182,9 @@ class ReadStore:
         return InspirationHandRecord.model_validate_json(row[0]) if row else None
 
     async def list_hands(self, status: Optional[str] = None) -> list[InspirationHandRecord]:
+        # rowid order reflects last projection write (INSERT OR REPLACE), which
+        # matches deal order only because a hand's status flips before the next
+        # hand is dealt.
         if status:
             cur = await self._conn.execute(
                 "SELECT data FROM inspiration_hands WHERE status=? ORDER BY rowid", (status,)

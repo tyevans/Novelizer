@@ -28,6 +28,11 @@ _NEVER_GATED = {
     EventType.CHAPTER_MINED,
     EventType.THEME_INTRODUCED,
     EventType.THEME_DEVELOPED,
+    # mechanical bookkeeping from a deterministic no-LLM agent, same class as chapter.mined
+    EventType.INSPIRATION_DRAWN,
+    EventType.INSPIRATION_HAND_CONSUMED,
+    EventType.INSPIRATION_HAND_SUPERSEDED,
+    EventType.INSPIRATION_UPTAKE_RECORDED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

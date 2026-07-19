@@ -12,6 +12,20 @@ from novelizer.muse.draws import DEFAULT_ERA, deal_hand
 logger = logging.getLogger(__name__)
 
 
+def _exclusion_window(hands, n: int) -> set[str]:
+    """Compute the set of items to exclude from the last `n` dealt hands.
+
+    n <= 0 means no exclusion window at all (not "exclude everything" —
+    a naive `hands[-0:]` slice would wrongly return the whole list).
+    """
+    recent = hands[-n:] if n > 0 else []
+    return {
+        item
+        for hand in recent
+        for item in (*hand.names, *hand.professions, *hand.settings, *hand.beats)
+    }
+
+
 class Muse(BaseAgent):
     """Deals seeded hands of corpus draws as inspiration.* events.
 
@@ -48,12 +62,8 @@ class Muse(BaseAgent):
         """Deal and commit a new hand unconditionally. Public: the director's
         `:muse reroll` calls this right after superseding the active hand,
         without waiting for the projector to catch up."""
-        recent = (await self._read.list_hands())[-self._exclusion_hands:]
-        exclude = {
-            item
-            for hand in recent
-            for item in (*hand.names, *hand.professions, *hand.settings, *hand.beats)
-        }
+        hands = await self._read.list_hands()
+        exclude = _exclusion_window(hands, self._exclusion_hands)
         seed = secrets.randbits(63)
         hand = deal_hand(self._corpora, seed, self._era, exclude, str(uuid.uuid4()))
         await self._committer.commit(self.name, EventType.INSPIRATION_DRAWN, hand.hand_id, hand)
