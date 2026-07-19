@@ -3,7 +3,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
-    SecretRecord, CausalEdgeRecord, SecretReferenceRecord,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -103,6 +103,15 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (thread_id,))
         row = await cur.fetchone()
         return ThreadRecord.model_validate_json(row[0]) if row else None
+
+    async def list_themes(self) -> list[ThemeRecord]:
+        cur = await self._conn.execute("SELECT data FROM themes ORDER BY rowid")
+        return [ThemeRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_theme(self, theme_id: str) -> Optional[ThemeRecord]:
+        cur = await self._conn.execute("SELECT data FROM themes WHERE id=?", (theme_id,))
+        row = await cur.fetchone()
+        return ThemeRecord.model_validate_json(row[0]) if row else None
 
     async def list_structure_scores(self) -> list[StructureScore]:
         cur = await self._conn.execute("SELECT data FROM structure_scores ORDER BY rowid")

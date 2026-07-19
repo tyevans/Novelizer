@@ -277,6 +277,88 @@ async def test_thread_replant_of_paid_off_thread_does_not_resurrect(wired):
     assert rows[0]["last_note"] == "resolved"
 
 
+async def _theme_rows(proj):
+    cur = await proj._conn.execute("SELECT data FROM themes ORDER BY rowid")
+    return [json.loads(r[0]) for r in await cur.fetchall()]
+
+
+async def test_theme_introduced_is_projected(wired):
+    from novelizer.canon.events import ThemeIntroduced
+    events, proj, _ = wired
+    await events.append(EventType.THEME_INTRODUCED, "isolation",
+                        ThemeIntroduced(id="isolation", title="Isolation"))
+    await proj.catch_up()
+    rows = await _theme_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "isolation" and rows[0]["title"] == "Isolation"
+    assert rows[0]["touch_count"] == 0
+
+
+async def test_theme_developed_increments_touch_count_and_updates_last_note(wired):
+    from novelizer.canon.events import ThemeIntroduced, ThemeDeveloped
+    events, proj, _ = wired
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation"))
+    await events.append(EventType.THEME_DEVELOPED, "isolation",
+                        ThemeDeveloped(id="isolation", note="deepens in ch3", chapter_id="c3"))
+    await proj.catch_up()
+    rows = await _theme_rows(proj)
+    assert rows[0]["touch_count"] == 1
+    assert rows[0]["last_note"] == "deepens in ch3"
+    assert rows[0]["last_chapter_id"] == "c3"
+
+
+async def test_theme_developed_for_unknown_id_is_projection_no_op(wired):
+    from novelizer.canon.events import ThemeDeveloped
+    events, proj, _ = wired
+    await events.append(EventType.THEME_DEVELOPED, "missing", ThemeDeveloped(id="missing", note="ghost"))
+    await proj.catch_up()
+    rows = await _theme_rows(proj)
+    assert rows == []
+    log = await events.events_since(0)
+    assert len(log) == 1  # still a fact in the log
+
+
+async def test_theme_reintroduced_is_first_mint_wins(wired):
+    from novelizer.canon.events import ThemeIntroduced, ThemeDeveloped
+    events, proj, _ = wired
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation"))
+    await events.append(EventType.THEME_DEVELOPED, "isolation", ThemeDeveloped(id="isolation", note="deepens"))
+    # A re-introduce of the same id must be a projection no-op: touch_count/last_note untouched.
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation Redux"))
+    await proj.catch_up()
+    rows = await _theme_rows(proj)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Isolation"
+    assert rows[0]["touch_count"] == 1
+    assert rows[0]["last_note"] == "deepens"
+
+
+async def test_reprojecting_theme_events_is_equivalent(wired):
+    from novelizer.canon.events import ThemeIntroduced, ThemeDeveloped
+    events, proj, path = wired
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation"))
+    await events.append(EventType.THEME_DEVELOPED, "isolation", ThemeDeveloped(id="isolation", note="deepens"))
+    await proj.catch_up()
+    incremental = await _theme_rows(proj)
+    proj2 = Projector(events, path)
+    await proj2.init()
+    await proj2._reset_state()
+    await proj2.catch_up()
+    from_scratch = await _theme_rows(proj2)
+    await proj2.close()
+    assert incremental == from_scratch
+
+
+async def test_reset_state_clears_themes(wired):
+    from novelizer.canon.events import ThemeIntroduced
+    events, proj, _ = wired
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation"))
+    await proj.catch_up()
+    await proj._reset_state()
+    cur = await proj._conn.execute("SELECT COUNT(*) FROM themes")
+    assert (await cur.fetchone())[0] == 0
+
+
 async def _structure_score_rows(proj):
     cur = await proj._conn.execute("SELECT data FROM structure_scores ORDER BY rowid")
     return [json.loads(r[0]) for r in await cur.fetchall()]

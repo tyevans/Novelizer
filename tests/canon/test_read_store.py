@@ -96,6 +96,20 @@ async def test_list_and_get_threads(stack):
     assert await read.get_thread("missing") is None
 
 
+async def test_list_and_get_themes(stack):
+    from novelizer.canon.events import ThemeIntroduced, ThemeDeveloped
+    events, proj, read = stack
+    await events.append(EventType.THEME_INTRODUCED, "isolation", ThemeIntroduced(id="isolation", title="Isolation"))
+    await events.append(EventType.THEME_INTRODUCED, "memory", ThemeIntroduced(id="memory", title="Memory"))
+    await events.append(EventType.THEME_DEVELOPED, "isolation", ThemeDeveloped(id="isolation", note="deepens"))
+    await proj.catch_up()
+    themes = await read.list_themes()
+    assert {t.id for t in themes} == {"isolation", "memory"}
+    fetched = await read.get_theme("isolation")
+    assert fetched is not None and fetched.touch_count == 1
+    assert await read.get_theme("missing") is None
+
+
 async def test_list_and_get_structure_scores(stack):
     from novelizer.canon.events import AnnotationStructureScored
     events, proj, read = stack

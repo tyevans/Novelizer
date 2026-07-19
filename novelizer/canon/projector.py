@@ -5,7 +5,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import ThreadRecord, ThreadState, SecretRecord
+from novelizer.store.models import ThreadRecord, ThreadState, SecretRecord, ThemeRecord
 from novelizer.canon.threads import TERMINAL_STATES
 
 _CREATE = """
@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS threads (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS secrets (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS themes (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS secret_knowledge (
@@ -91,7 +94,7 @@ class Projector:
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
-            "causal_edges",
+            "causal_edges", "themes",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -253,6 +256,38 @@ class Projector:
                 # log but the projection does not change (Locked decision #2).
             # else: no row for this id yet (shouldn't happen under correct
             # agent behavior) — nothing to project, no error raised.
+        elif t == EventType.THEME_INTRODUCED:
+            cur = await self._conn.execute("SELECT id FROM themes WHERE id=?", (p["id"],))
+            existing = await cur.fetchone()
+            if existing is None:
+                record = ThemeRecord(
+                    id=p["id"], title=p["title"],
+                    last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO themes (id, data) VALUES (?,?)",
+                    (record.id, record.model_dump_json()),
+                )
+            # else: a theme id is minted exactly once. A second theme.introduced
+            # for an id that already has a row is a projection no-op — same
+            # first-mint-wins rule as thread.planted/secret.created.
+        elif t == EventType.THEME_DEVELOPED:
+            cur = await self._conn.execute("SELECT data FROM themes WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ThemeRecord.model_validate_json(row[0])
+                updated = record.model_copy(update={
+                    "touch_count": record.touch_count + 1,
+                    "last_note": p.get("note", ""),
+                    "last_chapter_id": p.get("chapter_id", ""),
+                })
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO themes (id, data) VALUES (?,?)",
+                    (updated.id, updated.model_dump_json()),
+                )
+            # else: no row for this id yet (shouldn't happen under correct agent
+            # behavior, since agents validate intents against known ids before
+            # committing) — nothing to project, no error raised.
         elif t == EventType.CAUSAL_EDGE_DECLARED:
             await self._conn.execute(
                 "INSERT INTO causal_edges (cause_chapter_id, effect_chapter_id, note) VALUES (?,?,?)",
