@@ -54,7 +54,14 @@ def build_path_index(
     """
     index: dict[str, tuple[str, str]] = {}
     taken: set[str] = set()
+    seen_ids: dict[str, set[str]] = {}  # kind -> set of record IDs
+
     for i, ch in enumerate(chapters, start=1):
+        if "chapter" not in seen_ids:
+            seen_ids["chapter"] = set()
+        if ch.id in seen_ids["chapter"]:
+            raise ValueError(f"Duplicate chapter record ID: {ch.id}")
+        seen_ids["chapter"].add(ch.id)
         path = _claim("chapters", f"{i:03d}-{slugify(ch.title)}", ch.id, taken)
         index[path] = ("chapter", ch.id)
     for kind, directory, records, label in (
@@ -64,6 +71,11 @@ def build_path_index(
         ("secret", "secrets", secrets, lambda r: r.title),
         ("theme", "themes", themes, lambda r: r.title),
     ):
+        if kind not in seen_ids:
+            seen_ids[kind] = set()
         for record in records:
+            if record.id in seen_ids[kind]:
+                raise ValueError(f"Duplicate {kind} record ID: {record.id}")
+            seen_ids[kind].add(record.id)
             index[_claim(directory, label(record), record.id, taken)] = (kind, record.id)
     return index
