@@ -26,8 +26,8 @@ edges. Report facts the prose SHOWS but the log has no covering event for: a cha
 a secret, a secret being revealed, a thread being touched or paid off, or a causal link between chapters.
 Cite existing ids only -- set known_id=False if you cannot confidently match the fact to an existing
 secret/thread id. A character ACTING on a secret the prose never showed them learning is a 'uses' fact,
-not 'learn' -- report 'learn' only when the chapter shows the moment of learning on the page. Return
-empty lists if the prose shows nothing new."""
+not 'learn' -- report 'learn' only when the chapter shows the moment of learning on the page. Keep every
+note to one short sentence. Return empty lists if the prose shows nothing new."""
 
 # Thread actions mined prose can report ("touch", "planted", "paid_off" -- see
 # MinedThreadFact) map onto ThreadIntent's authoring vocabulary ("touch",
@@ -278,7 +278,11 @@ def build_continuity_mining_runner(settings):
     from deepagents import create_deep_agent
     from langchain.agents.structured_output import ProviderStrategy
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature)
+    # Mining is fact extraction, not composition: run cold regardless of the
+    # room's creative temperature. At 0.8 the model free-runs inside JSON
+    # string fields until the token cap (observed live: LengthFinishReasonError
+    # at completion_tokens=4096).
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, temperature=0.2)
     # ProviderStrategy pushes the schema to the endpoint as OpenAI json_schema
     # response_format; llama.cpp grammar-constrains decoding, so local models
     # cannot emit fenced-JSON text instead of the structured channel (observed
