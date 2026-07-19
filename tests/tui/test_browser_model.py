@@ -4,9 +4,18 @@ import pytest
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.canon.events import EventType, ThemeIntroduced
-from novelizer.store.models import Chapter, Character, WorldEntry, RetconRequest, RetconStatus
-from novelizer.tui.widgets.browser_model import browser_sections, detail_text
+from novelizer.canon.events import EventType, ThemeIntroduced, ThreadPlanted, ThreadTouched
+from novelizer.store.models import (
+    Chapter, Character, EditorialStatus, RetconRequest, RetconStatus, WorldEntry,
+)
+from novelizer.tui.widgets.browser_model import (
+    STATUS_DOTS,
+    browser_sections,
+    detail_view,
+    word_count,
+)
+
+THRESHOLD = 3  # tests pin the explicit keyword; production passes settings
 
 
 @pytest.fixture
@@ -19,88 +28,168 @@ async def stack():
     await read.close(); await proj.close(); await events.close(); os.unlink(path)
 
 
-async def test_sections_cover_all_categories(stack):
+async def test_sections_cover_all_categories_including_threads(stack):
     events, proj, read = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="It began."))
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="stoic"))
     await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Brinemarsh", body="salt"))
     await events.append(EventType.RETCON_REQUEST_CREATED, "r1", RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="left hand"))
+    await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
     await proj.catch_up()
-    secs = await browser_sections(read)
-    assert [s["key"] for s in secs] == ["chapters", "characters", "world", "retcons", "themes"]
-    assert secs[0]["items"][0]["label"].startswith("One")
+    secs = await browser_sections(read, staleness_threshold=THRESHOLD)
+    assert [s["key"] for s in secs] == ["chapters", "characters", "world", "retcons", "threads", "themes"]
     assert "Mira" in secs[1]["items"][0]["label"]
     assert "Brinemarsh" in secs[2]["items"][0]["label"]
     assert "scar mismatch" in secs[3]["items"][0]["label"]
+    assert "The Locket" in secs[4]["items"][0]["label"]
+    assert "the-locket" not in secs[4]["items"][0]["label"]   # no slugs anywhere
 
 
-async def test_browser_sections_includes_themes(stack):
+def test_status_dots_cover_the_real_editorial_statuses():
+    # Real enum values are draft/reviewed/final — the spec sketch's
+    # approved/draft/revising names map by pipeline position.
+    assert STATUS_DOTS == {
+        EditorialStatus.draft: "◌",
+        EditorialStatus.reviewed: "◐",
+        EditorialStatus.final: "●",
+    }
+
+
+async def test_chapter_rows_show_status_dot_not_enum_text(stack):
     events, proj, read = stack
-    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss of Innocence"))
+    await events.append(EventType.CHAPTER_CREATED, "c1",
+                        Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2",
+                        Chapter(id="c2", title="Two", prose="p", editorial_status=EditorialStatus.final))
     await proj.catch_up()
-    secs = await browser_sections(read)
-    themes_section = [s for s in secs if s["key"] == "themes"][0]
-    assert themes_section["label"] == "Themes (1)"
-    assert themes_section["items"][0]["id"] == "loss"
-    assert "Loss of Innocence" in themes_section["items"][0]["label"]
+    secs = await browser_sections(read, staleness_threshold=THRESHOLD)
+    chapter_labels = [i["label"] for i in secs[0]["items"]]
+    assert chapter_labels == ["◌ One", "● Two"]
+    assert not any("EditorialStatus" in l or "[" in l for l in chapter_labels)
 
 
-async def test_detail_text_renders_theme(stack):
+async def test_retcons_label_gains_alarm_mark_only_when_open(stack):
     events, proj, read = stack
-    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss of Innocence"))
-    await proj.catch_up()
-    d = await detail_text(read, "themes", "loss")
-    assert "Loss of Innocence" in d
-
-
-async def test_detail_text_for_chapter_and_character(stack):
-    events, proj, read = stack
-    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="It began in salt."))
-    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="stoic", arc_status="wary"))
-    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Brinemarsh", body="salt"))
-    await events.append(EventType.RETCON_REQUEST_CREATED, "r1", RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="left hand"))
-    await proj.catch_up()
-    assert "It began in salt." in await detail_text(read, "chapters", "c1")
-    d = await detail_text(read, "characters", "ch1")
-    assert "Mira" in d and "wary" in d
-    assert await detail_text(read, "chapters", "nope") == ""
-    assert await detail_text(read, "characters", "nope") == ""
-    assert await detail_text(read, "world", "nope") == ""
-    assert await detail_text(read, "retcons", "nope") == ""
-
-
-async def test_retcon_section_only_open(stack):
-    events, proj, read = stack
-    # Create one open retcon
-    r1 = RetconRequest(id="r1", description="open change", conflicting_entry_ids=[], proposed_resolution="fix it")
-    await events.append(EventType.RETCON_REQUEST_CREATED, "r1", r1)
-    # Create one resolved retcon (append created then resolved)
-    r2 = RetconRequest(id="r2", description="resolved change", conflicting_entry_ids=[], proposed_resolution="fix it")
+    secs = await browser_sections(read, staleness_threshold=THRESHOLD)
+    assert [s for s in secs if s["key"] == "retcons"][0]["label"] == "Retcons (0)"
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="open change", conflicting_entry_ids=[], proposed_resolution="fix"))
+    r2 = RetconRequest(id="r2", description="resolved change", conflicting_entry_ids=[], proposed_resolution="fix")
     await events.append(EventType.RETCON_REQUEST_CREATED, "r2", r2)
-    r2_resolved = r2.model_copy(update={"status": RetconStatus.resolved})
-    await events.append(EventType.RETCON_REQUEST_RESOLVED, "r2", r2_resolved)
+    await events.append(EventType.RETCON_REQUEST_RESOLVED, "r2",
+                        r2.model_copy(update={"status": RetconStatus.resolved}))
     await proj.catch_up()
-    secs = await browser_sections(read)
-    retcons_section = [s for s in secs if s["key"] == "retcons"][0]
-    assert len(retcons_section["items"]) == 1
-    assert retcons_section["items"][0]["id"] == "r1"
+    secs = await browser_sections(read, staleness_threshold=THRESHOLD)
+    retcons = [s for s in secs if s["key"] == "retcons"][0]
+    assert retcons["label"] == "Retcons (1) ⚠"
+    assert len(retcons["items"]) == 1 and retcons["items"][0]["id"] == "r1"
 
 
-async def test_detail_text_for_character_includes_voice_card_when_present(stack):
+async def test_threads_label_counts_open_and_stale_via_explicit_threshold(stack):
     events, proj, read = stack
-    await events.append(
-        EventType.CHARACTER_CREATED, "ch1",
-        Character(id="ch1", name="Mira", traits="stoic", arc_status="wary",
-                  voice="Speaks in short, clipped sentences."),
-    )
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="Stale One"))
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=f"Ch{i}", prose="p"))
+    await events.append(EventType.THREAD_PLANTED, "t2", ThreadPlanted(id="t2", name="Fresh Two"))
+    await events.append(EventType.THREAD_TOUCHED, "t2", ThreadTouched(id="t2", chapter_id="c2"))
     await proj.catch_up()
-    d = await detail_text(read, "characters", "ch1")
+    secs = await browser_sections(read, staleness_threshold=THRESHOLD)
+    threads = [s for s in secs if s["key"] == "threads"][0]
+    assert threads["label"] == "Threads (2 · 1 stale)"
+    labels = [i["label"] for i in threads["items"]]
+    assert "⚠ Stale One · stale" in labels
+    assert any(l.startswith("· Fresh Two") for l in labels)
+    # the SAME data with a looser threshold is quiet — staleness is a
+    # parameter fed from settings, never re-typed
+    loose = await browser_sections(read, staleness_threshold=99)
+    assert [s for s in loose if s["key"] == "threads"][0]["label"] == "Threads (2)"
+
+
+def test_word_count_is_computed_from_prose():
+    assert word_count("") == 0
+    assert word_count("It began in salt.") == 4
+
+
+async def test_detail_view_chapter_typography_title_meta_prose(stack):
+    events, proj, read = stack
+    prose = "It began in salt.\n\nAnd it ended there."
+    await events.append(EventType.CHAPTER_CREATED, "c1",
+                        Chapter(id="c1", title="One", prose=prose, editorial_status=EditorialStatus.final))
+    await proj.catch_up()
+    view = await detail_view(read, "chapters", "c1")
+    assert view.title == "One"
+    lines = view.body.plain.splitlines()
+    assert lines[0] == "One"
+    assert lines[1] == "final · 8 words"
+    assert "It began in salt." in view.body.plain
+    assert "And it ended there." in view.body.plain          # paragraphs preserved
+    styles = [(view.body.plain[s.start:s.end], str(s.style)) for s in view.body.spans]
+    assert ("One", "bold") in styles
+    assert ("final · 8 words", "dim") in styles
+
+
+async def test_detail_view_character_fields_and_voice(stack):
+    events, proj, read = stack
+    await events.append(EventType.CHARACTER_CREATED, "ch1",
+                        Character(id="ch1", name="Mira", traits="stoic", arc_status="wary",
+                                  voice="Speaks in short, clipped sentences.", backstory="Born at sea."))
+    await proj.catch_up()
+    view = await detail_view(read, "characters", "ch1")
+    assert view.title == "Mira"
+    d = view.body.plain
+    assert "Mira" in d and "Traits: stoic" in d and "Arc: wary" in d
     assert "Voice: Speaks in short, clipped sentences." in d
+    assert "Born at sea." in d
 
 
-async def test_detail_text_for_character_omits_voice_line_when_absent(stack):
+async def test_detail_view_character_omits_empty_fields(stack):
     events, proj, read = stack
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="stoic"))
     await proj.catch_up()
-    d = await detail_text(read, "characters", "ch1")
-    assert "Voice:" not in d
+    d = (await detail_view(read, "characters", "ch1")).body.plain
+    assert "Voice:" not in d and "Motivations:" not in d and "Arc:" not in d
+
+
+async def test_detail_view_thread_names_state_and_last_touch_no_ids(stack):
+    events, proj, read = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="The Gift", prose="p"))
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+    await events.append(EventType.THREAD_TOUCHED, "t1",
+                        ThreadTouched(id="t1", chapter_id="c1", note="left at the tideline"))
+    await proj.catch_up()
+    view = await detail_view(read, "threads", "t1")
+    assert view.title == "The Locket"
+    d = view.body.plain
+    assert 'touched' in d and 'last touch: ch 1 "The Gift"' in d
+    assert "left at the tideline" in d
+    assert "t1" not in d and "c1" not in d
+
+
+async def test_detail_view_thread_unknown_chapter_shows_dash_not_id(stack):
+    events, proj, read = stack
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+    await proj.catch_up()
+    d = (await detail_view(read, "threads", "t1")).body.plain
+    assert "last touch: —" in d
+
+
+async def test_detail_view_theme_world_and_retcon(stack):
+    events, proj, read = stack
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss of Innocence"))
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Brinemarsh", body="salt"))
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="left hand"))
+    await proj.catch_up()
+    theme = await detail_view(read, "themes", "loss")
+    assert theme.title == "Loss of Innocence" and "touched 0x" in theme.body.plain
+    world = await detail_view(read, "world", "w1")
+    assert world.title == "Brinemarsh" and "salt" in world.body.plain
+    retcon = await detail_view(read, "retcons", "r1")
+    assert retcon.title == "scar mismatch" and "Proposed: left hand" in retcon.body.plain
+
+
+async def test_detail_view_not_found_is_empty_titled(stack):
+    events, proj, read = stack
+    for section in ("chapters", "characters", "world", "retcons", "threads", "themes", "nope"):
+        view = await detail_view(read, section, "ghost")
+        assert view.title == "" and view.body.plain == ""

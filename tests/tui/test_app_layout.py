@@ -225,3 +225,39 @@ async def test_every_pane_has_its_border_title():
                 assert str(app.query_one(selector).border_title) == title, selector
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_detail_border_title_follows_selection_and_resets():
+    from types import SimpleNamespace
+    from textual.containers import VerticalScroll
+    from novelizer.canon.events import EventType
+    from novelizer.store.models import Chapter
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    try:
+        await rt.events.append(EventType.CHAPTER_CREATED, "c1",
+                               Chapter(id="c1", title="The Name in the Wind", prose="wind words"))
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            scroll = app.query_one("#detail_scroll", VerticalScroll)
+            assert str(scroll.border_title) == "DETAIL"
+            event = SimpleNamespace(node=SimpleNamespace(data={"section": "chapters", "id": "c1"}))
+            await app.on_tree_node_selected(event)
+            await pilot.pause()
+            assert str(scroll.border_title) == "THE NAME IN THE WIND"
+            # a miss resets the pane to its quiet label
+            event = SimpleNamespace(node=SimpleNamespace(data={"section": "chapters", "id": "ghost"}))
+            await app.on_tree_node_selected(event)
+            await pilot.pause()
+            assert str(scroll.border_title) == "DETAIL"
+    finally:
+        await rt.close(); os.unlink(path)

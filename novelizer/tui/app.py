@@ -11,7 +11,7 @@ from novelizer.director import commands
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import command_hint, status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
-from novelizer.tui.widgets.browser_model import detail_text
+from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.approval_screen import ApprovalScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
@@ -174,7 +174,10 @@ class NovelizerApp(App):
     async def _browser_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#browser", StoryBrowser).refresh_sections(self.runtime.read)
+                await self.query_one("#browser", StoryBrowser).refresh_sections(
+                    self.runtime.read,
+                    staleness_threshold=self.runtime.settings.staleness_threshold_chapters,
+                )
             except Exception as e:
                 self._report_worker_error("browser", e)
             await asyncio.sleep(1.0)
@@ -360,14 +363,21 @@ class NovelizerApp(App):
         data = event.node.data
         if not data or not data.get("id"):
             return
-        text = await detail_text(self.runtime.read, data["section"], data["id"])
-        self._update_detail(text or "(no detail)")
+        view = await detail_view(self.runtime.read, data["section"], data["id"])
+        if view.title:
+            self._update_detail(view.body, view.title)
+        else:
+            self._update_detail("(no detail)")
 
-    def _update_detail(self, text: str) -> None:
-        self.query_one("#detail", Static).update(text)
+    def _update_detail(self, content, title: str = "") -> None:
+        self.query_one("#detail", Static).update(content)
+        # The pane self-labels: border title is the selected item's
+        # UPPERCASED title, reset to DETAIL when nothing is selected.
+        scroll = self.query_one("#detail_scroll", VerticalScroll)
+        scroll.border_title = title.upper() if title else "DETAIL"
         # New selection: start reading at the top, not wherever the previous
         # entry was scrolled to.
-        self.query_one("#detail_scroll", VerticalScroll).scroll_home(animate=False)
+        scroll.scroll_home(animate=False)
 
     async def on_data_table_row_selected(self, event) -> None:
         if event.data_table.id != "er_trace":

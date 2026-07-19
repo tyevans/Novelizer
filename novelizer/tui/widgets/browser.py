@@ -6,8 +6,8 @@ from novelizer.tui.widgets.browser_model import browser_sections
 class StoryBrowser(Tree):
     _last_sections = None
 
-    async def refresh_sections(self, read) -> None:
-        sections = await browser_sections(read)
+    async def refresh_sections(self, read, *, staleness_threshold: int) -> None:
+        sections = await browser_sections(read, staleness_threshold=staleness_threshold)
         if sections == self._last_sections:
             # Nothing changed: skip the rebuild so the user's cursor position
             # (and expansion state) is preserved in the common steady state.

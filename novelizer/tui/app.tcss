@@ -9,7 +9,7 @@
 #brain_strip { height: 1; padding: 0 1; }
 #browser { height: 2fr; border: round $primary; }
 #detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }
-#detail { height: auto; }
+#detail { height: auto; max-width: 80; }
 #statusbar { height: 1; background: $panel; color: $text; }
 #activity_strip { height: 1; background: $boost; color: $text; padding: 0 1; }
 #command { height: 1; padding: 0 1; }
