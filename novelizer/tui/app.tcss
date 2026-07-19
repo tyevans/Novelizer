@@ -2,7 +2,7 @@
 #left { width: 3fr; }
 #right { width: 2fr; }
 #feed { height: 3fr; border: round $primary; }
-#proposals { height: auto; max-height: 6; border: round $secondary; }
+#proposals_banner { height: 1; padding: 0 1; }
 #brain { height: 16; max-height: 45%; border: round $secondary; }
 #brain TabPane { padding: 0 1; }
 #shape_spark { height: 1; }
@@ -20,7 +20,7 @@
 #body.reading #detail_scroll { width: 3fr; height: 1fr; }
 #engine_room { display: none; }
 #body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
-#body.engine #feed, #body.engine #roster, #body.engine #proposals,
+#body.engine #feed, #body.engine #proposals_banner,
 #body.engine #brain { display: none; }
 #er_vitals { height: 1; background: $boost; padding: 0 1; }
 #er_stream_scroll { height: 2fr; }
@@ -32,4 +32,4 @@
 #settings_msg { height: 1; }
 #edit_value { height: 3; }
 #feed, #browser { border-title-style: bold; }
-#proposals, #brain, #detail_scroll { border-title-color: $text-muted; }
+#brain, #detail_scroll { border-title-color: $text-muted; }

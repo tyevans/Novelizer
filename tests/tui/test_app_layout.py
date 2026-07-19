@@ -68,7 +68,7 @@ async def test_mission_control_panes_present_and_populate():
 
 
 @pytest.mark.asyncio
-async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_command():
+async def test_proposals_banner_appears_and_approve_via_command_clears_it():
     from textual.widgets import Static
     from novelizer.canon.events import EventType
     from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
@@ -79,7 +79,8 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
     rt = Runtime(settings, runners=_runners())
     await rt.start()
     # Pause all background agents to ensure deterministic test (only the intended proposal exists)
-    for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner"]:
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
         rt.scheduler.pause_agent(name)
     try:
         await rt.events.append(EventType.AUTONOMY_CHANGED, "singleton",
@@ -90,17 +91,43 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
         await rt.projector.catch_up()
         app = NovelizerApp(rt)
         async with app.run_test() as pilot:
-            await pilot.pause()
-            proposals_widget = app.query_one("#proposals", Static)
+            await pilot.pause(0.7)  # let _proposals_loop cycle
+            banner = app.query_one("#proposals_banner", Static)
+            assert banner.display, "banner must be visible while a proposal is open"
+            banner_text = str(banner.renderable)
+            assert banner_text == "▼ 1 proposal awaiting approval — press a"
             pending = await rt.read.list_proposals(status="open")
             assert len(pending) == 1
-            proposal_id = pending[0].id
-            proposals_text = str(proposals_widget.renderable)
-            assert proposal_id[:8] in proposals_text or "chapter.created" in proposals_text
-            await app._run_command(f"approve {proposal_id}")
+            assert pending[0].id[:8] not in banner_text   # id-free dashboard
+            # the resident pane is gone
+            assert not app.query("#proposals")
+            # approving through the command seam still works and empties the queue
+            await app._run_command(f"approve {pending[0].id}")
             await rt.projector.catch_up()
             chapters = await rt.read.list_chapters()
             assert len(chapters) == 1 and chapters[0].title == "Pending One"
+            await pilot.pause(0.7)
+            assert not app.query_one("#proposals_banner", Static).display
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_proposals_banner_hidden_on_a_quiet_story():
+    from textual.widgets import Static
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.pause(0.7)
+            assert not app.query_one("#proposals_banner", Static).display
     finally:
         await rt.close(); os.unlink(path)
 
@@ -190,7 +217,6 @@ async def test_every_pane_has_its_border_title():
         async with app.run_test():
             expected = {
                 "#feed": "THE ROOM",
-                "#proposals": "PROPOSALS",
                 "#brain": "STORY BRAIN",
                 "#browser": "STORY",
                 "#detail_scroll": "DETAIL",

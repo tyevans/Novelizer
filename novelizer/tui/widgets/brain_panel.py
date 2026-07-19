@@ -19,8 +19,6 @@ from novelizer.tui.widgets.brain_model import (
     threads_tab,
 )
 
-TAB_IDS = ("tab_shape", "tab_threads", "tab_secrets", "tab_causeway")
-
 
 def _joined(lines: list[Text]) -> Text:
     return Text("\n").join(lines)

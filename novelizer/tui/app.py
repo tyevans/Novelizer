@@ -12,7 +12,7 @@ from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path
 from novelizer.tui.widgets.roster import command_hint, status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
-from novelizer.tui.widgets.proposals_model import pending_lines
+from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -70,9 +70,9 @@ class NovelizerApp(App):
                 feed = RichLog(highlight=False, markup=False, id="feed")
                 feed.border_title = "THE ROOM"
                 yield feed
-                proposals = Static("no pending proposals", id="proposals")
-                proposals.border_title = "PROPOSALS"
-                yield proposals
+                banner = Static(id="proposals_banner")
+                banner.display = False
+                yield banner
                 brain = BrainPanel(id="brain")
                 brain.border_title = "STORY BRAIN"
                 yield brain
@@ -180,8 +180,11 @@ class NovelizerApp(App):
     async def _proposals_loop(self) -> None:
         while True:
             try:
-                lines = await pending_lines(self.runtime.read)
-                self.query_one("#proposals", Static).update("\n".join(lines) or "no pending proposals")
+                open_count = len(await self.runtime.read.list_proposals(status="open"))
+                banner = self.query_one("#proposals_banner", Static)
+                if open_count:
+                    banner.update(banner_line(open_count))
+                banner.display = bool(open_count)
             except Exception as e:
                 self._report_worker_error("proposals", e)
             await asyncio.sleep(0.5)
