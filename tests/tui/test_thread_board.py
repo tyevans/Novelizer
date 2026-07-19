@@ -26,3 +26,10 @@ def test_terminal_thread_never_flagged_stale():
     t = ThreadRecord(id="t1", name="Closed", state=ThreadState.paid_off, last_chapter_id="c0")
     line = thread_board_line(t, chs)
     assert "STALE" not in line and "paid_off" in line
+
+
+def test_thread_board_line_respects_explicit_threshold():
+    chs = _chapters(3)  # two chapters elapsed since c0
+    t = ThreadRecord(id="t1", name="T", state=ThreadState.planted, last_chapter_id="c0")
+    assert "STALE" not in thread_board_line(t, chs, threshold=3)
+    assert "STALE" in thread_board_line(t, chs, threshold=1)

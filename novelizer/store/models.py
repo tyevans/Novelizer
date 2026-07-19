@@ -45,6 +45,7 @@ class SignalKind(StrEnum):
     focus = "focus"
     override = "override"
     note = "note"
+    revise = "revise"
 
 
 class ThreadState(StrEnum):
@@ -205,6 +206,7 @@ class DirectorSignal(BaseModel):
     kind: SignalKind
     body: str
     target_agent: Optional[str] = None
+    target_entity: str = ""
     consumed: bool = False
 
 

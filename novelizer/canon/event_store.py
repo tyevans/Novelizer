@@ -20,13 +20,14 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 """
 
-_COLS = "sequence, id, event_type, aggregate_id, payload, created_at"
+_COLS = "sequence, id, event_type, aggregate_id, payload, created_at, run_id"
 
 
 def _row_to_event(row) -> StoredEvent:
     return StoredEvent(
         sequence=row[0], id=row[1], event_type=row[2],
         aggregate_id=row[3], payload=json.loads(row[4]), created_at=row[5],
+        run_id=row[6],
     )
 
 
@@ -42,31 +43,54 @@ class EventStore:
         self._conn = await aiosqlite.connect(self._path)
         await self._conn.execute("PRAGMA journal_mode=WAL")
         await self._conn.executescript(_CREATE)
+        # Additive migration: pre-telemetry DBs lack run_id; existing rows stay NULL.
+        cur = await self._conn.execute("PRAGMA table_info(events)")
+        cols = [r[1] for r in await cur.fetchall()]
+        if "run_id" not in cols:
+            await self._conn.execute("ALTER TABLE events ADD COLUMN run_id TEXT")
         await self._conn.commit()
 
     async def close(self) -> None:
         if self._conn:
             await self._conn.close()
 
-    async def _insert(self, event_type: str, aggregate_id: str, payload_json: str) -> StoredEvent:
+    async def _insert(self, event_type: str, aggregate_id: str, payload_json: str,
+                      run_id: Optional[str] = None) -> StoredEvent:
         eid = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         cur = await self._conn.execute(
-            "INSERT INTO events (id, event_type, aggregate_id, payload, created_at) VALUES (?,?,?,?,?)",
-            (eid, event_type, aggregate_id, payload_json, created_at),
+            "INSERT INTO events (id, event_type, aggregate_id, payload, created_at, run_id) VALUES (?,?,?,?,?,?)",
+            (eid, event_type, aggregate_id, payload_json, created_at, run_id),
         )
         await self._conn.commit()
         return StoredEvent(
             sequence=cur.lastrowid, id=eid, event_type=event_type,
             aggregate_id=aggregate_id, payload=json.loads(payload_json), created_at=created_at,
+            run_id=run_id,
         )
 
-    async def append(self, event_type: str, aggregate_id: str, payload: BaseModel) -> StoredEvent:
-        return await self._insert(event_type, aggregate_id, payload.model_dump_json())
+    async def append(self, event_type: str, aggregate_id: str, payload: BaseModel,
+                     run_id: Optional[str] = None) -> StoredEvent:
+        return await self._insert(event_type, aggregate_id, payload.model_dump_json(), run_id)
 
-    async def append_raw(self, event_type: str, aggregate_id: str, payload: dict) -> StoredEvent:
+    async def append_raw(self, event_type: str, aggregate_id: str, payload: dict,
+                         run_id: Optional[str] = None) -> StoredEvent:
         """Append a payload that is already a plain dict (e.g. rescued from a Proposal)."""
-        return await self._insert(event_type, aggregate_id, json.dumps(payload))
+        return await self._insert(event_type, aggregate_id, json.dumps(payload), run_id)
+
+    async def events_for_run(self, run_id: str) -> list[StoredEvent]:
+        cur = await self._conn.execute(
+            f"SELECT {_COLS} FROM events WHERE run_id = ? ORDER BY sequence", (run_id,)
+        )
+        return [_row_to_event(r) for r in await cur.fetchall()]
+
+    async def events_tail(self, limit: int) -> list[StoredEvent]:
+        """Last `limit` events in ascending sequence order."""
+        cur = await self._conn.execute(
+            f"SELECT {_COLS} FROM events ORDER BY sequence DESC LIMIT ?", (limit,)
+        )
+        rows = await cur.fetchall()
+        return [_row_to_event(r) for r in reversed(rows)]
 
     async def events_since(self, sequence: int, event_types: Optional[list[str]] = None) -> list[StoredEvent]:
         if event_types:

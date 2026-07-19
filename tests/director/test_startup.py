@@ -39,8 +39,9 @@ def test_wizard_result_written_0600_then_picker(monkeypatch, tmp_path):
     def fake_wizard():
         return {"llm_base_url": "http://h:1/v1", "llm_api_key": "sk-x"}
 
-    def fake_picker(stories, stories_dir, last_opened):
+    def fake_picker(stories, stories_dir, last_opened, base):
         assert stories_dir == Path("stories")
+        assert base.prose_profile  # effective settings reach the picker
         return story.root
 
     settings = _interactive_startup(None, run_wizard=fake_wizard, run_picker=fake_picker)
@@ -57,7 +58,7 @@ def test_existing_config_skips_wizard_and_honors_default_stories_dir(monkeypatch
     story = create_story(tmp_path / "novels" / "one", title="One")
     seen = {}
 
-    def fake_picker(stories, stories_dir, last_opened):
+    def fake_picker(stories, stories_dir, last_opened, base):
         seen["stories_dir"] = stories_dir
         seen["titles"] = [s.title for s in stories]
         return story.root

@@ -93,7 +93,8 @@ async def test_approve_and_reject_via_command_layer(stack):
     from novelizer.canon.events import EventType
     await events.append(EventType.PROPOSAL_CREATED, proposal.id, proposal)
     await proj.catch_up()
-    result = await commands.approve(events, read, proposal.id)
+    proposals = ProposalService(events)
+    result = await commands.approve(proposals, read, proposal.id)
     await proj.catch_up()
     assert "approved" in result.lower()
     assert len(await read.list_chapters()) == 1
@@ -102,10 +103,10 @@ async def test_approve_and_reject_via_command_layer(stack):
                           target_aggregate_id="c1", payload={"id": "c1", "editorial_status": "reviewed"})
     await events.append(EventType.PROPOSAL_CREATED, proposal2.id, proposal2)
     await proj.catch_up()
-    result2 = await commands.reject(events, read, proposal2.id)
+    result2 = await commands.reject(proposals, read, proposal2.id)
     assert "rejected" in result2.lower()
 
-    assert "not found" in (await commands.approve(events, read, "missing-id")).lower()
+    assert "not found" in (await commands.approve(proposals, read, "missing-id")).lower()
 
 
 async def test_dispatch_routes_autonomy_and_approve_reject(stack):
@@ -134,3 +135,22 @@ async def test_dispatch_routes_autonomy_and_approve_reject(stack):
     await proj.catch_up()
     result3 = await commands.dispatch(rt, f"approve {proposal.id}")
     assert "approved" in result3.lower()
+
+
+async def test_seed_story_dir_appends_seed_event_without_runtime(tmp_path):
+    from novelizer.director.commands import seed_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    await seed_story_dir(sd, "a tired thief takes one last job")
+
+    events = EventStore(str(sd.db_path))
+    await events.init()
+    try:
+        stored = await events.events_since(0)
+    finally:
+        await events.close()
+    assert len(stored) == 1
+    assert stored[0].event_type == EventType.DIRECTOR_SIGNAL_CREATED
+    assert stored[0].payload["kind"] == SignalKind.seed.value
+    assert stored[0].payload["body"] == "a tired thief takes one last job"

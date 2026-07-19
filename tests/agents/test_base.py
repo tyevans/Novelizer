@@ -358,6 +358,110 @@ async def test_commit_causal_intents_accepts_explicit_source(stack):
     assert log[0].payload["source"] == "mined"
 
 
+class _CapturingRecorder:
+    """Test double for TelemetryRecorder: records emits, tracks nothing."""
+
+    def __init__(self):
+        self.emitted = []  # list of (event_type, aggregate_id, payload)
+
+    async def emit(self, event_type, aggregate_id, payload):
+        self.emitted.append((event_type, aggregate_id, payload))
+
+    def in_llm_call(self, run_id):
+        return False
+
+
+async def test_run_once_emits_started_and_finished_with_one_run_id():
+    from novelizer.telemetry.events import TelemetryEventType
+
+    class Quiet(BaseAgent):
+        async def _run(self):
+            pass
+
+    agent = Quiet(runner=None, read_store=None, committer=None, interval=0, name="quiet")
+    rec = _CapturingRecorder()
+    agent.telemetry = rec
+    await agent.run_once()
+    types = [t for t, _, _ in rec.emitted]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FINISHED]
+    started, finished = rec.emitted[0][2], rec.emitted[1][2]
+    assert started.run_id == finished.run_id != ""
+    assert started.agent_name == "quiet"
+    assert finished.duration_s >= 0.0
+
+
+async def test_run_once_sets_ambient_run_context_during_run_and_resets_after():
+    from novelizer.run_context import current_run_id, current_agent_name
+
+    seen = {}
+
+    class Peek(BaseAgent):
+        async def _run(self):
+            seen["run_id"] = current_run_id.get()
+            seen["agent"] = current_agent_name.get()
+
+    agent = Peek(runner=None, read_store=None, committer=None, interval=0, name="peek")
+    await agent.run_once()  # works with telemetry=None too
+    assert seen["run_id"] is not None
+    assert seen["agent"] == "peek"
+    assert current_run_id.get() is None
+    assert current_agent_name.get() == ""
+
+
+async def test_run_once_crash_emits_run_failed_and_reraises():
+    from novelizer.telemetry.events import TelemetryEventType
+
+    class Boom(BaseAgent):
+        async def _run(self):
+            raise ValueError("kaboom")
+
+    agent = Boom(runner=None, read_store=None, committer=None, interval=0, name="boom")
+    rec = _CapturingRecorder()
+    agent.telemetry = rec
+    with pytest.raises(ValueError, match="kaboom"):
+        await agent.run_once()
+    types = [t for t, _, _ in rec.emitted]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FAILED]
+    failed = rec.emitted[1][2]
+    assert failed.error_type == "ValueError" and "kaboom" in failed.error_message
+    assert failed.phase == "agent"  # recorder reports no open LLM call
+
+
+async def test_run_once_crash_inside_open_llm_call_reports_llm_call_phase():
+    class InCall(_CapturingRecorder):
+        def in_llm_call(self, run_id):
+            return True
+
+    class Boom(BaseAgent):
+        async def _run(self):
+            raise ValueError("mid-call")
+
+    agent = Boom(runner=None, read_store=None, committer=None, interval=0, name="boom")
+    rec = InCall()
+    agent.telemetry = rec
+    with pytest.raises(ValueError):
+        await agent.run_once()
+    assert rec.emitted[1][2].phase == "llm_call"
+
+
+async def test_run_once_without_telemetry_is_silent_and_still_runs():
+    ran = []
+
+    class Quiet(BaseAgent):
+        async def _run(self):
+            ran.append(True)
+
+    agent = Quiet(runner=None, read_store=None, committer=None, interval=0, name="quiet")
+    await agent.run_once()
+    assert ran == [True]
+
+
+def test_seconds_until_ready_counts_down_and_floors_at_zero():
+    a = BaseAgent(runner=None, read_store=None, committer=None, interval=10, name="x")
+    a.mark_ran(now=100)
+    assert a.seconds_until_ready(now=104) == 6
+    assert a.seconds_until_ready(now=115) == 0
+
 from novelizer.agents.schemas import ThemeIntent
 
 
@@ -430,3 +534,115 @@ async def test_commit_theme_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_theme_intents([], active_theme_ids=set())
     assert await events.events_since(0) == []
+
+
+async def test_commit_theme_intents_introduce_files_similarity_suggestion_retcon(stack, tmp_path):
+    from novelizer.store.embeddings import EmbeddingStore
+    from novelizer.store.models import RetconStatus
+    from tests.conftest import FakeEmbeddingFunction
+
+    events, proj, read, committer = stack
+    embedding_store = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
+    from novelizer.store.models import ThemeRecord
+    await embedding_store.upsert_theme(ThemeRecord(id="loss", title="The Cost of Ambition"))
+    from novelizer.canon.events import ThemeIntroduced
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="The Cost of Ambition"))
+    await proj.catch_up()
+
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="The Price of Ambition")],
+        active_theme_ids={"loss"},
+        embedding_store=embedding_store,
+    )
+    await proj.catch_up()
+
+    # No auto-merge: the new theme still commits as its own distinct id.
+    new_theme = await read.get_theme("the-price-of-ambition")
+    assert new_theme is not None
+
+    reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len(reqs) == 1
+    assert "[source: theme_similarity]" in reqs[0].description
+    assert "loss" in reqs[0].description
+    assert "The Cost of Ambition" in reqs[0].description
+    embedding_store.close()
+
+
+async def test_commit_theme_intents_introduce_noop_when_no_embedding_store(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="Unwatched Theme")], active_theme_ids=set(),
+    )
+    await proj.catch_up()
+    theme = await read.get_theme("unwatched-theme")
+    assert theme is not None
+
+
+async def test_commit_knowledge_intents_normalizes_character_id_casing(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="s1", character_id="Kestrel")],
+        active_secret_ids={"s1"}, allowed_actions=frozenset({"learn"}),
+    )
+    log = await events.events_since(0, event_types=[EventType.SECRET_LEARNED])
+    assert len(log) == 1
+    assert log[0].payload["character_id"] == "kestrel"
+
+
+async def test_commit_knowledge_intents_normalizes_id_casing_for_membership_check(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="uses", id="S1", character_id="kestrel")],
+        active_secret_ids={"s1"},
+    )
+    log = await events.events_since(0, event_types=[EventType.SECRET_REFERENCED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "s1"
+
+
+async def test_commit_thread_intents_normalizes_touch_id_casing(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="touch", id="T1")], active_thread_ids={"t1"},
+    )
+    log = await events.events_since(0, event_types=[EventType.THREAD_TOUCHED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "t1"
+
+
+async def test_commit_theme_intents_normalizes_develop_id_casing(stack, caplog):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    with caplog.at_level("WARNING"):
+        await agent._commit_theme_intents(
+            [ThemeIntent(action="develop", id="Loss")], active_theme_ids={"loss"},
+        )
+    log = await events.events_since(0, event_types=[EventType.THEME_DEVELOPED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "loss"
+
+
+async def test_commit_causal_intents_normalizes_chapter_id_casing(stack, caplog):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="ABC123", effect_chapter_id="def456")],
+        valid_chapter_ids={"abc123", "def456"},
+    )
+    log = await events.events_since(0, event_types=[EventType.CAUSAL_EDGE_DECLARED])
+    assert len(log) == 1
+    assert log[0].payload["cause_chapter_id"] == "abc123"
+    assert log[0].payload["effect_chapter_id"] == "def456"
+
+
+def test_guarded_line_returns_labeled_value_when_present():
+    assert BaseAgent._guarded_line("In character", "gruff and terse") == "\n\nIn character: gruff and terse"
+
+
+def test_guarded_line_returns_empty_when_value_falsy():
+    assert BaseAgent._guarded_line("In character", "") == ""

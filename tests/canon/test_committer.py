@@ -9,6 +9,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.store.models import Chapter
+from novelizer.run_context import current_run_id
 
 
 @pytest.fixture
@@ -86,3 +87,60 @@ async def test_gating_committer_with_real_policy_gates_by_level(gating_stack):
     await proj.catch_up()
     assert await read.list_chapters() == []
     assert len(await read.list_proposals(status="open")) == 1
+
+
+async def test_commit_stamps_ambient_run_id():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    events = EventStore(path)
+    await events.init()
+    try:
+        token = current_run_id.set("run-7")
+        try:
+            await Committer(events).commit(
+                "author", EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+        finally:
+            current_run_id.reset(token)
+        stored = (await events.events_since(0))[0]
+        assert stored.run_id == "run-7"
+    finally:
+        await events.close()
+        os.unlink(path)
+
+
+async def test_commit_without_ambient_run_id_stores_none():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    events = EventStore(path)
+    await events.init()
+    try:
+        await Committer(events).commit(
+            "author", EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+        assert (await events.events_since(0))[0].run_id is None
+    finally:
+        await events.close()
+        os.unlink(path)
+
+
+async def test_gated_proposal_is_also_stamped_with_run_id():
+    class GateAll:
+        async def is_gated(self, agent_name, event_type):
+            return True
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    events = EventStore(path)
+    await events.init()
+    try:
+        token = current_run_id.set("run-8")
+        try:
+            await GatingCommitter(events, GateAll()).commit(
+                "author", EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+        finally:
+            current_run_id.reset(token)
+        stored = (await events.events_since(0))[0]
+        assert stored.event_type == EventType.PROPOSAL_CREATED
+        assert stored.run_id == "run-8"
+    finally:
+        await events.close()
+        os.unlink(path)

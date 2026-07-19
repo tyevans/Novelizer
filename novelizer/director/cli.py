@@ -34,6 +34,10 @@ async def _with_runtime(settings, fn):
     await rt.projector.init()
     await rt.read.init()
     await rt.projector.catch_up()
+    # Same ProposalService construction path Runtime.start() uses, without the
+    # LLM agents/runners a store-only CLI command doesn't need.
+    from novelizer.canon.proposal_service import ProposalService
+    rt.proposals = ProposalService(rt.events)
     try:
         return await fn(rt)
     finally:
@@ -85,10 +89,18 @@ def _run_wizard_app() -> dict | None:
     return SetupWizardApp().run()
 
 
-def _run_picker_app(stories, stories_dir: Path, last_opened: str | None):
+def _run_picker_app(
+    stories, stories_dir: Path, last_opened: str | None, base: EffectiveSettings
+):
     from novelizer.tui.story_picker import StoryPickerApp
 
-    return StoryPickerApp(stories, stories_dir=stories_dir, last_opened=last_opened).run()
+    return StoryPickerApp(
+        stories,
+        stories_dir=stories_dir,
+        last_opened=last_opened,
+        default_voice_pack=base.voice_pack,
+        default_prose_profile=base.prose_profile,
+    ).run()
 
 
 def _interactive_startup(
@@ -119,7 +131,7 @@ def _interactive_startup(
             else:
                 update_global_config(suppress_flat_migration_prompt=True)
             base = load_effective_settings()
-        chosen = run_picker(list_stories(stories_root), stories_root, base.last_opened_story)
+        chosen = run_picker(list_stories(stories_root), stories_root, base.last_opened_story, base)
         if chosen is None:
             return None
         story = StoryDirectory(root=Path(chosen))
@@ -345,7 +357,7 @@ def proposals(ctx):
 def approve(ctx, proposal_id: str):
     """Approve a pending proposal — appends its target event + proposal.approved."""
     async def _run(rt: Runtime):
-        result = await commands.approve(rt.events, rt.read, proposal_id)
+        result = await commands.approve(rt.proposals, rt.read, proposal_id)
         console.print(f"[green]{result}[/green]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
@@ -356,7 +368,7 @@ def approve(ctx, proposal_id: str):
 def reject(ctx, proposal_id: str):
     """Reject a pending proposal — appends proposal.rejected."""
     async def _run(rt: Runtime):
-        result = await commands.reject(rt.events, rt.read, proposal_id)
+        result = await commands.reject(rt.proposals, rt.read, proposal_id)
         console.print(f"[yellow]{result}[/yellow]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 

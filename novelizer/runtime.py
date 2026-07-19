@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from typing import Optional
 from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
 from novelizer.canon.event_store import EventStore
@@ -8,6 +9,9 @@ from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.scheduler import Scheduler
+from novelizer.telemetry.bus import TelemetryBus
+from novelizer.telemetry.recorder import TelemetryRecorder
+from novelizer.telemetry.callbacks import TelemetryCallbackHandler
 from novelizer.agents.author import Author, build_author_runner
 from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
 from novelizer.agents.character_keeper import CharacterKeeper, build_character_keeper_runner
@@ -28,6 +32,10 @@ class Runtime:
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
         self.read = ReadStore(settings.db_path)
+        self.telemetry_store = EventStore(str(Path(settings.db_path).with_name("telemetry.db")))
+        self.telemetry_bus = TelemetryBus()
+        self.telemetry = TelemetryRecorder(self.telemetry_store, self.telemetry_bus)
+        self._llm_callbacks = [TelemetryCallbackHandler(self.telemetry)]
         self.policy: Optional[AutonomyPolicy] = None
         self.proposals: Optional[ProposalService] = None
         self.committer = None  # constructed in start(), once self.read is initialized
@@ -47,17 +55,25 @@ class Runtime:
         self.chat: Optional[ChatService] = None
         self._chat_runner_cache: dict[str, object] = {}
 
-    def _runner_for(self, name: str, builder):
+    def _runner_for(self, name: str, builder, fallback_name: str | None = None):
         if self._runners is not None:
             if name in self._runners:
                 return self._runners[name]
-            # Any name absent from an injected runners dict falls back to the real
-            # builder (not just "continuity_checker_mining", which motivated this) —
-            # builders construct lazily and never touch the network before ainvoke().
-            return builder(self.settings)
+            # A derived role (e.g. the checker's mining runner) defaults to its
+            # parent agent's injected fake: building the REAL runner here made
+            # TUI tests hang on live connection attempts whenever the parent
+            # agent actually ran (post-M5.3-merge test_app_layout failure).
+            # The checker's isinstance guard treats a wrong-type response as
+            # malformed, so sharing the parent fake is safe.
+            if fallback_name is not None and fallback_name in self._runners:
+                return self._runners[fallback_name]
+            # Any other absent name falls back to the real builder — builders
+            # construct lazily and never touch the network before ainvoke(),
+            # and partial-roster fixtures only omit agents that never dispatch.
+            return builder(self.settings, callbacks=self._llm_callbacks)
         if name == "author" and self._runner is not None:
             return self._runner
-        return builder(self.settings)
+        return builder(self.settings, callbacks=self._llm_callbacks)
 
     def _chat_runner_for(self, agent_name: str):
         """Lazy per-agent chat runner. Injected fakes use key 'chat_<name>' in
@@ -73,6 +89,7 @@ class Runtime:
         await self.events.init()
         await self.projector.init()
         await self.read.init()
+        await self.telemetry_store.init()
         await self.projector.catch_up()
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
@@ -92,6 +109,8 @@ class Runtime:
             self._runner_for("author", build_author_runner), self.read, self.committer,
             interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
             provenance=provenance,
+            prior_chapter_summary_chars=s.prior_chapter_summary_chars,
+            staleness_threshold_chapters=s.staleness_threshold_chapters,
         )
         self.world_architect = WorldArchitect(
             self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
@@ -104,10 +123,11 @@ class Runtime:
         self.editor = Editor(
             self._runner_for("editor", build_editor_runner), self.read, self.committer,
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
+            sag_spike_delta=s.sag_spike_delta,
         )
         self.continuity_checker = ContinuityChecker(
             self._runner_for("continuity_checker", build_continuity_checker_runner),
-            self._runner_for("continuity_checker_mining", build_continuity_mining_runner),
+            self._runner_for("continuity_checker_mining", build_continuity_mining_runner, fallback_name="continuity_checker"),
             self.read, self.committer, self.events,
             interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
         )
@@ -123,7 +143,12 @@ class Runtime:
             self.world_architect, self.character_keeper, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
-        self.scheduler = Scheduler(self.agents, self.read)
+        for agent in self.agents:
+            agent.telemetry = self.telemetry
+        self.scheduler = Scheduler(
+            self.agents, self.read,
+            max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
+        )
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
@@ -152,6 +177,11 @@ class Runtime:
             elif key in interval_map:
                 for agent in interval_map[key]:
                     agent.interval = getattr(new, key)
+                applied.append(key)
+            elif key == "max_concurrent_agents":
+                # Read fresh per-tick, no cached construction to rebuild --
+                # applies live, same as cadence settings.
+                self.scheduler._max_concurrent = new.max_concurrent_agents
                 applied.append(key)
             else:
                 applied.append(key)
@@ -185,15 +215,15 @@ class Runtime:
 
         rebuild = self._runners is None and self._runner is None
         if "author_temperature" in changed and rebuild:
-            self.author._runner = build_author_runner(stored)
+            self.author._runner = build_author_runner(stored, callbacks=self._llm_callbacks)
         if "agent_temperature" in changed and rebuild:
-            self.world_architect._runner = build_world_architect_runner(stored)
-            self.character_keeper._runner = build_character_keeper_runner(stored)
-            self.editor._runner = build_editor_runner(stored)
-            self.continuity_checker._runner = build_continuity_checker_runner(stored)
-            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored)
-            self.retconner._runner = build_retconner_runner(stored)
-            self.structure_analyst._runner = build_structure_analyst_runner(stored)
+            self.world_architect._runner = build_world_architect_runner(stored, callbacks=self._llm_callbacks)
+            self.character_keeper._runner = build_character_keeper_runner(stored, callbacks=self._llm_callbacks)
+            self.editor._runner = build_editor_runner(stored, callbacks=self._llm_callbacks)
+            self.continuity_checker._runner = build_continuity_checker_runner(stored, callbacks=self._llm_callbacks)
+            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored, callbacks=self._llm_callbacks)
+            self.retconner._runner = build_retconner_runner(stored, callbacks=self._llm_callbacks)
+            self.structure_analyst._runner = build_structure_analyst_runner(stored, callbacks=self._llm_callbacks)
         if ("agent_temperature" in changed or "author_temperature" in changed) and rebuild:
             self._chat_runner_cache.clear()
 
@@ -211,4 +241,5 @@ class Runtime:
     async def close(self) -> None:
         await self.read.close()
         await self.projector.close()
+        await self.telemetry_store.close()
         await self.events.close()

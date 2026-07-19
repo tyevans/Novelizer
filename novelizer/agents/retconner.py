@@ -22,6 +22,9 @@ class Retconner(BaseAgent):
         personality: str = "",
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="retconner", personality=personality)
+        # Requests that failed an attempt (exception or empty response) are
+        # deferred so one poisoned request can't block the whole queue.
+        self._deferred: set[str] = set()
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
@@ -29,7 +32,14 @@ class Retconner(BaseAgent):
 
     async def poll(self) -> dict:
         open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
-        return {"target": open_reqs[0] if open_reqs else None, "world": await self._read.list_world_entries()}
+        self._deferred &= {r.id for r in open_reqs}
+        candidates = [r for r in open_reqs if r.id not in self._deferred]
+        if not candidates and open_reqs:
+            # Every open request has failed one attempt — start a fresh pass
+            # rather than idling forever with readiness pinned at 1.0.
+            self._deferred.clear()
+            candidates = open_reqs
+        return {"target": candidates[0] if candidates else None, "world": await self._read.list_world_entries()}
 
     async def work(self, ctx: dict) -> RetconAmendments | None:
         req = ctx["target"]
@@ -37,7 +47,7 @@ class Retconner(BaseAgent):
             return None
         conflicting = [e for e in ctx["world"] if e.id in req.conflicting_entry_ids]
         text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
@@ -53,14 +63,25 @@ class Retconner(BaseAgent):
         await self._committer.commit(self.name, EventType.RETCON_REQUEST_RESOLVED, req.id, resolved)
         await self._remark(out.feed_note)
 
-    async def run_once(self) -> None:
+    async def _run(self) -> None:
         ctx = await self.poll()
-        out = await self.work(ctx)
-        await self.commit(out, ctx)
+        req = ctx["target"]
+        if req is None:
+            return
+        try:
+            out = await self.work(ctx)
+            if out is None:
+                self._deferred.add(req.id)
+                return
+            await self.commit(out, ctx)
+        except Exception:
+            self._deferred.add(req.id)
+            raise
+        self._deferred.discard(req.id)
 
 
-def build_retconner_runner(settings):
+def build_retconner_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens)
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)

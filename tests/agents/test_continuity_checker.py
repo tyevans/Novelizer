@@ -332,6 +332,109 @@ async def test_mining_ambiguous_secret_fact_files_a_tagged_retcon_not_an_event(s
     assert any(e.payload["description"].startswith(MINED_SOURCE_TAG) for e in retcons)
 
 
+async def test_mining_duplicate_unknown_id_facts_file_one_retcon(stack):
+    # Regression (a-dress-for-doug, events 12+13 and 67+68): the miner listed
+    # the same unknown-id fact twice in one output and both were filed —
+    # _file_mined_retcon had no in-batch dedup.
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    fact = dict(action="uses", id="the-invented", character_id="the-boy", chapter_id="c1", known_id=False)
+    mining_out = MinedFactsOutput(secret_facts=[MinedSecretFact(**fact), MinedSecretFact(**fact)])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+                  if r.description.startswith(MINED_SOURCE_TAG)]
+    assert len(mined_reqs) == 1
+
+
+async def test_mined_retcon_not_refiled_when_already_open(stack):
+    # A crash between retcon filing and the chapter.mined stamp re-mines the
+    # chapter next cycle; the identical description must not be filed twice —
+    # same open-queue dedup the leak/paradox paths already have.
+    from novelizer.store.models import RetconRequest
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    desc = (f"{MINED_SOURCE_TAG} mined secret uses fact citing unrecognized/unknown secret id "
+            f"'the-invented' for character 'the-boy' in chapter 'c1'")
+    await events.append(EventType.RETCON_REQUEST_CREATED, "seed",
+                        RetconRequest(id="seed", description=desc, conflicting_entry_ids=[], proposed_resolution=""))
+    await proj.catch_up()
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-invented", character_id="the-boy", chapter_id="c1", known_id=False),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+                  if r.description.startswith(MINED_SOURCE_TAG)]
+    assert len(mined_reqs) == 1
+
+
+async def test_mining_prompt_lists_active_secret_ids_for_citation(stack):
+    # Regression: the miner cited thread ids and character names as secret ids.
+    # The secret namespace was only implicit in the knowledge-matrix lines; the
+    # prompt must name the legal secret ids outright, like the Editor's does.
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    mining_runner = FakeRunner(MinedFactsOutput())
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+    await agent.run_once()
+    sent = mining_runner.calls[-1]["messages"][0]["content"]
+    assert "Active secret ids" in sent
+    assert "the-heir-lives" in sent
+
+
+async def test_mining_secret_fact_citing_thread_id_redirects_to_thread_touch(stack):
+    # Regression: 'the-boy-s-gift' and 'the-name-of-the-sea' were active THREAD
+    # ids the miner filed as secret facts. A deterministic namespace check can
+    # recover the intended meaning — the prose engages that thread — as a
+    # mined touch (same downgrade precedent as plant-collision → touch), not
+    # an unresolvable retcon.
+    from novelizer.canon.events import ThreadPlanted
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-lost-heir", ThreadPlanted(id="the-lost-heir", name="The Lost Heir"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-lost-heir", character_id="mara", chapter_id="c1", known_id=False),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED and e.payload.get("source") == "mined"]
+    assert len(touches) == 1 and touches[0].payload["id"] == "the-lost-heir"
+    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+                  if r.description.startswith(MINED_SOURCE_TAG)]
+    assert mined_reqs == []
+
+
+async def test_mining_secret_fact_citing_already_touched_thread_is_a_noop(stack):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-lost-heir", ThreadPlanted(id="the-lost-heir", name="The Lost Heir"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.THREAD_TOUCHED, "the-lost-heir", ThreadTouched(id="the-lost-heir", chapter_id="c1"))
+    await proj.catch_up()
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-lost-heir", character_id="mara", chapter_id="c1", known_id=False),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED]
+    assert len(touches) == 1  # only the seeded one
+    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+                  if r.description.startswith(MINED_SOURCE_TAG)]
+    assert mined_reqs == []
+
+
 async def test_mining_reveal_fact_always_escalates_never_auto_commits(stack):
     events, proj, read, committer = stack
     await events.append(EventType.SECRET_CREATED, "the-heir-lives",
@@ -686,3 +789,66 @@ async def test_m5_1_done_when_mechanical_chain(stack):
     tagged_retcons_after = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
                             and e.payload["description"].startswith(MINED_SOURCE_TAG)]
     assert len(tagged_retcons_after) >= len(retcons_after_c3) + 1
+
+
+from novelizer.store.models import RetconRequest
+
+
+async def _seed_open_retcon(events, proj, description="two suns vs one"):
+    req = RetconRequest(description=description, conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    return req
+
+
+async def test_poll_includes_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    assert [r.description for r in ctx["open_retcons"]] == ["two suns vs one"]
+
+
+async def test_work_prompt_lists_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed (do not re-report these)" in sent
+    assert "two suns vs one" in sent
+
+
+async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed" not in sent
+
+
+async def test_llm_retcon_matching_open_description_is_not_refiled(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    llm_out = ContinuityOutput(retcon_requests=[RetconDraft(
+        description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")])
+    agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
+
+
+async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
+    events, proj, read, committer = stack
+    draft = RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    llm_out = ContinuityOutput(retcon_requests=[draft, draft])
+    agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1

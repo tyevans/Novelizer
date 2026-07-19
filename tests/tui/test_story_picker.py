@@ -19,9 +19,9 @@ async def test_new_name_input_renders_at_natural_height(tmp_path):
     """Regression: #new_name must not be crunched to height:1/border:none."""
     app = StoryPickerApp([], stories_dir=tmp_path)
     async with app.run_test(size=(80, 50)) as pilot:
-        name_input = app.query_one("#new_name", Input)
-        name_input.display = True
+        app.query_one("#new_story_form").display = True
         await pilot.pause()
+        name_input = app.query_one("#new_name", Input)
         assert name_input.outer_size.height >= 3
         assert name_input.styles.border_top[0] != "none"
         app.exit(None)
@@ -53,8 +53,8 @@ async def test_new_story_flow_creates_and_returns(tmp_path):
         options = app.query_one("#stories", OptionList)
         options.highlighted = 0  # "new story"
         await pilot.press("enter")
+        assert app.query_one("#new_story_form").display  # form revealed
         name_input = app.query_one("#new_name", Input)
-        assert name_input.display  # revealed
         name_input.value = "My Great Novel!"
         name_input.focus()
         await pilot.pause()
@@ -79,5 +79,99 @@ async def test_new_story_duplicate_slug_shows_error(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         assert "exists" in str(app.query_one("#picker_error", Static).renderable)
+        app.exit(None)
+    assert app.return_value is None
+
+
+from textual.widgets import Select, TextArea
+
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.events import EventType
+from novelizer.settings.story_dir import StoryDirectory
+
+_NOIR_PACK = '''name = "noir"
+
+[prose_profiles.hardboiled]
+name = "hardboiled"
+casting_note = "Short sentences. Rain on glass."
+'''
+
+
+async def _read_events(root):
+    events = EventStore(str(StoryDirectory(root=root).db_path))
+    await events.init()
+    try:
+        return await events.events_since(0)
+    finally:
+        await events.close()
+
+
+async def test_create_with_defaults_writes_only_title_and_no_seed(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Plain One"
+        await app._create()
+    root = app.return_value
+    assert load_toml_file(root / "story.toml") == {"title": "Plain One"}
+    assert not (root / "world.db").exists()  # no premise -> no event log yet
+
+
+async def test_create_with_premise_and_voice_writes_overrides_and_seed(tmp_path):
+    (tmp_path / "noir.toml").write_text(_NOIR_PACK, encoding="utf-8")
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Iron Harvest"
+        app.query_one("#new_premise", TextArea).text = "A tired thief takes one last job."
+        app.query_one("#new_voice_pack", Select).value = str(tmp_path / "noir.toml")
+        await pilot.pause()
+        assert app.query_one("#new_profile", Select).value == "hardboiled"
+        await app._create()
+    root = app.return_value
+    assert root == tmp_path / "iron-harvest"
+    assert load_toml_file(root / "story.toml") == {
+        "title": "Iron Harvest",
+        "voice_pack": str(tmp_path / "noir.toml"),
+        "prose_profile": "hardboiled",
+    }
+    stored = await _read_events(root)
+    assert len(stored) == 1
+    assert stored[0].event_type == EventType.DIRECTOR_SIGNAL_CREATED
+    assert stored[0].payload["kind"] == "seed"
+    assert stored[0].payload["body"] == "A tired thief takes one last job."
+
+
+async def test_profile_select_repopulates_when_pack_changes(tmp_path):
+    (tmp_path / "noir.toml").write_text(_NOIR_PACK, encoding="utf-8")
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        profile = app.query_one("#new_profile", Select)
+        assert profile.value == "plain"  # shipped default pack, effective default profile
+        app.query_one("#new_voice_pack", Select).value = str(tmp_path / "noir.toml")
+        await pilot.pause()
+        assert profile.value == "hardboiled"
+        app.exit(None)
+
+
+async def test_cancel_button_and_escape_collapse_the_form(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        form = app.query_one("#new_story_form")
+        assert form.display
+        await pilot.click("#cancel_btn")
+        assert not form.display
+        await pilot.press("enter")  # reopen via highlighted "new story"
+        assert form.display
+        app.query_one("#new_name", Input).focus()
+        await pilot.pause()
+        await pilot.press("escape")
+        assert not form.display
         app.exit(None)
     assert app.return_value is None

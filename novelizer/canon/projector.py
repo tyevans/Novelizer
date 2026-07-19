@@ -1,12 +1,21 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
 from typing import Optional
 import aiosqlite
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import ThreadRecord, ThreadState, SecretRecord, ThemeRecord
+from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord
 from novelizer.canon.threads import TERMINAL_STATES
+
+logger = logging.getLogger(__name__)
+
+# A revised chapter's prose more than this multiple of the original prose's
+# length is a signal for a human/Retconner to notice via the feed, not
+# something the Projector silently corrects (event sourcing: the log is the
+# truth) -- see Locked decision 10's escape hatch.
+_REVISION_LENGTH_SANITY_MULTIPLE = 4
 
 _CREATE = """
 CREATE TABLE IF NOT EXISTS chapters (
@@ -129,6 +138,28 @@ class Projector:
                 "INSERT OR REPLACE INTO chapters (id, data, editorial_status, supersedes_id) VALUES (?,?,?,?)",
                 (p["id"], data, p.get("editorial_status", "draft"), p.get("supersedes_id")),
             )
+        elif t == EventType.CHAPTER_REVISED:
+            cur = await self._conn.execute("SELECT data FROM chapters WHERE id=?", (p["chapter_id"],))
+            row = await cur.fetchone()
+            if row is None:
+                logger.warning(
+                    "chapter.revised for unknown chapter_id=%s -- no-op (shouldn't happen under correct signal routing)",
+                    p["chapter_id"],
+                )
+            else:
+                existing = Chapter.model_validate_json(row[0])
+                if existing.prose and len(p["prose"]) > _REVISION_LENGTH_SANITY_MULTIPLE * len(existing.prose):
+                    logger.warning(
+                        "chapter.revised prose for chapter_id=%s is >%dx the original length -- "
+                        "committing anyway (event sourcing: the log is the truth, a length anomaly "
+                        "is a signal to notice via the feed, not something to silently correct)",
+                        p["chapter_id"], _REVISION_LENGTH_SANITY_MULTIPLE,
+                    )
+                revised = existing.model_copy(update={"prose": p["prose"], "editorial_status": EditorialStatus.draft})
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO chapters (id, data, editorial_status, supersedes_id) VALUES (?,?,?,?)",
+                    (revised.id, revised.model_dump_json(), EditorialStatus.draft.value, revised.supersedes_id),
+                )
         elif t == EventType.WORLD_ENTRY_CREATED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO world_entries (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",

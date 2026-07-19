@@ -7,8 +7,8 @@ from hypothesis import given, settings as hyp_settings, strategies as st
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.canon.events import EventType
-from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, SignalKind
+from novelizer.canon.events import EventType, ChapterRevised
+from novelizer.store.models import Chapter, EditorialStatus, WorldEntry, Character, DirectorSignal, SignalKind
 
 
 @pytest.fixture
@@ -45,6 +45,30 @@ async def test_chapter_created_is_projected(wired):
     await proj.catch_up()
     rows = await _chapter_rows(proj)
     assert len(rows) == 1 and rows[0]["title"] == "One"
+
+
+async def test_chapter_revised_replaces_prose_same_chapter_id(wired):
+    events, proj, _ = wired
+    await events.append(EventType.CHAPTER_CREATED, "c1",
+                        Chapter(id="c1", title="One", prose="original",
+                                editorial_status=EditorialStatus.reviewed))
+    await proj.catch_up()
+    await events.append(EventType.CHAPTER_REVISED, "c1",
+                        ChapterRevised(chapter_id="c1", prose="revised prose"))
+    await proj.catch_up()
+    rows = await _chapter_rows(proj)
+    assert len(rows) == 1  # chapter count unchanged, not a new chapter
+    assert rows[0]["id"] == "c1"
+    assert rows[0]["prose"] == "revised prose"
+    assert rows[0]["editorial_status"] == "draft"  # re-enters review
+
+
+async def test_chapter_revised_for_unknown_id_is_no_op(wired):
+    events, proj, _ = wired
+    await events.append(EventType.CHAPTER_REVISED, "ghost",
+                        ChapterRevised(chapter_id="ghost", prose="revised prose"))
+    await proj.catch_up()
+    assert await _chapter_rows(proj) == []
 
 
 async def test_director_signal_consumed_flips_flag(wired):
