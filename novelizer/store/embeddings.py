@@ -163,6 +163,15 @@ class EmbeddingStore:
             "theme": self._themes,
         }
 
+    @staticmethod
+    def _search_one_collection_sync(col, query: str, n: int) -> list[dict]:
+        """Blocking count+query for a single collection -- runs inside
+        asyncio.to_thread so query()'s HTTP embed call never blocks the
+        event loop (reads are lock-free: no write contention to serialize)."""
+        if col.count() == 0:
+            return []
+        return col.query(query_texts=[query], n_results=min(n, col.count()))
+
     async def search(self, query: str, kinds: list[str] | None = None, n: int = 8) -> list[SearchHit]:
         by_kind = self._collections_by_kind()
         wanted = list(by_kind) if kinds is None else kinds
@@ -172,9 +181,9 @@ class EmbeddingStore:
         hits: list[SearchHit] = []
         for kind in wanted:
             col = by_kind[kind]
-            if col.count() == 0:
+            results = await asyncio.to_thread(self._search_one_collection_sync, col, query, n)
+            if not results:
                 continue
-            results = col.query(query_texts=[query], n_results=min(n, col.count()))
             for i, doc_id in enumerate(results["ids"][0]):
                 meta = results["metadatas"][0][i] or {}
                 title = meta.get("title") or meta.get("name") or ""

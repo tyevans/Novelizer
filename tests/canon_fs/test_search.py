@@ -53,6 +53,13 @@ async def test_search_canon_unavailable_on_store_error(store):
     assert "ls/glob/grep" in out
 
 
+async def test_search_canon_unknown_kind_returns_corrective_feedback(store):
+    tool = build_search_canon_tool(store, FakeReadStore())
+    out = await tool.ainvoke({"query": "x", "kinds": ["chapters"]})
+    assert "Unknown kinds" in out and "chapter" in out
+    assert not out.startswith("Search unavailable")
+
+
 async def test_search_canon_tool_metadata():
     tool = build_search_canon_tool(None, None)
     assert tool.name == "search_canon"

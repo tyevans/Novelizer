@@ -120,9 +120,12 @@ class NovelizerApp(App):
         while True:
             try:
                 await self.runtime.projector.catch_up()
-                await self.runtime.index_catch_up()
             except Exception as e:
                 self._report_worker_error("projector", e)
+            try:
+                await self.runtime.index_catch_up()
+            except Exception as e:
+                self._report_worker_error("indexer", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:

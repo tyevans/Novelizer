@@ -27,3 +27,11 @@ milestone touches the write path.
   tick hook (`_projector_loop` now also awaits `index_catch_up()` each cycle
   so embeddings stay current during a live session) are all in place and
   pinned by tests.
+
+  Acceptance-run flags to watch for:
+  - test with the embed endpoint deliberately down — the per-tick retry has
+    no backoff, so a sustained outage means `catch_up` re-attempts (and
+    logs a warning) every single tick until the endpoint returns.
+  - first-run backfill on a large story is serial (one record at a time,
+    no batching/concurrency) — expect a noticeable delay before the index
+    is fully warm on an existing story with a big canon.

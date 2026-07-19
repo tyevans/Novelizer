@@ -97,6 +97,12 @@ top-k typed hits `(kind, id, title, snippet, score)`. Embeds the query with
 the same model the theme-similarity path uses; cosine over the embeddings
 store. Empty index / no hits returns "no results" (an answer, not an error).
 
+**Delivered hit format:** each line is
+`(kind) /path — 'title' [id: X]` — the canon-fs path replaces the
+snippet/score shown above. The path is more useful than a snippet or raw
+distance score: it lets the agent go read the full record directly via the
+canon filesystem, which is the intended follow-up action after a hit.
+
 **Indexing:** incremental, projector-side — when events that create/revise
 canon content commit, the affected record is (re)embedded with a
 `(kind, id)` tag. Same pattern as theme similarity. A one-shot backfill

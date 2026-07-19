@@ -19,6 +19,10 @@ def build_search_canon_tool(embedding_store, read_store):
         """
         try:
             hits = await embedding_store.search(query, kinds=kinds)
+        except ValueError as e:
+            # The store's message names the valid kinds -- corrective
+            # feedback the agent can act on directly, rather than a dead end.
+            return str(e)
         except Exception as e:
             return (f"Search unavailable ({type(e).__name__}); browse the canon "
                     f"filesystem with ls/glob/grep instead.")

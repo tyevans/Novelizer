@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 
 from novelizer.canon.events import EventType
@@ -50,23 +51,34 @@ class CanonIndexer:
             return 0
 
     def _save_cursor(self, seq: int) -> None:
-        self._cursor_path.write_text(json.dumps({"last_sequence": seq}))
+        # Atomic write: tmp file + os.replace, so a crash mid-write never
+        # leaves a truncated/corrupt cursor file behind.
+        tmp_path = self._cursor_path.with_suffix(self._cursor_path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps({"last_sequence": seq}))
+        os.replace(tmp_path, self._cursor_path)
 
     async def catch_up(self) -> int:
-        last = self._load_cursor()
-        stored = await self._events.events_since(
-            last, event_types=list(INDEXED_EVENT_TYPES)
-        )
         processed = 0
-        for ev in stored:
-            try:
-                await self._index_one(ev.event_type, ev.aggregate_id)
-            except Exception as e:  # endpoint down, malformed record, ...
-                logger.warning("canon indexing stopped at seq %s (%s: %s); will retry",
-                               ev.sequence, type(e).__name__, e)
-                break
-            self._save_cursor(ev.sequence)
-            processed += 1
+        try:
+            last = self._load_cursor()
+            stored = await self._events.events_since(
+                last, event_types=list(INDEXED_EVENT_TYPES)
+            )
+            for ev in stored:
+                try:
+                    await self._index_one(ev.event_type, ev.aggregate_id)
+                except Exception as e:  # endpoint down, malformed record, ...
+                    logger.warning("canon indexing stopped at seq %s (%s: %s); will retry",
+                                   ev.sequence, type(e).__name__, e)
+                    break
+                self._save_cursor(ev.sequence)
+                processed += 1
+        except Exception as e:
+            # events_since (e.g. "database is locked") or _save_cursor
+            # (OSError) escaping here would violate the never-raise contract
+            # Runtime.start() relies on -- log and return what was processed.
+            logger.warning("canon indexing catch_up failed (%s: %s); will retry next tick",
+                            type(e).__name__, e)
         return processed
 
     async def _index_one(self, event_type: str, aggregate_id: str) -> None:
@@ -83,8 +95,9 @@ class CanonIndexer:
             else:  # superseded out of the active list
                 try:
                     await self._emb.delete(aggregate_id, "world_entries")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("world entry %s not present in index to delete (%s: %s)",
+                                 aggregate_id, type(e).__name__, e)
         elif kind == "character":
             record = await self._read.get_character(aggregate_id)
             if record is not None:
