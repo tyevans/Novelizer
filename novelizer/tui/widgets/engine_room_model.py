@@ -148,6 +148,15 @@ def trace_line(ev: StoredEvent) -> str:
     if et == TelemetryEventType.LLM_CALL_FAILED:
         return (f"{_t(ev)} {p.get('agent_name', '?')} llm call {p.get('call_index', '?')} "
                 f"✗ {p.get('error_type', '?')}")
+    if et == TelemetryEventType.TOOL_CALL_STARTED:
+        return (f"{_t(ev)} ⚒ {p.get('agent_name', '?')} → "
+                f"{p.get('tool_name', '?')}({p.get('input_summary', '')})")
+    if et == TelemetryEventType.TOOL_CALL_FINISHED:
+        return (f"{_t(ev)} ⚒ {p.get('agent_name', '?')} ← {p.get('tool_name', '?')} "
+                f"({p.get('duration_s', 0):.1f}s)")
+    if et == TelemetryEventType.TOOL_CALL_FAILED:
+        return (f"{_t(ev)} ⚒ {p.get('agent_name', '?')} ✗ {p.get('tool_name', '?')}: "
+                f"{p.get('error_type', '?')}")
     if et == TelemetryEventType.SCHEDULER_PICKED:
         return f"{_t(ev)} scheduler picked {p.get('agent_name', '?')}"
     if et == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED:

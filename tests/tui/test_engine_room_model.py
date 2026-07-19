@@ -107,6 +107,21 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_trace_line_formats_tool_call_events():
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "query text"})
+    assert "search_web" in trace_line(started)
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2, "output_chars": 200})
+    assert "search_web" in trace_line(finished)
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                 {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                  "duration_s": 0.5, "error_type": "ValueError", "error_message": "bad"})
+    assert "search_web" in trace_line(failed)
+
+
 @given(st.lists(st.sampled_from([
     TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FINISHED,
     TelemetryEventType.LLM_CALL_STARTED, TelemetryEventType.LLM_CALL_FINISHED,
