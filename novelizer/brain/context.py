@@ -82,6 +82,17 @@ def open_retcons_note(requests: list[RetconRequest]) -> str:
     return f"\n\nRetcon requests already filed (do not re-report these):\n{lines}"
 
 
+def chapter_map_note(chapters: list[Chapter]) -> str:
+    """Pull-mode chapter index: one line per chapter, never prose."""
+    if not chapters:
+        return "None yet."
+    return "\n".join(
+        f"- [{c.id}] '{c.title}' ({c.editorial_status.value}) "
+        f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'}"
+        for c in chapters
+    )
+
+
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:
     """Build the Editor-facing paradox-candidate summary, calling the *same*
     find_paradoxes function M4.2's Continuity Checker and M4.3's Causeway
