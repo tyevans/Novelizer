@@ -182,3 +182,22 @@ def test_mined_causal_fact_has_no_known_id_field():
     from novelizer.agents.schemas import MinedCausalFact
     f = MinedCausalFact(cause_chapter_id="c1", effect_chapter_id="c2")
     assert not hasattr(f, "known_id")
+
+
+def test_theme_intent_introduce_action():
+    from novelizer.agents.schemas import ThemeIntent
+    intent = ThemeIntent(action="introduce", title="The Weight of Secrets")
+    assert intent.action == "introduce" and intent.id == ""
+
+
+def test_theme_intent_develop_action_cites_id():
+    from novelizer.agents.schemas import ThemeIntent
+    intent = ThemeIntent(action="develop", id="the-weight-of-secrets", note="revisited in ch3")
+    assert intent.action == "develop" and intent.id == "the-weight-of-secrets"
+
+
+def test_theme_intent_rejects_terminal_actions():
+    import pydantic
+    from novelizer.agents.schemas import ThemeIntent
+    with pytest.raises(pydantic.ValidationError):
+        ThemeIntent(action="pay_off", id="t1")

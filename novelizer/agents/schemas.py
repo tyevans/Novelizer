@@ -41,6 +41,24 @@ class ThreadIntent(BaseModel):
     note: str = ""
 
 
+class ThemeIntent(BaseModel):
+    """One agent-declared theme action from structured output.
+
+    `introduce` mints a new theme from a freeform `title` (the system slugs it
+    into an id — see novelizer.canon.themes.slugify_theme_name); `develop`
+    must cite an existing theme's `id` rather than inventing one. Unlike
+    threads/secrets, themes have no terminal states (no pay_off/abandon/reveal).
+    `BaseAgent._commit_theme_intents` turns validated intents into theme.*
+    commits (see novelizer/agents/base.py). This plan/schema implements
+    M5.2 Locked decision 6 (theme action vocabulary).
+    """
+
+    action: Literal["introduce", "develop"]
+    title: str = ""
+    id: str = ""
+    note: str = ""
+
+
 class KnowledgeIntent(BaseModel):
     """One agent-declared secret-knowledge action from structured output.
 
