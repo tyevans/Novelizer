@@ -100,9 +100,6 @@ class DetailView:
     body: Text
 
 
-_EMPTY_VIEW = DetailView("", Text(""))
-
-
 def _view(title: str, meta: str, prose: str = "",
           fields: list[tuple[str, str]] | None = None) -> DetailView:
     """Detail typography: bold title line, dim metadata line, dim-labeled
@@ -124,17 +121,20 @@ def _view(title: str, meta: str, prose: str = "",
     return DetailView(title, body)
 
 
-async def detail_view(read, section_key: str, item_id: str) -> DetailView:
+async def detail_view(read, section_key: str, item_id: str) -> DetailView | None:
+    """Render the detail pane for one record; None when the record (or the
+    section itself) is not found — distinct from a found record whose title
+    happens to be empty."""
     if section_key == "chapters":
         ch = await read.get_chapter(item_id)
         if not ch:
-            return _EMPTY_VIEW
+            return None
         meta = f"{_enum_val(ch.editorial_status)} · {word_count(ch.prose):,} words"
         return _view(ch.title, meta, ch.prose)
     if section_key == "characters":
         c = await read.get_character(item_id)
         if not c:
-            return _EMPTY_VIEW
+            return None
         fields = [("Traits", c.traits), ("Arc", c.arc_status), ("Motivations", c.motivations)]
         if c.voice:
             fields.append(("Voice", c.voice))
@@ -143,17 +143,17 @@ async def detail_view(read, section_key: str, item_id: str) -> DetailView:
         for e in await read.list_world_entries():
             if e.id == item_id:
                 return _view(e.title, _enum_val(e.domain), e.body)
-        return _EMPTY_VIEW
+        return None
     if section_key == "retcons":
         for r in await read.list_retcon_requests():
             if r.id == item_id:
                 return _view(r.description, f"status: {_enum_val(r.status)}", "",
                              [("Proposed", r.proposed_resolution)])
-        return _EMPTY_VIEW
+        return None
     if section_key == "threads":
         t = await read.get_thread(item_id)
         if not t:
-            return _EMPTY_VIEW
+            return None
         chapters = await read.list_chapters()
         known = chapter_number(t.last_chapter_id, chapters) is not None
         last = chapter_label(t.last_chapter_id, chapters) if known else "—"
@@ -162,6 +162,6 @@ async def detail_view(read, section_key: str, item_id: str) -> DetailView:
     if section_key == "themes":
         theme = await read.get_theme(item_id)
         if not theme:
-            return _EMPTY_VIEW
+            return None
         return _view(theme.title, f"touched {theme.touch_count}x", theme.last_note)
-    return _EMPTY_VIEW
+    return None

@@ -407,10 +407,10 @@ class NovelizerApp(App):
         if not data or not data.get("id"):
             return
         view = await detail_view(self.runtime.read, data["section"], data["id"])
-        if view.title:
-            self._update_detail(view.body, view.title)
-        else:
+        if view is None:
             self._update_detail("(no detail)")
+        else:
+            self._update_detail(view.body, view.title)
 
     def _update_detail(self, content, title: str = "") -> None:
         self.query_one("#detail", Static).update(content)
