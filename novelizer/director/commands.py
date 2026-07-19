@@ -1,13 +1,27 @@
 from __future__ import annotations
 from novelizer.canon.events import EventType
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatus
+from novelizer.canon.event_store import EventStore
 from novelizer.canon.proposal_service import ProposalService
+from novelizer.settings.story_dir import StoryDirectory
 from novelizer.store.models import DirectorSignal, SignalKind
 
 
 async def seed(events, text: str) -> None:
     sig = DirectorSignal(kind=SignalKind.seed, body=text)
     await events.append(EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
+
+
+async def seed_story_dir(story: StoryDirectory, text: str) -> None:
+    """Append a seed signal directly to a story's event log, without a running
+    Runtime. Used at story-creation time: the picker runs before Runtime boots,
+    and EventStore is standalone (creates its own schema on init)."""
+    events = EventStore(str(story.db_path))
+    await events.init()
+    try:
+        await seed(events, text)
+    finally:
+        await events.close()
 
 
 async def focus(events, entity: str) -> None:

@@ -4,6 +4,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from novelizer.settings.layers import StoryConfigError
+from novelizer.settings.models import STORY_OVERRIDABLE_KEYS
 from novelizer.settings.toml_io import write_toml_file
 
 
@@ -30,10 +32,24 @@ def is_story_dir(path: Path) -> bool:
     return (path / "story.toml").exists() or (path / "world.db").exists()
 
 
-def create_story(root: Path, title: str) -> StoryDirectory:
+def create_story(
+    root: Path, title: str, overrides: dict[str, object] | None = None
+) -> StoryDirectory:
+    """Create a story directory with a story.toml. `overrides` are optional
+    story-scoped settings (validated against STORY_OVERRIDABLE_KEYS) written
+    alongside the title; validation runs before mkdir so a bad call leaves
+    no half-created directory."""
+    data: dict[str, object] = {"title": title}
+    if overrides:
+        unknown = sorted(set(overrides) - STORY_OVERRIDABLE_KEYS)
+        if unknown:
+            raise StoryConfigError(
+                f"{root / 'story.toml'}: {unknown} are not story-overridable settings"
+            )
+        data.update(overrides)
     sd = StoryDirectory(root=root)
     root.mkdir(parents=True, exist_ok=True)
-    write_toml_file(sd.story_toml, {"title": title})
+    write_toml_file(sd.story_toml, data)
     return sd
 
 

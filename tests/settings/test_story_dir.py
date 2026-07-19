@@ -91,3 +91,29 @@ def test_migrate_flat_layout_preserves_existing_story_toml(tmp_path):
     write_toml_file(target / "story.toml", {"title": "Custom Title", "prose_profile": "lush"})
     sd = migrate_flat_layout(tmp_path)
     assert load_toml_file(sd.story_toml) == {"title": "Custom Title", "prose_profile": "lush"}
+
+
+def test_create_story_with_overrides_writes_them(tmp_path):
+    sd = create_story(
+        tmp_path / "s", title="S",
+        overrides={"prose_profile": "lush", "voice_pack": "/packs/noir.toml"},
+    )
+    assert load_toml_file(sd.story_toml) == {
+        "title": "S", "prose_profile": "lush", "voice_pack": "/packs/noir.toml",
+    }
+
+
+def test_create_story_without_overrides_unchanged(tmp_path):
+    sd = create_story(tmp_path / "s", title="S")
+    assert load_toml_file(sd.story_toml) == {"title": "S"}
+
+
+def test_create_story_rejects_unknown_and_forbidden_keys(tmp_path):
+    from novelizer.settings.layers import StoryConfigError
+
+    with pytest.raises(StoryConfigError):
+        create_story(tmp_path / "s", title="S", overrides={"llm_api_key": "sk-x"})
+    with pytest.raises(StoryConfigError):
+        create_story(tmp_path / "s", title="S", overrides={"nonsense": "x"})
+    # validation happens before mkdir: no half-created story dir
+    assert not (tmp_path / "s").exists()
