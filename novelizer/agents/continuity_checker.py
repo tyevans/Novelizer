@@ -371,10 +371,20 @@ class ContinuityChecker(BaseAgent):
                 self.note_pass()
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         out, mined = await self.work(ctx)
         await self.commit(out, ctx, mined)
-        await self._record_watermark()
+        fp_now = await self._fingerprint()
+        # unmined > 0 at record time means a mining pass failed (its "will
+        # retry next poll" contract requires the gate stay open) or new prose
+        # arrived mid-run; moved chapter components likewise mean this run
+        # never saw the newest chapter. Either way, leave the watermark clear.
+        # Own stamps/refs/edges are absorbed via fp_now otherwise.
+        if fp_now[2] == 0 and fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
 def build_continuity_checker_runner(settings, callbacks=None):

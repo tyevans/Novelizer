@@ -142,10 +142,20 @@ class CharacterKeeper(BaseAgent):
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         out = await self.work(ctx)
         await self.commit(out, ctx)
-        await self._record_watermark()
+        fp_now = await self._fingerprint()
+        # The chapter components (count, latest id) are purely external — the
+        # Keeper never writes chapters. If they moved mid-run, this run's
+        # analysis did not cover the new prose: leave the watermark clear so
+        # the next tick re-dispatches. Own retcon filings land in fp_now and
+        # are absorbed.
+        if fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
 def build_character_keeper_runner(settings, callbacks=None):

@@ -108,6 +108,9 @@ class BaseAgent:
     async def _record_watermark(self) -> None:
         self._last_fingerprint = await self._fingerprint()
 
+    def _clear_watermark(self) -> None:
+        self._last_fingerprint = None
+
     async def readiness(self) -> float:
         return 0.0
 

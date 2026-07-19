@@ -902,3 +902,21 @@ async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
     assert remarks[-1].payload["note"] == "All threads hold."
     import time
     assert passing.seconds_until_ready(time.monotonic()) > passing.interval
+
+
+class NoneMiningRunner:
+    async def ainvoke(self, inputs):
+        return {"structured_response": None}
+
+
+async def test_continuity_failed_mining_keeps_gate_open(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), NoneMiningRunner(), read, committer, events)
+    await agent.run_once()
+    # ch1 was not stamped chapter.mined; the "retry next poll" contract
+    # requires readiness to stay open, not gate to 0.0.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert mined == []
+    assert await agent.readiness() > 0.0

@@ -106,6 +106,12 @@ Editor/Retconner/StructureAnalyst/Author (their readiness already reaches
   dispatch in `Scheduler.tick` bypasses readiness but still honors
   `ready_for_interval` — an operator who wants an immediate re-run can
   still get one after the backoff window, or by restarting).
+- The watermark is recorded only when the run fully accounted for the state
+  it fingerprints: if the chapter components moved mid-run (concurrent
+  Author commit), or — for the ContinuityChecker — any chapter is still
+  unmined at record time (failed mining pass must honor its "retry next
+  poll" contract), the watermark is left clear so the next tick
+  re-dispatches.
 
 ## Testing
 

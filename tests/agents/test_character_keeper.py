@@ -357,3 +357,32 @@ async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):
     log = await events.events_since(0)
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert [e.payload["note"] for e in remarks] == [DEFAULT_PASS_REMARK]
+
+
+class ChapterCommittingRunner(FakeRunner):
+    """Simulates the Author committing a chapter while the Keeper's LLM call
+    is in flight."""
+
+    def __init__(self, out, events, proj):
+        super().__init__(out)
+        self._events = events
+        self._proj = proj
+
+    async def ainvoke(self, inputs):
+        await self._events.append(
+            EventType.CHAPTER_CREATED, "ch-midrun",
+            Chapter(id="ch-midrun", title="Mid-run", prose="Arrived during the run."),
+        )
+        await self._proj.catch_up()
+        return await super().ainvoke(inputs)
+
+
+async def test_keeper_midrun_chapter_is_not_absorbed_by_watermark(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
+    await proj.catch_up()
+    agent = CharacterKeeper(ChapterCommittingRunner(KeeperOutput(), events, proj), read, committer)
+    await agent.run_once()
+    # The mid-run chapter was never analyzed: the watermark must stay clear.
+    assert await agent.readiness() > 0.0
