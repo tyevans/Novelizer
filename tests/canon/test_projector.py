@@ -1,9 +1,12 @@
+import asyncio
 import json
 import os
 import tempfile
 import pytest
+from hypothesis import given, settings as hyp_settings, strategies as st
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
+from novelizer.canon.read_store import ReadStore
 from novelizer.canon.events import EventType
 from novelizer.store.models import Chapter, WorldEntry, Character, DirectorSignal, SignalKind
 
@@ -491,3 +494,57 @@ async def test_reset_state_clears_causal_edges(wired):
     await proj._reset_state()
     cur = await proj._conn.execute("SELECT COUNT(*) FROM causal_edges")
     assert (await cur.fetchone())[0] == 0
+
+
+async def _build_thread_stack(*, omit_source: bool):
+    """Build a fresh (events, proj, read) stack, append a thread.planted and
+    thread.touched for 't1', catch_up(), and return the resulting ThreadRecord.
+    When omit_source is True, both events are appended via append_raw with a
+    payload dict that lacks the 'source' key entirely (the pre-M5.1 event
+    shape). When False, the events go through the normal pydantic models,
+    whose 'source' field defaults to 'declared'.
+    """
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        events = EventStore(path)
+        await events.init()
+        proj = Projector(events, path)
+        await proj.init()
+        read = ReadStore(path)
+        await read.init()
+
+        if omit_source:
+            await events.append_raw(EventType.THREAD_PLANTED, "t1", {"id": "t1", "name": "The Locket"})
+            await events.append_raw(EventType.THREAD_TOUCHED, "t1", {"id": "t1", "note": "reappears"})
+        else:
+            await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+            await events.append(EventType.THREAD_TOUCHED, "t1", ThreadTouched(id="t1", note="reappears"))
+
+        await proj.catch_up()
+        record = await read.get_thread("t1")
+
+        await read.close()
+        await proj.close()
+        await events.close()
+        return record
+    finally:
+        os.unlink(path)
+
+
+@given(has_source=st.booleans())
+@hyp_settings(max_examples=20, deadline=None)
+def test_thread_touched_replays_identically_with_and_without_source_field(has_source):
+    """Replay-compatibility invariant (M5.1 Locked decision 1): a
+    thread.touched event with the source field omitted (pre-M5.1 shape,
+    simulated via append_raw with a payload dict lacking 'source') and one
+    with source='declared' explicitly set produce byte-identical
+    ThreadsProjection rows after catch_up() -- the added field is additive
+    and does not change fold behavior, so old events in an existing log
+    replay exactly as before.
+    """
+    record_a = asyncio.run(_build_thread_stack(omit_source=True))
+    record_b = asyncio.run(_build_thread_stack(omit_source=False))
+    assert record_a == record_b

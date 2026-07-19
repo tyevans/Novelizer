@@ -119,3 +119,86 @@ class ChapterScore(BaseModel):
 class StructureAnalystOutput(BaseModel):
     scores: list[ChapterScore] = Field(default_factory=list)
     feed_note: str = ""
+
+
+class MinedSecretFact(BaseModel):
+    """A secret-knowledge fact extracted by prose mining from a chapter's prose.
+
+    Mining cites existing secret ids only (mining never invents new secret
+    identity via 'plant' -- see M5.1 Locked decision 3). `action` is restricted
+    to 'learn' and 'uses' (reveal actions are modeled separately as
+    MinedRevealFact). `known_id` signals whether the miner recognized the secret
+    id in the active knowledge matrix -- if False, the fact escalates to
+    retcon_request.created rather than auto-committing.
+    """
+
+    action: Literal["learn", "uses"]
+    id: str
+    character_id: str
+    chapter_id: str
+    known_id: bool = True
+    note: str = ""
+
+
+class MinedRevealFact(BaseModel):
+    """A secret-reveal fact extracted by prose mining.
+
+    Unlike MinedSecretFact, reveal facts always escalate to retcon_request.created
+    unconditionally, regardless of `known_id`, per M5.1 Locked decision 3 --
+    mining never auto-commits a secret.revealed event. The `known_id` field is
+    retained for consistency and to describe to the retcon whether the secret id
+    was even recognized.
+    """
+
+    id: str
+    chapter_id: str
+    known_id: bool = True
+    note: str = ""
+
+
+class MinedThreadFact(BaseModel):
+    """A plot-thread fact extracted by prose mining.
+
+    Mining cites existing thread ids only (mining never mints new thread identity
+    via 'plant' -- see M5.1 Locked decision 3). `action` is restricted to
+    'touch', 'planted', and 'paid_off' (not 'plant' or 'abandon' -- the latter
+    are agent authoring actions, not prose-mined observations). `known_id` signals
+    whether the miner recognized the thread id -- if False, the fact escalates to
+    retcon_request.created rather than auto-committing.
+    """
+
+    action: Literal["touch", "planted", "paid_off"]
+    id: str
+    chapter_id: str
+    known_id: bool = True
+    note: str = ""
+
+
+class MinedCausalFact(BaseModel):
+    """A causal-edge fact extracted by prose mining.
+
+    Unlike mined secret/thread facts, causal facts cite chapter ids, which are
+    always known to the miner (they come from ctx["chapters"]/chapter_order), so
+    there is no ambiguity axis and no `known_id` field. Dedup for causal facts
+    is exact triple-match against existing edges, not an escalate-on-ambiguity path.
+    """
+
+    cause_chapter_id: str
+    effect_chapter_id: str
+    note: str = ""
+
+
+class MinedFactsOutput(BaseModel):
+    """Structured output from the prose-mining pass of the Continuity Checker.
+
+    The mining pass reads a chapter's prose and returns a set of facts
+    (secret/reveal/thread/causal) that the prose shows but the log may not
+    have covering events for. See M5.1 for the mining architecture and
+    commit/dedup logic.
+    """
+
+    secret_facts: list[MinedSecretFact] = Field(default_factory=list)
+    reveal_facts: list[MinedRevealFact] = Field(default_factory=list)
+    thread_facts: list[MinedThreadFact] = Field(default_factory=list)
+    causal_facts: list[MinedCausalFact] = Field(default_factory=list)
+    feed_note: str = ""

@@ -105,7 +105,7 @@ async def test_commit_thread_intents_touch_commits_when_id_known(stack):
     log = await events.events_since(0)
     assert len(log) == 1
     assert log[0].event_type == EventType.THREAD_TOUCHED
-    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "reappears"}
+    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "reappears", "source": "declared"}
 
 
 async def test_commit_thread_intents_drops_unknown_id_with_no_event(stack):
@@ -152,7 +152,7 @@ async def test_commit_thread_intents_plant_colliding_with_active_id_downgrades_t
     log = await events.events_since(0)
     assert len(log) == 1
     assert log[0].event_type == EventType.THREAD_TOUCHED
-    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going"}
+    assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going", "source": "declared"}
 
 
 from novelizer.agents.schemas import KnowledgeIntent
@@ -200,7 +200,7 @@ async def test_commit_knowledge_intents_learn_commits_when_id_known(stack):
     log = await events.events_since(0)
     assert len(log) == 1
     assert log[0].event_type == EventType.SECRET_LEARNED
-    assert log[0].payload == {"id": "the-heir-lives", "character_id": "mara", "chapter_id": "c2", "note": "found the letter"}
+    assert log[0].payload == {"id": "the-heir-lives", "character_id": "mara", "chapter_id": "c2", "note": "found the letter", "source": "declared"}
 
 
 async def test_commit_knowledge_intents_learn_dropped_when_character_id_blank(stack):
@@ -273,7 +273,7 @@ async def test_commit_causal_intents_commits_when_both_chapters_valid(stack):
     log = await events.events_since(0)
     assert len(log) == 1
     assert log[0].event_type == EventType.CAUSAL_EDGE_DECLARED
-    assert log[0].payload == {"cause_chapter_id": "c1", "effect_chapter_id": "c3", "note": "fire forces the move"}
+    assert log[0].payload == {"cause_chapter_id": "c1", "effect_chapter_id": "c3", "note": "fire forces the move", "source": "declared"}
 
 
 async def test_commit_causal_intents_drops_self_edge(stack):
@@ -308,3 +308,51 @@ async def test_commit_causal_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_causal_intents([], valid_chapter_ids=set())
     assert await events.events_since(0) == []
+
+
+async def test_commit_thread_intents_defaults_source_to_declared(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents([ThreadIntent(action="plant", name="A Thread")], active_thread_ids=set())
+    await proj.catch_up()
+    log = await events.events_since(0, event_types=[EventType.THREAD_PLANTED])
+    assert len(log) == 1
+    assert log[0].payload["source"] == "declared"
+
+
+async def test_commit_thread_intents_accepts_explicit_source(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="plant", name="A Thread")], active_thread_ids=set(), source="mined",
+    )
+    await proj.catch_up()
+    log = await events.events_since(0, event_types=[EventType.THREAD_PLANTED])
+    assert len(log) == 1
+    assert log[0].payload["source"] == "mined"
+
+
+async def test_commit_knowledge_intents_accepts_explicit_source(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara")],
+        active_secret_ids={"the-heir-lives"}, source="mined",
+    )
+    await proj.catch_up()
+    log = await events.events_since(0, event_types=[EventType.SECRET_LEARNED])
+    assert len(log) == 1
+    assert log[0].payload["source"] == "mined"
+
+
+async def test_commit_causal_intents_accepts_explicit_source(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2")],
+        valid_chapter_ids={"c1", "c2"}, source="mined",
+    )
+    await proj.catch_up()
+    log = await events.events_since(0, event_types=[EventType.CAUSAL_EDGE_DECLARED])
+    assert len(log) == 1
+    assert log[0].payload["source"] == "mined"

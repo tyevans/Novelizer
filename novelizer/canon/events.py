@@ -30,6 +30,7 @@ class EventType:
     SECRET_REVEALED = "secret.revealed"
     CAUSAL_EDGE_DECLARED = "causal_edge.declared"
     ANNOTATION_STRUCTURE_SCORED = "annotation.structure_scored"
+    CHAPTER_MINED = "chapter.mined"
 
 
 class StoredEvent(BaseModel):
@@ -64,6 +65,9 @@ class ThreadPlanted(BaseModel):
     name: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadTouched(BaseModel):
@@ -72,6 +76,9 @@ class ThreadTouched(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadPaidOff(BaseModel):
@@ -83,6 +90,9 @@ class ThreadPaidOff(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class ThreadAbandoned(BaseModel):
@@ -122,6 +132,9 @@ class SecretLearned(BaseModel):
     character_id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class SecretReferenced(BaseModel):
@@ -135,6 +148,9 @@ class SecretReferenced(BaseModel):
     character_id: str
     chapter_id: str = ""
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class SecretRevealed(BaseModel):
@@ -160,6 +176,9 @@ class CausalEdgeDeclared(BaseModel):
     cause_chapter_id: str
     effect_chapter_id: str
     note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
 
 class AnnotationStructureScored(BaseModel):
@@ -172,3 +191,14 @@ class AnnotationStructureScored(BaseModel):
     chapter_id: str
     tension: float = Field(ge=0.0, le=1.0)
     pacing_label: str = ""
+
+
+class ChapterMined(BaseModel):
+    """Payload for chapter.mined -- bookkeeping marker that the prose-mining
+    pass has run for this chapter. Never projected (no _apply branch in
+    Projector), same class as AgentRemark. Gives mining idempotency without
+    a new persisted 'already mined' flag or a re-scan of the full log's
+    prose every cycle (M5.1 Locked decision 2).
+    """
+
+    chapter_id: str

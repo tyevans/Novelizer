@@ -24,6 +24,7 @@ _NEVER_GATED = {
     EventType.SECRET_LEARNED,
     EventType.SECRET_REFERENCED,
     EventType.CAUSAL_EDGE_DECLARED,
+    EventType.CHAPTER_MINED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

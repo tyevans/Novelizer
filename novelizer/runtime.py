@@ -12,7 +12,9 @@ from novelizer.agents.author import Author, build_author_runner
 from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
 from novelizer.agents.character_keeper import CharacterKeeper, build_character_keeper_runner
 from novelizer.agents.editor import Editor, build_editor_runner
-from novelizer.agents.continuity_checker import ContinuityChecker, build_continuity_checker_runner
+from novelizer.agents.continuity_checker import (
+    ContinuityChecker, build_continuity_checker_runner, build_continuity_mining_runner,
+)
 from novelizer.agents.retconner import Retconner, build_retconner_runner
 from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
 from novelizer.voices.loader import load_voice_pack
@@ -43,7 +45,12 @@ class Runtime:
 
     def _runner_for(self, name: str, builder):
         if self._runners is not None:
-            return self._runners[name]
+            if name in self._runners:
+                return self._runners[name]
+            # Any name absent from an injected runners dict falls back to the real
+            # builder (not just "continuity_checker_mining", which motivated this) —
+            # builders construct lazily and never touch the network before ainvoke().
+            return builder(self.settings)
         if name == "author" and self._runner is not None:
             return self._runner
         return builder(self.settings)
@@ -85,7 +92,9 @@ class Runtime:
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
         )
         self.continuity_checker = ContinuityChecker(
-            self._runner_for("continuity_checker", build_continuity_checker_runner), self.read, self.committer,
+            self._runner_for("continuity_checker", build_continuity_checker_runner),
+            self._runner_for("continuity_checker_mining", build_continuity_mining_runner),
+            self.read, self.committer, self.events,
             interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
         )
         self.retconner = Retconner(
@@ -164,6 +173,7 @@ class Runtime:
             self.character_keeper._runner = build_character_keeper_runner(stored)
             self.editor._runner = build_editor_runner(stored)
             self.continuity_checker._runner = build_continuity_checker_runner(stored)
+            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored)
             self.retconner._runner = build_retconner_runner(stored)
             self.structure_analyst._runner = build_structure_analyst_runner(stored)
 

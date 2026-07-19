@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.continuity_checker import ContinuityChecker
-from novelizer.agents.schemas import ContinuityOutput, RetconDraft
+from novelizer.agents.schemas import ContinuityOutput, RetconDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact
 from novelizer.store.models import WorldEntry, RetconStatus, Chapter
 from novelizer.canon.events import SecretCreated, SecretReferenced
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
@@ -39,7 +39,7 @@ async def test_files_retcons_for_contradictions(stack):
     await events.append(EventType.WORLD_ENTRY_CREATED, "w2", WorldEntry(id="w2", title="Sky", body="The lone sun set."))
     await proj.catch_up()
     out = ContinuityOutput(retcon_requests=[RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1", "w2"], proposed_resolution="pick one")])
-    agent = ContinuityChecker(FakeRunner(out), read, committer)
+    agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     assert len(await read.list_retcon_requests(status=RetconStatus.open)) == 1
@@ -47,7 +47,7 @@ async def test_files_retcons_for_contradictions(stack):
 
 async def test_no_contradictions_is_noop(stack):
     events, proj, read, committer = stack
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_retcon_requests() == []
@@ -56,7 +56,7 @@ async def test_no_contradictions_is_noop(stack):
 async def test_work_prompt_includes_personality_when_set(stack):
     events, proj, read, committer = stack
     runner = FakeRunner(ContinuityOutput())
-    agent = ContinuityChecker(runner, read, committer, personality="A dry, pedantic fact-checker.")
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, personality="A dry, pedantic fact-checker.")
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -67,7 +67,7 @@ async def test_work_prompt_includes_personality_when_set(stack):
 async def test_commit_emits_remark_when_feed_note_present(stack):
     events, proj, read, committer = stack
     out = ContinuityOutput(feed_note="Two suns again. Nobody else noticed.")
-    agent = ContinuityChecker(FakeRunner(out), read, committer)
+    agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.commit(out, {})
     await proj.catch_up()
     log = await events.events_since(0)
@@ -93,7 +93,7 @@ async def _seed_leak(events, proj):
 async def test_leak_is_filed_as_a_tagged_retcon_request(stack):
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
@@ -105,7 +105,7 @@ async def test_leak_is_filed_as_a_tagged_retcon_request(stack):
 async def test_leak_is_not_refiled_on_a_second_cycle(stack):
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     await agent.run_once()
@@ -123,7 +123,7 @@ async def test_learned_reference_does_not_get_flagged(stack):
     await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara", chapter_id="c1"))
     await events.append(EventType.SECRET_REFERENCED, "the-heir-lives", SecretReferenced(id="the-heir-lives", character_id="mara", chapter_id="c1"))
     await proj.catch_up()
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
@@ -137,7 +137,7 @@ async def test_paradox_is_filed_as_a_tagged_retcon_request(stack):
     await events.append(EventType.CAUSAL_EDGE_DECLARED, "c1",
                         CausalEdgeDeclared(cause_chapter_id="c2", effect_chapter_id="c1"))
     await proj.catch_up()
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
@@ -149,7 +149,7 @@ async def test_llm_and_deterministic_findings_coexist_in_one_cycle(stack):
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
     llm_out = ContinuityOutput(retcon_requests=[RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")])
-    agent = ContinuityChecker(FakeRunner(llm_out), read, committer)
+    agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
@@ -161,7 +161,7 @@ async def test_llm_and_deterministic_findings_coexist_in_one_cycle(stack):
 async def test_poll_includes_knowledge_and_causal_data(stack):
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     ctx = await agent.poll()
     assert "the-heir-lives" in ctx["knowledge_matrix"]
     assert ctx["secret_references"][0].character_id == "mara"
@@ -178,7 +178,7 @@ async def test_m4_2_done_when_leak_fixture_reaches_the_open_retcon_queue(stack):
     list_retcon_requests(status=open)."""
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
 
     await agent.run_once()
     await proj.catch_up()
@@ -220,7 +220,7 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
 
     # Step 1: LeakDetector flags it deterministically (no LLM), via the same
     # poll() the Continuity Checker uses.
-    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), read, committer)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     ctx = await agent.poll()
     from novelizer.brain.leaks import find_leaks
     leaks = find_leaks(ctx["secret_references"], ctx["knowledge_matrix"])
@@ -247,3 +247,442 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     line = who_knows_what_line(secret, characters, matrix)
     assert "Kestrel" not in line
     assert "known to no one" in line
+
+
+from novelizer.brain.mining import MINED_SOURCE_TAG
+from novelizer.store.models import Character
+
+
+async def test_mining_commits_a_secret_referenced_event_tagged_mined(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    contradiction_runner = FakeRunner(ContinuityOutput())
+    mining_runner = FakeRunner(MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1"),
+    ]))
+    agent = ContinuityChecker(contradiction_runner, mining_runner, read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    assert mined_refs[0].payload["character_id"] == "mara"
+
+    from novelizer.brain.leaks import find_leaks
+    matrix = await read.knowledge_matrix()
+    refs = await read.list_secret_references()
+    leaks = find_leaks(refs, matrix)
+    assert any(l.secret_id == "the-heir-lives" and l.character_id == "mara" for l in leaks)
+
+
+async def test_mining_does_not_recommit_on_a_second_run_once(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1"),
+    ])
+    agent = ContinuityChecker(
+        FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events,
+    )
+    await agent.run_once()
+    await proj.catch_up()
+
+    agent2 = ContinuityChecker(
+        FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events,
+    )
+    await agent2.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    mined_markers = [e for e in log if e.event_type == EventType.CHAPTER_MINED and e.payload["chapter_id"] == "c1"]
+    assert len(mined_markers) == 1
+
+
+async def test_mining_ambiguous_secret_fact_files_a_tagged_retcon_not_an_event(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1", known_id=False),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type in (EventType.SECRET_REFERENCED, EventType.SECRET_LEARNED)] == []
+    retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    assert any(e.payload["description"].startswith(MINED_SOURCE_TAG) for e in retcons)
+
+
+async def test_mining_reveal_fact_always_escalates_never_auto_commits(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(reveal_facts=[
+        MinedRevealFact(id="the-heir-lives", chapter_id="c1"),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
+    retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    assert any(e.payload["description"].startswith(MINED_SOURCE_TAG) for e in retcons)
+
+
+async def test_mining_causal_fact_dedups_against_exact_triple_match(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(EventType.CAUSAL_EDGE_DECLARED, "c2",
+                        CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c2"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(causal_facts=[
+        MinedCausalFact(cause_chapter_id="c1", effect_chapter_id="c2"),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    edges = await read.list_causal_edges()
+    matching = [e for e in edges if e.cause_chapter_id == "c1" and e.effect_chapter_id == "c2"]
+    assert len(matching) == 1
+
+
+async def test_mining_thread_fact_dedups_against_raw_log_scan(stack):
+    from novelizer.canon.events import ThreadPlanted, ThreadTouched
+
+    events, proj, read, committer = stack
+    await events.append(EventType.THREAD_PLANTED, "the-lost-heir", ThreadPlanted(id="the-lost-heir", name="The Lost Heir"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.THREAD_TOUCHED, "the-lost-heir", ThreadTouched(id="the-lost-heir", chapter_id="c1"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(thread_facts=[
+        MinedThreadFact(action="touch", id="the-lost-heir", chapter_id="c1"),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED and e.payload["chapter_id"] == "c1"]
+    assert len(touches) == 1
+
+
+class RaisingThenFakeMiningRunner:
+    """Raises on its first call (simulating a mining-pass failure for one
+    chapter), then returns `out` for every subsequent call."""
+
+    def __init__(self, out):
+        self._out = out
+        self._first_call = True
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        if self._first_call:
+            self._first_call = False
+            raise RuntimeError("mining pass exploded")
+        return {"structured_response": self._out}
+
+
+async def test_mining_exception_for_one_chapter_does_not_block_the_next(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c2"),
+    ])
+    mining_runner = RaisingThenFakeMiningRunner(mining_out)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    assert len(mining_runner.calls) == 2  # both chapters attempted
+
+    log = await events.events_since(0)
+    mined_markers = {e.payload["chapter_id"] for e in log if e.event_type == EventType.CHAPTER_MINED}
+    assert mined_markers == {"c2"}  # c1's failure left it unstamped, c2 succeeded
+
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    assert mined_refs[0].payload["chapter_id"] == "c2"
+
+
+async def test_mining_runs_only_for_chapters_without_a_mined_marker(stack):
+    from novelizer.canon.events import ChapterMined
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(EventType.CHAPTER_MINED, "c1", ChapterMined(chapter_id="c1"))
+    await proj.catch_up()
+
+    mining_runner = FakeRunner(MinedFactsOutput())
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+
+    ctx = await agent.poll()
+    mined_ids = {c.id for c in ctx["mined_chapters"]}
+    assert mined_ids == {"c2"}
+
+    await agent.run_once()
+    assert len(mining_runner.calls) == 1
+
+
+import asyncio
+from hypothesis import given, settings as hyp_settings, strategies as st
+
+
+async def _run_mining_idempotency(fact_count: int, run_twice: bool) -> tuple[int, int]:
+    """Seeds `fact_count` distinct secrets, a chapter, and a character; covers
+    the even-indexed secrets with a pre-existing secret.referenced event
+    (source='declared') so only the odd-indexed ones are "new" for mining to
+    find. Runs a FakeRunner mining pass citing all fact_count facts once (via
+    run_once), then optionally a second run_once with a runner whose mining
+    response would re-cite the same facts -- but since the chapter already
+    carries a chapter.mined marker, poll() must exclude it and the mining
+    runner must never be invoked again.
+
+    Returns (chapter_mined_count, mined_sourced_secret_referenced_count).
+    """
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        events = EventStore(path); await events.init()
+        proj = Projector(events, path); await proj.init()
+        read = ReadStore(path); await read.init()
+        committer = Committer(events)
+
+        secret_ids = [f"s{i}" for i in range(fact_count)]
+        uncovered_ids = []
+        await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+        await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        for i, sid in enumerate(secret_ids):
+            await events.append(EventType.SECRET_CREATED, sid, SecretCreated(id=sid, title=sid))
+            if i % 2 == 0:
+                await events.append(EventType.SECRET_REFERENCED, sid,
+                                    SecretReferenced(id=sid, character_id="mara", chapter_id="c1"))
+            else:
+                uncovered_ids.append(sid)
+        await proj.catch_up()
+
+        mining_out = MinedFactsOutput(secret_facts=[
+            MinedSecretFact(action="uses", id=sid, character_id="mara", chapter_id="c1")
+            for sid in secret_ids
+        ])
+        agent = ContinuityChecker(
+            FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events,
+        )
+        await agent.run_once()
+        await proj.catch_up()
+
+        if run_twice:
+            # A second run whose mining response, if ever invoked for this
+            # chapter, would try to recommit the same facts -- poll()'s
+            # mined_chapters exclusion must mean it's never called.
+            second_mining_runner = FakeRunner(mining_out)
+            agent2 = ContinuityChecker(
+                FakeRunner(ContinuityOutput()), second_mining_runner, read, committer, events,
+            )
+            await agent2.run_once()
+            await proj.catch_up()
+            assert second_mining_runner.calls == []
+
+        log = await events.events_since(0)
+        mined_markers = [e for e in log if e.event_type == EventType.CHAPTER_MINED
+                          and e.payload["chapter_id"] == "c1"]
+        mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED
+                      and e.payload.get("source") == "mined"]
+        return len(mined_markers), len(mined_refs)
+    finally:
+        await read.close(); await proj.close(); await events.close(); os.unlink(path)
+
+
+@given(
+    fact_count=st.integers(min_value=0, max_value=5),
+    run_twice=st.booleans(),
+)
+@hyp_settings(max_examples=25, deadline=None)
+def test_mining_the_same_chapter_twice_never_double_commits_idempotency(fact_count, run_twice):
+    """Idempotency invariant (M5.1 Locked decision 2): running run_once()
+    against the same un-mined chapter any number of times with arbitrary
+    mined-fact counts commits each distinct fact at most once, and always
+    ends with exactly one chapter.mined marker for that chapter -- the
+    marker absorbs repeat mining attempts regardless of what the second
+    run's FakeRunner would have returned.
+    """
+    uncovered_count = (fact_count + 1) // 2  # odd-indexed secrets, 0..fact_count-1
+    mined_marker_count, mined_ref_count = asyncio.run(_run_mining_idempotency(fact_count, run_twice))
+    assert mined_marker_count == 1
+    assert mined_ref_count <= uncovered_count
+
+
+async def test_poll_includes_threads_secrets_and_mined_chapters(stack):
+    from novelizer.canon.events import ThreadPlanted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.THREAD_PLANTED, "the-lost-heir",
+                        ThreadPlanted(id="the-lost-heir", name="The Lost Heir"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+
+    assert {s.id for s in ctx["secrets"]} == {"the-heir-lives"}
+    assert {t.id for t in ctx["threads"]} == {"the-lost-heir"}
+    assert {c.id for c in ctx["mined_chapters"]} == {"c1"}
+    assert ctx["thread_touch_pairs"] == set()
+
+
+async def test_m5_1_done_when_mechanical_chain(stack):
+    """M5.1 done-when (a), traced clause by clause -- see
+    docs/submilestones/M5-finish.md's M5.1 done-when cell and
+    docs/superpowers/plans/2026-07-18-novelizer-m5.1-prose-mining.md Task 9."""
+    from novelizer.canon.committer import GatingCommitter
+    from novelizer.canon.policy import AutonomyPolicy
+    from novelizer.canon.autonomy import AutonomyLevel
+    from novelizer.brain.leaks import find_leaks
+
+    events, proj, read, committer = stack
+
+    # --- Clause 1+2: seed a chapter's prose with an undeclared secret use
+    # (no secret.referenced event for it in the log) and a FakeRunner mining
+    # response declaring that use; run run_once() -> the resulting
+    # secret.referenced event exists, tagged source="mined".
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.CHAPTER_CREATED, "c1",
+                        Chapter(id="c1", title="One", prose="Mara knew the heir lived."))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1"),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    assert mined_refs[0].payload["character_id"] == "mara"
+
+    # --- Clause 3: find_leaks now flags it -- mining feeds the existing
+    # deterministic detector, doesn't bypass it.
+    matrix = await read.knowledge_matrix()
+    refs = await read.list_secret_references()
+    leaks = find_leaks(refs, matrix)
+    assert any(l.secret_id == "the-heir-lives" and l.character_id == "mara" for l in leaks)
+
+    # --- Clause 4: a second run_once() against the same chapter does not
+    # re-commit the same mined fact (idempotency via chapter.mined).
+    second_mining_runner = FakeRunner(mining_out)
+    agent2 = ContinuityChecker(FakeRunner(ContinuityOutput()), second_mining_runner, read, committer, events)
+    await agent2.run_once()
+    await proj.catch_up()
+
+    assert second_mining_runner.calls == []  # mined_chapters excluded c1
+
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
+    mined_markers = [e for e in log if e.event_type == EventType.CHAPTER_MINED and e.payload["chapter_id"] == "c1"]
+    assert len(mined_markers) == 1
+
+    # --- Clause 5: an ambiguous-mining fixture (known_id=False, unknown id)
+    # produces a retcon_request.created tagged MINED_SOURCE_TAG instead of a
+    # bad event.
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="A stranger spoke of something unclear."))
+    await proj.catch_up()
+
+    ambiguous_out = MinedFactsOutput(secret_facts=[
+        MinedSecretFact(action="uses", id="some-unknown-secret", character_id="mara", chapter_id="c2", known_id=False),
+    ])
+    agent3 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(ambiguous_out), read, committer, events)
+    await agent3.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    bad_events = [e for e in log if e.event_type in (EventType.SECRET_REFERENCED, EventType.SECRET_LEARNED)
+                  and e.payload.get("id") == "some-unknown-secret"]
+    assert bad_events == []
+    tagged_retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                      and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert any("some-unknown-secret" in e.payload["description"] for e in tagged_retcons)
+
+    # --- Clause 6: a mined-reveal fixture produces a retcon_request.created
+    # tagged MINED_SOURCE_TAG and NO secret.revealed event, at every
+    # autonomy level -- mined reveals never auto-commit. First under a
+    # plain Committer:
+    await events.append(EventType.CHAPTER_CREATED, "c3", Chapter(id="c3", title="Three", prose="The heir's truth came out."))
+    await proj.catch_up()
+
+    reveal_out = MinedFactsOutput(reveal_facts=[
+        MinedRevealFact(id="the-heir-lives", chapter_id="c3"),
+    ])
+    agent4 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(reveal_out), read, committer, events)
+    await agent4.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
+    retcons_after_c3 = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                        and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert any("the-heir-lives" in e.payload["description"] for e in retcons_after_c3)
+
+    # And explicitly under a GatingCommitter at AutonomyLevel.full_auto too,
+    # per the decomposition's literal "at every autonomy level" wording --
+    # mined reveals never auto-commit even when full_auto would let every
+    # other event type through ungated.
+    autonomy_state = await read.get_autonomy_state()
+    assert autonomy_state.global_level == AutonomyLevel.full_auto  # default; asserted, not set
+
+    await events.append(EventType.CHAPTER_CREATED, "c4", Chapter(id="c4", title="Four", prose="Another reveal, unspoken."))
+    await proj.catch_up()
+
+    gating_committer = GatingCommitter(events, AutonomyPolicy(read))
+    reveal_out_2 = MinedFactsOutput(reveal_facts=[
+        MinedRevealFact(id="the-heir-lives", chapter_id="c4"),
+    ])
+    agent5 = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(reveal_out_2), read, gating_committer, events)
+    await agent5.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
+    tagged_retcons_after = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+                            and e.payload["description"].startswith(MINED_SOURCE_TAG)]
+    assert len(tagged_retcons_after) >= len(retcons_after_c3) + 1

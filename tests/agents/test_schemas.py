@@ -1,3 +1,4 @@
+import pytest
 from novelizer.agents.base import ChapterDraft
 from novelizer.agents.schemas import (
     WorldEntryDraft, WorldEntriesDraft, CharacterUpdate, RetconDraft,
@@ -144,3 +145,40 @@ def test_chapter_draft_carries_knowledge_and_causal_intents():
     )
     assert d.knowledge_intents[0].title == "The Heir Lives"
     assert d.causal_intents[0].cause_chapter_id == "c1"
+
+
+def test_mined_facts_output_defaults_to_empty():
+    from novelizer.agents.schemas import MinedFactsOutput
+    out = MinedFactsOutput()
+    assert out.secret_facts == [] and out.reveal_facts == [] and out.thread_facts == [] and out.causal_facts == []
+
+
+def test_mined_secret_fact_defaults_known_id_true():
+    from novelizer.agents.schemas import MinedSecretFact
+    f = MinedSecretFact(action="uses", id="s1", character_id="mara", chapter_id="c1")
+    assert f.known_id is True
+
+
+def test_mined_secret_fact_can_declare_unknown_id():
+    from novelizer.agents.schemas import MinedSecretFact
+    f = MinedSecretFact(action="uses", id="s-guessed", character_id="mara", chapter_id="c1", known_id=False)
+    assert f.known_id is False
+
+
+def test_mined_reveal_fact_shape():
+    from novelizer.agents.schemas import MinedRevealFact
+    f = MinedRevealFact(id="s1", chapter_id="c1")
+    assert f.note == "" and f.known_id is True
+
+
+def test_mined_thread_fact_action_is_restricted():
+    from novelizer.agents.schemas import MinedThreadFact
+    import pydantic
+    with pytest.raises(pydantic.ValidationError):
+        MinedThreadFact(action="plant", id="t1", chapter_id="c1")
+
+
+def test_mined_causal_fact_has_no_known_id_field():
+    from novelizer.agents.schemas import MinedCausalFact
+    f = MinedCausalFact(cause_chapter_id="c1", effect_chapter_id="c2")
+    assert not hasattr(f, "known_id")
