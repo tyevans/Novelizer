@@ -1,10 +1,11 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import KeeperOutput
+from novelizer.brain.context import open_retcons_note
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.store.models import RetconRequest
+from novelizer.store.models import RetconRequest, RetconStatus
 
 SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world.
 You receive characters (with traits and arcs) and recent prose chapters. Your tasks:
@@ -13,7 +14,8 @@ You receive characters (with traits and arcs) and recent prose chapters. Your ta
 3. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
    in their lines, and revise it as their voice evolves across chapters.
 Return updated_characters (id + revised arc_status, and any corrected traits/motivations/backstory/voice)
-and retcon_requests (description, conflicting_entry_ids, proposed_resolution)."""
+and retcon_requests (description, conflicting_entry_ids, proposed_resolution). You may also be shown
+retcon requests already filed and still open: do not re-report those issues, even reworded."""
 
 
 class CharacterKeeper(BaseAgent):
@@ -38,6 +40,7 @@ class CharacterKeeper(BaseAgent):
             "characters": await self._read.list_characters(),
             "recent": chapters[-5:],
             "secrets": await self._read.list_secrets(),
+            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
         }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
@@ -46,7 +49,8 @@ class CharacterKeeper(BaseAgent):
         chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"])
         chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
         cast = f"\n\nIn character: {self.personality}" if self.personality else ""
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
+        retcons = open_retcons_note(ctx.get("open_retcons", []))
+        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -64,10 +68,18 @@ class CharacterKeeper(BaseAgent):
                     fields[f] = v
             updated = current.model_copy(update=fields)
             await self._committer.commit(self.name, EventType.CHARACTER_UPDATED, updated.id, updated)
-        for r in out.retcon_requests:
-            req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
-                                proposed_resolution=r.proposed_resolution)
-            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        if out.retcon_requests:
+            # Re-read the queue at commit time (not from ctx): the LLM call in
+            # work() is slow enough that another agent may have filed meanwhile.
+            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+            seen_descriptions = {r.description for r in open_reqs}
+            for r in out.retcon_requests:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
+                req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
+                                    proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
         await self._commit_knowledge_intents(
             out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})

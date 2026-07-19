@@ -631,3 +631,37 @@ async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
     assert len(tagged) == 1, f"expected the duplicate drift flag to dedup, got {len(tagged)} open voice retcons"
+
+
+from novelizer.store.models import RetconRequest
+
+
+async def test_editor_prompt_lists_open_voice_drift_retcons(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    req = RetconRequest(
+        description=f"{VOICE_SOURCE_TAG} clipped speech violated by mara: \"Well, I suppose we could.\"",
+        conflicting_entry_ids=["mara"], proposed_resolution="")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed (do not re-flag these lines)" in sent
+    assert 'violated by mara: "Well, I suppose we could."' in sent
+
+
+async def test_editor_prompt_ignores_non_voice_open_retcons(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    req = RetconRequest(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert sent == "Chapter title: One\n\nProse:\np"

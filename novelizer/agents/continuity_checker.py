@@ -4,6 +4,7 @@ from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
+from novelizer.brain.context import open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
@@ -18,7 +19,9 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are the Continuity Checker for a living fictional world. Review the given world
 entries, characters, and chapter excerpts for contradictions, anachronisms, or logical inconsistencies.
 Return retcon_requests, each with a description (what contradicts what), conflicting_entry_ids (the ids
-of the conflicting records), and a proposed_resolution. Return an empty list if you find nothing."""
+of the conflicting records), and a proposed_resolution. You may also be shown retcon requests already
+filed and still open: do not re-report those issues, even reworded. Return an empty list if you find
+nothing new."""
 
 MINING_SYSTEM_PROMPT = """You are the prose-mining pass of the Continuity Checker for a living fictional
 world. Read one chapter's prose plus the current knowledge matrix, active secret/thread ids, and causal
@@ -65,6 +68,7 @@ class ContinuityChecker(BaseAgent):
                              EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
         )
         return {
+            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
             "chapters": chapters[-10:],
@@ -83,7 +87,8 @@ class ContinuityChecker(BaseAgent):
         chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
         chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
         cast = f"\n\nIn character: {self.personality}" if self.personality else ""
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{cast}"
+        retcons = open_retcons_note(ctx.get("open_retcons", []))
+        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         out = result.get("structured_response")
 
@@ -229,6 +234,9 @@ class ContinuityChecker(BaseAgent):
 
         if out is not None:
             for r in out.retcon_requests:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
                 req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
                                     proposed_resolution=r.proposed_resolution)
                 await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)

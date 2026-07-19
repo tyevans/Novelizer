@@ -148,3 +148,64 @@ async def test_character_keeper_commit_with_no_knowledge_intents_emits_no_secret
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []
+
+
+from novelizer.store.models import RetconRequest
+
+
+async def _seed_keeper_scene(events, proj):
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira", traits="stoic", arc_status="wary"))
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mira wept openly."))
+    await proj.catch_up()
+
+
+async def _seed_open_retcon(events, proj, description="stoic vs weeping"):
+    req = RetconRequest(description=description, conflicting_entry_ids=["c1"], proposed_resolution="show restraint")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    return req
+
+
+async def test_poll_includes_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer)
+    ctx = await agent.poll()
+    assert [r.description for r in ctx["open_retcons"]] == ["stoic vs weeping"]
+
+
+async def test_work_prompt_lists_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_keeper_scene(events, proj)
+    await _seed_open_retcon(events, proj)
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed (do not re-report these)" in sent
+    assert "stoic vs weeping" in sent
+
+
+async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
+    events, proj, read, committer = stack
+    await _seed_keeper_scene(events, proj)
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed" not in sent
+
+
+async def test_retcon_matching_open_description_is_not_refiled(stack):
+    events, proj, read, committer = stack
+    await _seed_keeper_scene(events, proj)
+    await _seed_open_retcon(events, proj)
+    out = KeeperOutput(retcon_requests=[RetconDraft(
+        description="stoic vs weeping", conflicting_entry_ids=["c1"], proposed_resolution="show restraint")])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len([r for r in open_reqs if r.description == "stoic vs weeping"]) == 1
