@@ -84,6 +84,15 @@ class Runtime:
             return self._runner
         return builder(self.settings, callbacks=self._llm_callbacks)
 
+    def _phase_a_toolkit(self):
+        """(backend, tools) for pull-mode agents, or (None, None) when the
+        embeddings store isn't up yet. Built once per start()."""
+        from novelizer.canon_fs.backend import CanonBackend
+        from novelizer.canon_fs.search import build_search_canon_tool
+        backend = CanonBackend(self.read)
+        tools = [build_search_canon_tool(self.embeddings, self.read)]
+        return backend, tools
+
     def _chat_runner_for(self, agent_name: str):
         """Lazy per-agent chat runner. Injected fakes use key 'chat_<name>' in
         the runners dict; real runners are built on first use and cached."""
@@ -120,18 +129,25 @@ class Runtime:
         casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
         personalities = self.voice_pack.agent_personalities
         s = self.settings
+        backend, tools = self._phase_a_toolkit()
         provenance = {
             "model": s.author_model,
             "temperature": s.author_temperature,
             "voice_pack": self.voice_pack.name,
             "prose_profile": s.prose_profile,
         }
+        author_builder = build_author_runner
+        if s.author_tools_enabled:
+            author_builder = lambda settings, callbacks=None: build_author_runner(
+                settings, callbacks=callbacks, backend=backend, tools=tools,
+            )
         self.author = Author(
-            self._runner_for("author", build_author_runner), self.read, self.committer,
+            self._runner_for("author", author_builder), self.read, self.committer,
             interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
             provenance=provenance,
             prior_chapter_summary_chars=s.prior_chapter_summary_chars,
             staleness_threshold_chapters=s.staleness_threshold_chapters,
+            pull_mode=s.author_tools_enabled,
         )
         self.world_architect = WorldArchitect(
             self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
@@ -146,11 +162,17 @@ class Runtime:
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
             sag_spike_delta=s.sag_spike_delta,
         )
+        checker_builder = build_continuity_checker_runner
+        if s.checker_tools_enabled:
+            checker_builder = lambda settings, callbacks=None: build_continuity_checker_runner(
+                settings, callbacks=callbacks, backend=backend, tools=tools,
+            )
         self.continuity_checker = ContinuityChecker(
-            self._runner_for("continuity_checker", build_continuity_checker_runner),
+            self._runner_for("continuity_checker", checker_builder),
             self._runner_for("continuity_checker_mining", build_continuity_mining_runner, fallback_name="continuity_checker"),
             self.read, self.committer, self.events,
             interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
+            pull_mode=s.checker_tools_enabled,
         )
         self.retconner = Retconner(
             self._runner_for("retconner", build_retconner_runner), self.read, self.committer,
