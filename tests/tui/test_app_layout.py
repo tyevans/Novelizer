@@ -47,27 +47,21 @@ async def test_mission_control_panes_present_and_populate():
             deadline = time.monotonic() + 5.0
             statusbar_text = ""
             all_labels = []
-            # Under the M5.3 concurrency pool, agents complete in milliseconds
-            # and the bar names the in-flight set or the most recent completer
-            # -- WHICH agent is named at any sampled instant is a race, so the
-            # deterministic form of "the status bar shows the active agent" is
-            # that SOME roster agent is named, not "author" specifically.
-            _roster_names = (
-                "author", "world_architect", "character_keeper", "editor",
-                "continuity_checker", "retconner", "structure_analyst",
-            )
+            # The statusbar is now the glyph strip + dial: the cast's glyphs
+            # are always present once _statusbar_loop has run, and the dial
+            # renders 'AUTONOMY ▮...' — no agent names appear by design.
             while time.monotonic() < deadline:
                 await pilot.pause(0.2)
                 statusbar_text = str(app.query_one("#statusbar", Static).renderable)
                 tree = app.query_one("#browser", Tree)
                 all_labels = [str(n.label) for n in tree.root.children] + [str(c.label) for n in tree.root.children for c in n.children]
-                if any(n in statusbar_text for n in _roster_names) and (
+                if "AUTONOMY" in statusbar_text and (
                     any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
                 ):
                     break
-            # status bar shows the active agent; browser shows the authored chapter
-            assert any(n in statusbar_text for n in _roster_names)
-            assert "AUTONOMY" in statusbar_text
+            # statusbar shows the cast glyph strip and the dial; browser shows the authored chapter
+            assert "✎" in statusbar_text and "∿" in statusbar_text
+            assert "AUTONOMY ▮" in statusbar_text
             assert any("Chapter One" in l for l in all_labels) or any("Chapters (1" in l for l in all_labels)
     finally:
         await rt.close(); os.unlink(path)

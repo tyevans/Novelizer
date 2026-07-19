@@ -90,3 +90,56 @@ def test_summary_is_the_plain_strip_and_one_cell_pair_per_agent(rows):
     if status:
         # glyph+mark per agent, single-space-joined: 2 cells per agent + gaps
         assert len(strip.plain) == 3 * len(status) - 1
+
+
+from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+from novelizer.tui.widgets.roster import (
+    PLACEHOLDER_HINTS,
+    command_hint,
+    dial_meter,
+    status_strip,
+)
+
+
+def test_dial_meter_gated_canon_is_two_filled_segments():
+    meter = dial_meter(AutonomyState(global_level=AutonomyLevel.gated_canon))
+    assert meter.plain == "AUTONOMY ▮▮▯▯ gated_canon"
+
+
+def test_dial_meter_full_auto_all_filled_and_gated_all_one_filled():
+    full = dial_meter(AutonomyState(global_level=AutonomyLevel.full_auto))
+    assert full.plain == "AUTONOMY ▮▮▮▮ full_auto"
+    floor = dial_meter(AutonomyState(global_level=AutonomyLevel.gated_all))
+    assert floor.plain == "AUTONOMY ▮▯▯▯ gated_all"
+    mid = dial_meter(AutonomyState(global_level=AutonomyLevel.gated_retcons))
+    assert mid.plain == "AUTONOMY ▮▮▮▯ gated_retcons"
+
+
+def test_dial_meter_color_steps_with_trust():
+    full = dial_meter(AutonomyState(global_level=AutonomyLevel.full_auto))
+    styles = [(full.plain[s.start:s.end], str(s.style)) for s in full.spans]
+    assert ("▮▮▮▮", "green3") in styles
+    floor = dial_meter(AutonomyState(global_level=AutonomyLevel.gated_all))
+    styles = [(floor.plain[s.start:s.end], str(s.style)) for s in floor.spans]
+    assert ("▮", "red") in styles
+
+
+def test_dial_meter_summarizes_overrides_compactly():
+    meter = dial_meter(AutonomyState(
+        global_level=AutonomyLevel.full_auto,
+        overrides={"retconner": AutonomyLevel.gated_all},
+    ))
+    assert meter.plain == "AUTONOMY ▮▮▮▮ full_auto (retconner=gated_all)"
+
+
+def test_status_strip_composes_roster_then_dial():
+    strip = status_strip([_row("author")], AutonomyState(global_level=AutonomyLevel.gated_canon))
+    assert strip.plain == "✎·    AUTONOMY ▮▮▯▯ gated_canon"
+
+
+def test_command_hint_is_deterministic_and_wraps():
+    assert command_hint(0) == PLACEHOLDER_HINTS[0]
+    assert command_hint(len(PLACEHOLDER_HINTS)) == PLACEHOLDER_HINTS[0]
+    assert command_hint(2) == PLACEHOLDER_HINTS[2]
+    assert len(PLACEHOLDER_HINTS) == 4
+    assert all(h.startswith(":") for h in PLACEHOLDER_HINTS)

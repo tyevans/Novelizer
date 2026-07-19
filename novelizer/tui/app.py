@@ -7,10 +7,9 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
-from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
-from novelizer.tui.widgets.roster import roster_summary
+from novelizer.tui.widgets.roster import command_hint, status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
@@ -34,17 +33,6 @@ def format_event(ev: StoredEvent) -> str:
     return render_event(ev).plain
 
 
-def _status_line(state: AutonomyState) -> str:
-    base = (
-        f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
-        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings"
-    )
-    if state.overrides:
-        summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
-        base += f"  (overrides: {summary})"
-    return base
-
-
 class NovelizerApp(App):
     TITLE = "Novelizer — Mission Control"
     CSS_PATH = "app.tcss"
@@ -65,9 +53,10 @@ class NovelizerApp(App):
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime, hint_index: int = 0) -> None:
         super().__init__()
         self.runtime = runtime
+        self._hint_index = hint_index
         self._last_seq = 0
         self._chapter_count = 0
         self.messages: list[str] = []
@@ -95,11 +84,11 @@ class NovelizerApp(App):
                 with VerticalScroll(id="detail_scroll") as detail_scroll:
                     detail_scroll.border_title = "DETAIL"
                     yield Static("Select an item to view details.", id="detail")
-        yield Static("AUTONOMY: loading…", id="statusbar")
+        yield Static("loading…", id="statusbar")
         yield ActivityStrip("idle", id="activity_strip")
         # compact=True drops Input's default tall border, which would consume
         # both edges of the single row #command gets and leave 0 content lines.
-        yield Input(id="command", placeholder="command… (seed/focus/pause/resume)", compact=True)
+        yield Input(id="command", placeholder=command_hint(self._hint_index), compact=True)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -201,8 +190,8 @@ class NovelizerApp(App):
         while True:
             try:
                 state = await self.runtime.read.get_autonomy_state()
-                agents = roster_summary(self.runtime.scheduler.status())
-                self.query_one("#statusbar", Static).update(f"{agents}   |   {_status_line(state)}")
+                strip = status_strip(self.runtime.scheduler.status(), state)
+                self.query_one("#statusbar", Static).update(strip)
             except Exception as e:
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
