@@ -188,8 +188,17 @@ async def test_detail_view_theme_world_and_retcon(stack):
     assert retcon.title == "scar mismatch" and "Proposed: left hand" in retcon.body.plain
 
 
-async def test_detail_view_not_found_is_empty_titled(stack):
+async def test_detail_view_not_found_returns_none(stack):
     events, proj, read = stack
     for section in ("chapters", "characters", "world", "retcons", "threads", "themes", "nope"):
-        view = await detail_view(read, section, "ghost")
-        assert view.title == "" and view.body.plain == ""
+        assert await detail_view(read, section, "ghost") is None
+
+
+async def test_detail_view_empty_title_is_distinct_from_not_found(stack):
+    # A record that exists but has an empty title must NOT look like not-found.
+    events, proj, read = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="", prose="p"))
+    await proj.catch_up()
+    view = await detail_view(read, "chapters", "c1")
+    assert view is not None
+    assert view.title == ""
