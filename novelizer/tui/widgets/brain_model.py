@@ -23,6 +23,18 @@ from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
 
+WARN_STYLE = "yellow"
+
+SPARK_LEVELS = "▁▂▃▄▅▆▇█"
+SHAPE_GUTTER = "tension  "  # the marker row indents by this much to align under the spark
+
+
+def spark_char(tension: float) -> str:
+    """One block-glyph cell for one chapter's tension, clamped to [0, 1]."""
+    clamped = min(max(tension, 0.0), 1.0)
+    return SPARK_LEVELS[min(int(clamped * len(SPARK_LEVELS)), len(SPARK_LEVELS) - 1)]
+
+
 # One dim line each — the panel's designed quiet states. Secrets and
 # Causeway are verbatim from the design spec; Shape and Threads match the
 # same voice.
@@ -51,7 +63,9 @@ def chapter_label(chapter_id: str, chapters: list[Chapter]) -> str:
 
 @dataclass(frozen=True)
 class ShapeTab:
-    tensions: list[float]   # sparkline data, chapter order
+    tensions: list[float]   # chapter-order tension values (invariants/tests)
+    spark: Text | None      # "tension  ▂▅█" — one cell per chapter; None when empty
+    markers: Text | None    # "⚠" cells aligned under flagged chapters; None when no flags
     meta: Text              # axis + pacing line, or the dim empty state
     callouts: list[Text]    # one ALARM_STYLE line per sag/spike, chapter order
     alarm_count: int
@@ -66,13 +80,24 @@ def shape_tab(
     settings.sag_spike_delta via the app's _brain_loop (M5.3 single-sourcing);
     the default is the imported constant, never a re-typed literal."""
     if not scores:
-        return ShapeTab([], Text(SHAPE_EMPTY, style=DIM), [], 0)
+        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
     chapter_ids = {c.id for c in chapters}
     ordered = [by_chapter[c.id] for c in chapters if c.id in by_chapter]
     ordered += [s for cid, s in by_chapter.items() if cid not in chapter_ids]
     tensions = [s.tension for s in ordered]
     flags = detect_sag_spike(scores, delta)
+    spark = Text(SHAPE_GUTTER, style=DIM)
+    for s in ordered:
+        spark.append(spark_char(s.tension))
+    markers: Text | None = None
+    if any(s.chapter_id in flags for s in ordered):
+        markers = Text(" " * len(SHAPE_GUTTER))
+        for s in ordered:
+            if s.chapter_id in flags:
+                markers.append("⚠", style=ALARM_STYLE)
+            else:
+                markers.append(" ")
     callouts = [
         Text(f"⚠ {flags[s.chapter_id]}: {chapter_label(s.chapter_id, chapters)}", style=ALARM_STYLE)
         for s in ordered
@@ -81,7 +106,7 @@ def shape_tab(
     axis = f"ch 1 ▸ ch {len(tensions)}" if len(tensions) > 1 else "ch 1"
     pacing = ordered[-1].pacing_label
     meta = Text(f"{axis} · pacing: {pacing}" if pacing else axis, style=DIM)
-    return ShapeTab(tensions, meta, callouts, len(callouts))
+    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts))
 
 
 def thread_line(

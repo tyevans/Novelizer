@@ -107,7 +107,10 @@ only hides the least urgent); zoom shows all.
 
 ## Section 3 — Per-tab visual upgrades
 
-**Shape.** Compact keeps the `Sparkline` and gains a marker row beneath it —
+**Shape.** Compact replaces the `Sparkline` *widget* with a model-rendered text spark — one
+block cell per chapter, so the marker row beneath it aligns exactly (the widget
+scales data to its width, which makes per-chapter alignment impossible; the
+scaled full-width chart lives in P2's zoom mode) —
 sag/spike flags positioned under their chapters — plus the existing axis/pacing
 line:
 

@@ -3,10 +3,13 @@ from hypothesis import given, strategies as st
 from novelizer.store.models import Chapter, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.brain_model import (
     SHAPE_EMPTY,
+    SHAPE_GUTTER,
+    SPARK_LEVELS,
     THREADS_EMPTY,
     chapter_label,
     chapter_number,
     shape_tab,
+    spark_char,
     thread_line,
     threads_tab,
 )
@@ -39,6 +42,8 @@ def test_shape_tab_empty_is_one_dim_line_no_data():
     assert tab.meta.plain == SHAPE_EMPTY
     assert str(tab.meta.style) == "dim"
     assert tab.callouts == [] and tab.alarm_count == 0
+    assert tab.spark is None
+    assert tab.markers is None
 
 
 def test_shape_tab_single_score_axis_and_pacing():
@@ -112,6 +117,39 @@ def test_shape_tab_score_for_unknown_chapter_keeps_its_data_at_the_end():
     assert tab.tensions == [0.2, 0.9]
 
 
+def test_spark_char_maps_tension_onto_the_eight_block_levels():
+    assert spark_char(0.0) == "▁"
+    assert spark_char(1.0) == "█"
+    assert spark_char(0.6) == "▅"
+    assert spark_char(-3.0) == "▁"   # clamped low
+    assert spark_char(9.0) == "█"    # clamped high
+
+
+def test_shape_tab_spark_is_one_cell_per_chapter_after_the_gutter():
+    chs = _chapters("One", "Two", "Three")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.3, 0.5, 0.7])
+    ]
+    tab = shape_tab(scores, chs)
+    assert tab.spark.plain == SHAPE_GUTTER + "▃▅▆"
+    assert tab.markers is None                    # quiet story: no marker row
+
+
+def test_shape_tab_marker_row_aligns_alarm_glyphs_under_flagged_chapters():
+    chs = _chapters("One", "Two", "The Long Calm")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.6, 0.6, 0.1])    # c3 sags
+    ]
+    tab = shape_tab(scores, chs)
+    assert tab.markers.plain == " " * len(SHAPE_GUTTER) + "  ⚠"
+    marker_spans = [
+        (tab.markers.plain[s.start:s.end], str(s.style)) for s in tab.markers.spans
+    ]
+    assert ("⚠", ALARM_STYLE) in marker_spans
+
+
 @given(st.lists(st.floats(min_value=0.0, max_value=1.0), min_size=1, max_size=12))
 def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     chs = [Chapter(id=f"c{i}", title=f"T{i}", prose="p") for i in range(len(tensions))]
@@ -122,6 +160,7 @@ def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     tab = shape_tab(scores, chs)
     assert len(tab.tensions) == len(tensions)
     assert tab.alarm_count == len(tab.callouts)
+    assert len(tab.spark.plain) == len(SHAPE_GUTTER) + len(tensions)
 
 
 def test_thread_line_stale_names_last_touched_chapter_and_gap():
