@@ -6,7 +6,9 @@ from novelizer.runtime import Runtime
 from novelizer.canon.events import EventType, SecretCreated
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.chat.schemas import ChatReply
+from novelizer.chat.service import ChatService
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent
+from novelizer.store.models import Chapter
 
 
 class _R:
@@ -118,6 +120,49 @@ async def test_gated_intent_becomes_proposal(db_path):
         assert proposals[0].payload["proposing_agent"] == "author"
         assert proposals[0].payload["target_event_type"] == EventType.SECRET_REVEALED
         assert not [e for e in log if e.event_type == EventType.SECRET_REVEALED]
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_story_context_pull_mode_false_keeps_prose_excerpts(db_path):
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    try:
+        await rt.events.append(
+            EventType.CHAPTER_CREATED, "c1",
+            Chapter(id="c1", title="One", prose="secret prose text like a grudge"),
+        )
+        await rt.projector.catch_up()
+        service = ChatService(
+            rt.events, rt.read, rt.committer, rt._chat_runner_for,
+            lambda name: rt.voice_pack.agent_personalities.get(name, ""),
+        )
+        context = await service._story_context()
+        assert "secret prose text" in context
+        assert "Chapter index:" not in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_story_context_pull_mode_true_replaces_prose_with_chapter_map(db_path):
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    try:
+        await rt.events.append(
+            EventType.CHAPTER_CREATED, "c1",
+            Chapter(id="c1", title="One", prose="secret prose text like a grudge"),
+        )
+        await rt.projector.catch_up()
+        service = ChatService(
+            rt.events, rt.read, rt.committer, rt._chat_runner_for,
+            lambda name: rt.voice_pack.agent_personalities.get(name, ""),
+            pull_mode=True,
+        )
+        context = await service._story_context()
+        assert "secret prose text" not in context
+        assert "Chapter index:" in context
+        # map line shape pinned by brain.context.chapter_map_note
+        assert "cast:" in context
     finally:
         await rt.close()
 
