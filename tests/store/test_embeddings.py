@@ -86,3 +86,16 @@ async def test_search_kind_filter_and_empty(fake_store):
 async def test_search_unknown_kind_raises(fake_store):
     with pytest.raises(ValueError):
         await fake_store.search("x", kinds=["novel"])
+
+
+async def test_concurrent_writes_are_serialized_and_complete(fake_store):
+    import asyncio
+    chapters = [Chapter(id=f"ch{i}", title=f"T{i}", prose="p") for i in range(8)]
+    chars = [Character(id=f"c{i}", name=f"N{i}") for i in range(8)]
+    await asyncio.gather(
+        *[fake_store.upsert_chapter(c) for c in chapters],
+        *[fake_store.upsert_character(c) for c in chars],
+    )
+    assert fake_store._chapters.count() == 8
+    assert fake_store._chars.count() == 8
+    assert fake_store._write_lock.locked() is False

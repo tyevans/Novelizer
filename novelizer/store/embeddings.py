@@ -36,45 +36,59 @@ class EmbeddingStore:
         self._themes = self._client.get_or_create_collection("themes", embedding_function=ef)
         self._threads = self._client.get_or_create_collection("threads", embedding_function=ef)
         self._secrets = self._client.get_or_create_collection("secrets", embedding_function=ef)
+        # Writes ARE reachable concurrently: agent intent commits
+        # (novelizer/agents/intents.py) run as concurrent background tasks,
+        # and CanonIndexer.catch_up() runs on every TUI tick. chromadb's
+        # persistence is sqlite-backed, and unserialized cross-thread writes
+        # risk "database is locked" errors (see commit 17387ac). This lock
+        # serializes writes across all callers; asyncio.to_thread is what
+        # keeps the event loop responsive while a write is in flight.
+        self._write_lock = asyncio.Lock()
 
     def close(self) -> None:
         pass  # chromadb PersistentClient auto-flushes
 
     async def upsert_world_entry(self, entry: WorldEntry) -> None:
         text = f"{entry.title}\n{entry.body}"
-        await asyncio.to_thread(
-            self._world.upsert, ids=[entry.id], documents=[text], metadatas=[{"title": entry.title}]
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._world.upsert, ids=[entry.id], documents=[text], metadatas=[{"title": entry.title}]
+            )
 
     async def upsert_character(self, char: Character) -> None:
         text = f"{char.name}\n{char.traits}\n{char.backstory}"
-        await asyncio.to_thread(
-            self._chars.upsert, ids=[char.id], documents=[text], metadatas=[{"name": char.name}]
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._chars.upsert, ids=[char.id], documents=[text], metadatas=[{"name": char.name}]
+            )
 
     async def upsert_chapter(self, chapter: Chapter) -> None:
-        await asyncio.to_thread(
-            self._chapters.upsert,
-            ids=[chapter.id],
-            documents=[chapter.prose],
-            metadatas=[{"title": chapter.title}],
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._chapters.upsert,
+                ids=[chapter.id],
+                documents=[chapter.prose],
+                metadatas=[{"title": chapter.title}],
+            )
 
     async def upsert_theme(self, theme: ThemeRecord) -> None:
-        await asyncio.to_thread(
-            self._themes.upsert, ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}]
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._themes.upsert, ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}]
+            )
 
     async def upsert_thread(self, thread: ThreadRecord) -> None:
         text = f"{thread.name}\n{thread.last_note}" if thread.last_note else thread.name
-        await asyncio.to_thread(
-            self._threads.upsert, ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}]
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._threads.upsert, ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}]
+            )
 
     async def upsert_secret(self, secret: SecretRecord) -> None:
-        await asyncio.to_thread(
-            self._secrets.upsert, ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}]
-        )
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._secrets.upsert, ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}]
+            )
 
     async def delete(self, entity_id: str, collection: str) -> None:
         col = {
@@ -89,8 +103,10 @@ class EmbeddingStore:
         # would otherwise block the whole asyncio loop (see upsert_* -- same
         # reasoning: CPT-M3 now runs catch-up every TUI tick, so a blocking
         # call here freezes rendering each cycle whenever the embed endpoint
-        # is unreachable, not just once at startup).
-        await asyncio.to_thread(col.delete, ids=[entity_id])
+        # is unreachable, not just once at startup). The lock serializes this
+        # against concurrent upserts/deletes from agent commits and catch_up.
+        async with self._write_lock:
+            await asyncio.to_thread(col.delete, ids=[entity_id])
 
     async def query_world_entries(self, query: str, n: int = 5) -> list[WorldEntry]:
         if self._world.count() == 0:
