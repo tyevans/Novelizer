@@ -8,7 +8,7 @@ from novelizer.canon.events import StoredEvent, EventType
 from novelizer.canon.autonomy import AutonomyState
 from novelizer.director import commands
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
-from novelizer.tui.widgets.roster import AgentRoster
+from novelizer.tui.widgets.roster import roster_summary
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
@@ -97,7 +97,6 @@ class NovelizerApp(App):
         with Horizontal(id="body"):
             with Vertical(id="left"):
                 yield RichLog(highlight=False, markup=False, id="feed")
-                yield AgentRoster(id="roster")
                 yield Static("no pending proposals", id="proposals")
                 yield ThreadBoard("no threads yet", id="thread_board")
                 yield StoryShape("no chapters scored yet", id="story_shape")
@@ -117,7 +116,6 @@ class NovelizerApp(App):
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
-        self.run_worker(self._roster_loop(), exclusive=False)
         self.run_worker(self._browser_loop(), exclusive=False)
         self.run_worker(self._proposals_loop(), exclusive=False)
         self.run_worker(self._statusbar_loop(), exclusive=False)
@@ -166,14 +164,6 @@ class NovelizerApp(App):
                 self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)
 
-    async def _roster_loop(self) -> None:
-        while True:
-            try:
-                self.query_one("#roster", AgentRoster).update_from(self.runtime.scheduler.status())
-            except Exception as e:
-                self._report_worker_error("roster", e)
-            await asyncio.sleep(0.5)
-
     async def _browser_loop(self) -> None:
         while True:
             try:
@@ -195,7 +185,8 @@ class NovelizerApp(App):
         while True:
             try:
                 state = await self.runtime.read.get_autonomy_state()
-                self.query_one("#statusbar", Static).update(_status_line(state))
+                agents = roster_summary(self.runtime.scheduler.status())
+                self.query_one("#statusbar", Static).update(f"{agents}   |   {_status_line(state)}")
             except Exception as e:
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
