@@ -139,3 +139,69 @@ async def test_status_reports_last_error_and_clears_on_success():
     assert await sched.tick() == "flaky"
     st = {s["name"]: s for s in sched.status()}
     assert st["flaky"]["last_error"] is None
+
+
+class CapturingRecorder:
+    def __init__(self):
+        self.emitted = []
+
+    async def emit(self, event_type, aggregate_id, payload):
+        self.emitted.append((event_type, payload))
+
+    def in_llm_call(self, run_id):
+        return False
+
+
+async def test_tick_emits_scheduler_picked_for_the_chosen_agent():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
+    rec = CapturingRecorder()
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    await sched.tick()
+    picked = [p for t, p in rec.emitted if t == TelemetryEventType.SCHEDULER_PICKED]
+    assert [p.agent_name for p in picked] == ["b"]
+
+
+async def test_eligibility_changes_emit_once_not_per_tick():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.9, interval=10)
+    rec = CapturingRecorder()
+    now = [1000.0]
+    sched = Scheduler([a], StubRead(), clock=lambda: now[0], telemetry=rec)
+    await sched.tick()   # a ready -> runs -> interval consumed
+    now[0] = 1001.0
+    await sched.tick()   # a ineligible: "interval not elapsed"
+    now[0] = 1002.0
+    await sched.tick()   # still ineligible: same state -> NO new event
+    elig = [p for t, p in rec.emitted if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED]
+    assert [(p.agent_name, p.eligible, p.reason) for p in elig] == [
+        ("a", True, "ready"),
+        ("a", False, "interval not elapsed"),
+    ]
+
+
+async def test_paused_and_readiness_zero_reasons_are_reported():
+    from novelizer.telemetry.events import TelemetryEventType
+    a = StubAgent("a", 0.0)   # eligible by interval but readiness 0
+    b = StubAgent("b", 0.5)
+    b.pause()
+    rec = CapturingRecorder()
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    await sched.tick()  # nothing runs: a scores 0, b paused
+    elig = {p.agent_name: p for t, p in rec.emitted
+            if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
+    assert elig["a"].reason == "readiness 0" and elig["a"].eligible is False
+    assert elig["b"].reason == "paused" and elig["b"].eligible is False
+
+
+async def test_scheduler_without_telemetry_behaves_exactly_as_before():
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    assert await sched.tick() == "b"
+
+
+async def test_status_includes_next_ready_in_and_tolerates_stub_agents():
+    a = StubAgent("a", 0.9, interval=10)
+    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
+    st = sched.status()[0]
+    assert st["next_ready_in"] == 0.0  # StubAgent has no seconds_until_ready -> 0.0

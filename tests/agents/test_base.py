@@ -454,3 +454,10 @@ async def test_run_once_without_telemetry_is_silent_and_still_runs():
     agent = Quiet(runner=None, read_store=None, committer=None, interval=0, name="quiet")
     await agent.run_once()
     assert ran == [True]
+
+
+def test_seconds_until_ready_counts_down_and_floors_at_zero():
+    a = BaseAgent(runner=None, read_store=None, committer=None, interval=10, name="x")
+    a.mark_ran(now=100)
+    assert a.seconds_until_ready(now=104) == 6
+    assert a.seconds_until_ready(now=115) == 0

@@ -74,6 +74,9 @@ class BaseAgent:
     def mark_ran(self, now: float) -> None:
         self._last_run = now
 
+    def seconds_until_ready(self, now: float) -> float:
+        return max(0.0, self.interval - (now - self._last_run))
+
     async def readiness(self) -> float:
         return 0.0
 
