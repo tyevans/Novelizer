@@ -45,6 +45,7 @@ class Editor(BaseAgent):
             "chapters": await self._read.list_chapters(),
             "causal_edges": await self._read.list_causal_edges(),
             "themes": await self._read.list_themes(),
+            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -84,7 +85,22 @@ class Editor(BaseAgent):
                 "the prose shows a character planting, learning, revealing, or "
                 "using one:\n" + listing
             )
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}{secret_ids}"
+        # The Editor re-reviews the same draft every cycle; showing the LLM
+        # which voice-drift flags are already queued keeps it from burning
+        # output on repeats the commit-time dedup would drop anyway. Only
+        # VOICE_SOURCE_TAG-tagged requests belong here -- the rest of the
+        # queue is other checkers' business. Empty when none are open (prompt
+        # stays byte-identical, pinned by tests).
+        drift_filed = [
+            r.description.removeprefix(VOICE_SOURCE_TAG).strip()
+            for r in ctx.get("open_retcons", [])
+            if r.description.startswith(VOICE_SOURCE_TAG)
+        ]
+        drift = ""
+        if drift_filed:
+            listing = "\n".join(f"- {d}" for d in drift_filed[:20])
+            drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
+        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}{secret_ids}{drift}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

@@ -663,3 +663,37 @@ async def test_editor_constructor_threads_sag_spike_delta_through(stack):
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Pacing flags" in sent
+
+
+from novelizer.store.models import RetconRequest
+
+
+async def test_editor_prompt_lists_open_voice_drift_retcons(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    req = RetconRequest(
+        description=f"{VOICE_SOURCE_TAG} clipped speech violated by mara: \"Well, I suppose we could.\"",
+        conflicting_entry_ids=["mara"], proposed_resolution="")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed (do not re-flag these lines)" in sent
+    assert 'violated by mara: "Well, I suppose we could."' in sent
+
+
+async def test_editor_prompt_ignores_non_voice_open_retcons(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    req = RetconRequest(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert sent == "Chapter title: One\n\nProse:\np"

@@ -789,3 +789,66 @@ async def test_m5_1_done_when_mechanical_chain(stack):
     tagged_retcons_after = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
                             and e.payload["description"].startswith(MINED_SOURCE_TAG)]
     assert len(tagged_retcons_after) >= len(retcons_after_c3) + 1
+
+
+from novelizer.store.models import RetconRequest
+
+
+async def _seed_open_retcon(events, proj, description="two suns vs one"):
+    req = RetconRequest(description=description, conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await proj.catch_up()
+    return req
+
+
+async def test_poll_includes_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    assert [r.description for r in ctx["open_retcons"]] == ["two suns vs one"]
+
+
+async def test_work_prompt_lists_open_retcons(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed (do not re-report these)" in sent
+    assert "two suns vs one" in sent
+
+
+async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "already filed" not in sent
+
+
+async def test_llm_retcon_matching_open_description_is_not_refiled(stack):
+    events, proj, read, committer = stack
+    await _seed_open_retcon(events, proj)
+    llm_out = ContinuityOutput(retcon_requests=[RetconDraft(
+        description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")])
+    agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
+
+
+async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
+    events, proj, read, committer = stack
+    draft = RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
+    llm_out = ContinuityOutput(retcon_requests=[draft, draft])
+    agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1

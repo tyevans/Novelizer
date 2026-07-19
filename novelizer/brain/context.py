@@ -3,7 +3,9 @@ from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, stale_threads
 from novelizer.canon.secrets import knowledge_cell_state
-from novelizer.store.models import CausalEdgeRecord, Chapter, Character, SecretRecord, StructureScore, ThreadRecord
+from novelizer.store.models import (
+    CausalEdgeRecord, Chapter, Character, RetconRequest, SecretRecord, StructureScore, ThreadRecord,
+)
 
 
 def stale_threads_note(
@@ -64,6 +66,20 @@ def known_secrets_note(
     if not lines:
         return ""
     return "\n\nSecrets and who knows them:\n" + "\n".join(lines)
+
+
+def open_retcons_note(requests: list[RetconRequest]) -> str:
+    """Build the checker-facing prompt block listing retcon requests already
+    sitting open in the queue, so an LLM pass that re-reviews the same
+    material every cycle doesn't re-report a known issue under fresh wording
+    (exact-description dedup at commit time can't catch a reworded repeat).
+    Empty string when the queue is empty, so prompts stay byte-identical
+    whenever there is nothing to say.
+    """
+    if not requests:
+        return ""
+    lines = "\n".join(f"- {r.description}" for r in requests[:20])
+    return f"\n\nRetcon requests already filed (do not re-report these):\n{lines}"
 
 
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:
