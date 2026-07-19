@@ -49,7 +49,7 @@ class StructureAnalyst(BaseAgent):
         if not chapters:
             return None
         listing = "\n\n".join(f"Chapter id:{c.id} '{c.title}': {c.prose[:400]}" for c in chapters)
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         msg = f"Score these chapters:\n{listing}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")

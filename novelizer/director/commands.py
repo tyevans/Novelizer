@@ -1,10 +1,13 @@
 from __future__ import annotations
+import logging
 from novelizer.canon.events import EventType
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatus
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.settings.story_dir import StoryDirectory
 from novelizer.store.models import DirectorSignal, SignalKind
+
+logger = logging.getLogger(__name__)
 
 
 async def seed(events, text: str) -> None:
@@ -41,23 +44,25 @@ async def autonomy(events, state: AutonomyState) -> None:
     await events.append(EventType.AUTONOMY_CHANGED, "singleton", state)
 
 
-async def approve(events, read, proposal_id: str) -> str:
+async def approve(proposals: ProposalService, read, proposal_id: str) -> str:
     proposal = await read.get_proposal(proposal_id)
     if proposal is None:
         return f"Proposal not found: {proposal_id}"
     if proposal.status != ProposalStatus.open:
         return f"Proposal {proposal_id} is already {proposal.status.value}."
-    await ProposalService(events).approve(proposal)
+    await proposals.approve(proposal)
+    logger.info("approved proposal %s (%s)", proposal_id, proposal.target_event_type)
     return f"Approved proposal {proposal_id} ({proposal.target_event_type})"
 
 
-async def reject(events, read, proposal_id: str) -> str:
+async def reject(proposals: ProposalService, read, proposal_id: str) -> str:
     proposal = await read.get_proposal(proposal_id)
     if proposal is None:
         return f"Proposal not found: {proposal_id}"
     if proposal.status != ProposalStatus.open:
         return f"Proposal {proposal_id} is already {proposal.status.value}."
-    await ProposalService(events).reject(proposal)
+    await proposals.reject(proposal)
+    logger.info("rejected proposal %s (%s)", proposal_id, proposal.target_event_type)
     return f"Rejected proposal {proposal_id} ({proposal.target_event_type})"
 
 

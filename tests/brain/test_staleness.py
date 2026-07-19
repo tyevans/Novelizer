@@ -68,3 +68,9 @@ def test_staleness_boundary_holds_for_any_elapsed_count(elapsed):
     thread = ThreadRecord(id="t1", name="T", state=ThreadState.touched, last_chapter_id="c0")
     assert chapters_elapsed_since("c0", chs) == elapsed
     assert is_thread_stale(thread, chs) is (elapsed >= STALENESS_THRESHOLD_CHAPTERS)
+
+def test_find_stale_threads_respects_explicit_threshold():
+    chs = _chapters(3)  # two chapters elapsed since c0
+    thread = ThreadRecord(id="t1", name="T", state=ThreadState.planted, last_chapter_id="c0")
+    assert is_thread_stale(thread, chs, threshold=3) is False
+    assert is_thread_stale(thread, chs, threshold=1) is True

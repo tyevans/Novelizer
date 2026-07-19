@@ -144,9 +144,24 @@ class NovelizerApp(App):
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:
+        # Dispatched agents now run concurrently as background tasks, so a
+        # crashing agent no longer raises synchronously out of tick() (that
+        # would defeat the whole point of not awaiting dispatch) -- it's
+        # recorded in Scheduler.status()'s last_error instead. Poll for newly
+        # completed failing runs each cycle and surface them the same way a
+        # direct tick() exception would have been reported before concurrency.
+        # Dedup by run_count, not error text: repeated identical failures
+        # (e.g. the same agent crashing the same way every cycle) must each
+        # still be reported once per completed run.
+        reported_run_count: dict[str, int] = {}
         while True:
             try:
                 await self.runtime.scheduler.tick()
+                for s in self.runtime.scheduler.status():
+                    err = s["last_error"]
+                    if err and reported_run_count.get(s["name"]) != s["run_count"]:
+                        reported_run_count[s["name"]] = s["run_count"]
+                        self._report_worker_error("scheduler", RuntimeError(f"{s['name']}: {err}"))
             except Exception as e:
                 self._report_worker_error("scheduler", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
@@ -195,7 +210,9 @@ class NovelizerApp(App):
     async def _thread_board_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#thread_board", ThreadBoard).refresh_from(self.runtime.read)
+                await self.query_one("#thread_board", ThreadBoard).refresh_from(
+                    self.runtime.read, threshold=self.runtime.settings.staleness_threshold_chapters
+                )
             except Exception as e:
                 self._report_worker_error("thread_board", e)
             await asyncio.sleep(1.0)
@@ -203,7 +220,9 @@ class NovelizerApp(App):
     async def _story_shape_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#story_shape", StoryShape).refresh_from(self.runtime.read)
+                await self.query_one("#story_shape", StoryShape).refresh_from(
+                    self.runtime.read, delta=self.runtime.settings.sag_spike_delta
+                )
             except Exception as e:
                 self._report_worker_error("story_shape", e)
             await asyncio.sleep(1.0)

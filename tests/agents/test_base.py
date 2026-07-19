@@ -430,3 +430,115 @@ async def test_commit_theme_intents_noop_on_empty_list(stack):
     agent = BaseAgent(None, read, committer, interval=60, name="author")
     await agent._commit_theme_intents([], active_theme_ids=set())
     assert await events.events_since(0) == []
+
+
+async def test_commit_theme_intents_introduce_files_similarity_suggestion_retcon(stack, tmp_path):
+    from novelizer.store.embeddings import EmbeddingStore
+    from novelizer.store.models import RetconStatus
+    from tests.conftest import FakeEmbeddingFunction
+
+    events, proj, read, committer = stack
+    embedding_store = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
+    from novelizer.store.models import ThemeRecord
+    await embedding_store.upsert_theme(ThemeRecord(id="loss", title="The Cost of Ambition"))
+    from novelizer.canon.events import ThemeIntroduced
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="The Cost of Ambition"))
+    await proj.catch_up()
+
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="The Price of Ambition")],
+        active_theme_ids={"loss"},
+        embedding_store=embedding_store,
+    )
+    await proj.catch_up()
+
+    # No auto-merge: the new theme still commits as its own distinct id.
+    new_theme = await read.get_theme("the-price-of-ambition")
+    assert new_theme is not None
+
+    reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    assert len(reqs) == 1
+    assert "[source: theme_similarity]" in reqs[0].description
+    assert "loss" in reqs[0].description
+    assert "The Cost of Ambition" in reqs[0].description
+    embedding_store.close()
+
+
+async def test_commit_theme_intents_introduce_noop_when_no_embedding_store(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="Unwatched Theme")], active_theme_ids=set(),
+    )
+    await proj.catch_up()
+    theme = await read.get_theme("unwatched-theme")
+    assert theme is not None
+
+
+async def test_commit_knowledge_intents_normalizes_character_id_casing(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="s1", character_id="Kestrel")],
+        active_secret_ids={"s1"}, allowed_actions=frozenset({"learn"}),
+    )
+    log = await events.events_since(0, event_types=[EventType.SECRET_LEARNED])
+    assert len(log) == 1
+    assert log[0].payload["character_id"] == "kestrel"
+
+
+async def test_commit_knowledge_intents_normalizes_id_casing_for_membership_check(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="uses", id="S1", character_id="kestrel")],
+        active_secret_ids={"s1"},
+    )
+    log = await events.events_since(0, event_types=[EventType.SECRET_REFERENCED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "s1"
+
+
+async def test_commit_thread_intents_normalizes_touch_id_casing(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_thread_intents(
+        [ThreadIntent(action="touch", id="T1")], active_thread_ids={"t1"},
+    )
+    log = await events.events_since(0, event_types=[EventType.THREAD_TOUCHED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "t1"
+
+
+async def test_commit_theme_intents_normalizes_develop_id_casing(stack, caplog):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    with caplog.at_level("WARNING"):
+        await agent._commit_theme_intents(
+            [ThemeIntent(action="develop", id="Loss")], active_theme_ids={"loss"},
+        )
+    log = await events.events_since(0, event_types=[EventType.THEME_DEVELOPED])
+    assert len(log) == 1
+    assert log[0].payload["id"] == "loss"
+
+
+async def test_commit_causal_intents_normalizes_chapter_id_casing(stack, caplog):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_causal_intents(
+        [CausalIntent(cause_chapter_id="ABC123", effect_chapter_id="def456")],
+        valid_chapter_ids={"abc123", "def456"},
+    )
+    log = await events.events_since(0, event_types=[EventType.CAUSAL_EDGE_DECLARED])
+    assert len(log) == 1
+    assert log[0].payload["cause_chapter_id"] == "abc123"
+    assert log[0].payload["effect_chapter_id"] == "def456"
+
+
+def test_guarded_line_returns_labeled_value_when_present():
+    assert BaseAgent._guarded_line("In character", "gruff and terse") == "\n\nIn character: gruff and terse"
+
+
+def test_guarded_line_returns_empty_when_value_falsy():
+    assert BaseAgent._guarded_line("In character", "") == ""

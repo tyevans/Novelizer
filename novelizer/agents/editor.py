@@ -2,6 +2,7 @@ from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.brain.context import causal_flags_note, pacing_flags_note
+from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -24,9 +25,11 @@ class Editor(BaseAgent):
         interval: int = 120,
         casting_note: str = "",
         personality: str = "",
+        sag_spike_delta: float = SAG_SPIKE_DELTA,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="editor", personality=personality)
         self._casting_note = casting_note
+        self._sag_spike_delta = sag_spike_delta
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status=EditorialStatus.draft))
@@ -63,9 +66,9 @@ class Editor(BaseAgent):
             if self._casting_note
             else ""
         )
-        cast = f"\n\nIn character: {self.personality}" if self.personality else ""
+        cast = self._guarded_line("In character", self.personality)
         voices = await self._character_voices_block(ch.character_ids)
-        pacing = pacing_flags_note(ctx["scores"])
+        pacing = pacing_flags_note(ctx["scores"], delta=self._sag_spike_delta)
         chapter_order = [c.id for c in ctx["chapters"]]
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
         # Citation aid, not knowledge-state injection (that is Author-only per
@@ -93,7 +96,7 @@ class Editor(BaseAgent):
             updated = ch.model_copy(update={"editorial_status": EditorialStatus.reviewed, "editor_notes": verdict.notes})
             await self._committer.commit(self.name, EventType.CHAPTER_STATUS_CHANGED, updated.id, updated)
         else:
-            sig = DirectorSignal(kind=SignalKind.note, body=f"[Editor on '{ch.title}'] {verdict.notes}", target_agent="author")
+            sig = DirectorSignal(kind=SignalKind.revise, body=verdict.notes, target_agent="author", target_entity=ch.id)
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
         active_thread_ids = {
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES

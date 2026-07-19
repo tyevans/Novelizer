@@ -60,6 +60,22 @@ async def test_revise_keeps_draft_and_notes_author(stack):
     assert any("middle sags" in s.body for s in notes)
 
 
+async def test_editor_revise_verdict_commits_revise_signal_with_target_entity(stack):
+    from novelizer.store.models import SignalKind
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    agent = Editor(FakeRunner(EditorVerdict(verdict="revise", notes="fix pacing")), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    signals = await read.list_unconsumed_signals(target_agent="author")
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.kind == SignalKind.revise
+    assert sig.target_agent == "author"
+    assert sig.target_entity == "c1"
+
+
 async def test_editor_prompt_includes_active_prose_profile(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
@@ -631,3 +647,19 @@ async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
     assert len(tagged) == 1, f"expected the duplicate drift flag to dedup, got {len(tagged)} open voice retcons"
+
+
+async def test_editor_constructor_threads_sag_spike_delta_through(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                        AnnotationStructureScored(chapter_id="c1", tension=0.5, pacing_label="steady"))
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c2",
+                        AnnotationStructureScored(chapter_id="c2", tension=0.65, pacing_label="steady"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer, sag_spike_delta=0.05)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Pacing flags" in sent

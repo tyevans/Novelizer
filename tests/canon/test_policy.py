@@ -24,6 +24,7 @@ GATED_CASES = [
     (AutonomyLevel.gated_canon, EventType.CHARACTER_UPDATED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_STATUS_CHANGED, True),
+    (AutonomyLevel.gated_canon, EventType.CHAPTER_REVISED, True),
     (AutonomyLevel.gated_canon, EventType.RETCON_REQUEST_RESOLVED, True),
     (AutonomyLevel.gated_all, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_all, EventType.RETCON_REQUEST_CREATED, True),

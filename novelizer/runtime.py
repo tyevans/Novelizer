@@ -78,6 +78,8 @@ class Runtime:
             self._runner_for("author", build_author_runner), self.read, self.committer,
             interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
             provenance=provenance,
+            prior_chapter_summary_chars=s.prior_chapter_summary_chars,
+            staleness_threshold_chapters=s.staleness_threshold_chapters,
         )
         self.world_architect = WorldArchitect(
             self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
@@ -90,6 +92,7 @@ class Runtime:
         self.editor = Editor(
             self._runner_for("editor", build_editor_runner), self.read, self.committer,
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
+            sag_spike_delta=s.sag_spike_delta,
         )
         self.continuity_checker = ContinuityChecker(
             self._runner_for("continuity_checker", build_continuity_checker_runner),
@@ -109,7 +112,7 @@ class Runtime:
             self.world_architect, self.character_keeper, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
-        self.scheduler = Scheduler(self.agents, self.read)
+        self.scheduler = Scheduler(self.agents, self.read, max_concurrent_agents=s.max_concurrent_agents)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -134,6 +137,11 @@ class Runtime:
             elif key in interval_map:
                 for agent in interval_map[key]:
                     agent.interval = getattr(new, key)
+                applied.append(key)
+            elif key == "max_concurrent_agents":
+                # Read fresh per-tick, no cached construction to rebuild --
+                # applies live, same as cadence settings.
+                self.scheduler._max_concurrent = new.max_concurrent_agents
                 applied.append(key)
             else:
                 applied.append(key)
