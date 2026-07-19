@@ -63,7 +63,7 @@ async def test_keys_1_to_4_switch_brain_tabs():
 
 @pytest.mark.asyncio
 async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
-    from textual.widgets import Sparkline, Static
+    from textual.widgets import Static
 
     app, rt, path = await _app()
     try:
@@ -73,7 +73,7 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert str(app.query_one("#threads_body", Static).renderable) == THREADS_EMPTY
             assert str(app.query_one("#secrets_body", Static).renderable) == SECRETS_EMPTY
             assert str(app.query_one("#causeway_body", Static).renderable) == CAUSEWAY_EMPTY
-            assert not app.query_one("#shape_spark", Sparkline).display
+            assert not app.query("#shape_spark")   # the widget is gone entirely
             assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause"
     finally:
         await rt.close(); os.unlink(path)

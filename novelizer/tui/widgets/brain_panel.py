@@ -1,15 +1,17 @@
 """The Story Brain panel: one TabbedContent over the four brain views.
 
 Thin Textual shell — every rendered string/Text comes from the pure
-brain_model functions; this widget only fetches ReadStore data once per
-refresh and places the results. No selection/targeting inside tabs (Phase 3).
+brain_model functions; this includes spark lines, which are model-rendered
+text (one block cell per chapter, e.g. "tension  ▃▅▆"). This widget only
+fetches ReadStore data once per refresh and places the results. No
+selection/targeting inside tabs (Phase 3).
 """
 from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Sparkline, Static, TabbedContent, TabPane
+from textual.widgets import Static, TabbedContent, TabPane
 
 from novelizer.tui.widgets.brain_model import (
     alarm_strip,
@@ -32,7 +34,6 @@ class BrainPanel(Vertical):
     def compose(self) -> ComposeResult:
         with TabbedContent(id="brain_tabs"):
             with TabPane("1 Shape", id="tab_shape"):
-                yield Sparkline([], id="shape_spark")
                 yield Static("", id="shape_body")
             with TabPane("2 Threads", id="tab_threads"):
                 yield Static("", id="threads_body")
@@ -55,10 +56,8 @@ class BrainPanel(Vertical):
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
 
-        spark = self.query_one("#shape_spark", Sparkline)
-        spark.display = bool(shape.tensions)
-        spark.data = shape.tensions
-        self.query_one("#shape_body", Static).update(_joined([shape.meta, *shape.callouts]))
+        shape_rows = [r for r in (shape.spark, shape.markers, shape.meta) if r is not None]
+        self.query_one("#shape_body", Static).update(_joined([*shape_rows, *shape.callouts]))
         self.query_one("#threads_body", Static).update(_joined(threads.lines))
         self.query_one("#secrets_body", Static).update(_joined(secrets.lines))
         self.query_one("#causeway_body", Static).update(_joined(cause.lines))

@@ -188,14 +188,13 @@ async def test_story_brain_threads_and_shape_tabs_populate():
         await rt.projector.catch_up()
         app = NovelizerApp(rt)
         async with app.run_test() as pilot:
-            from textual.widgets import Sparkline, Static
+            from textual.widgets import Static
             await pilot.pause(0.5)
             threads_text = str(app.query_one("#threads_body", Static).renderable)
             shape_text = str(app.query_one("#shape_body", Static).renderable)
-            spark = app.query_one("#shape_spark", Sparkline)
             assert "The Locket" in threads_text
             assert "the-locket" not in threads_text          # no ids on the dashboard
-            assert list(spark.data) == [0.6] and spark.display
+            assert shape_text.splitlines()[0] == "tension  ▅"   # 0.6 → level 4 of 8
             assert "pacing: rising" in shape_text
             assert "c1" not in shape_text                    # no ids on the dashboard
     finally:
