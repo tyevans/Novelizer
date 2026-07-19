@@ -34,6 +34,10 @@ async def _with_runtime(settings, fn):
     await rt.projector.init()
     await rt.read.init()
     await rt.projector.catch_up()
+    # Same ProposalService construction path Runtime.start() uses, without the
+    # LLM agents/runners a store-only CLI command doesn't need.
+    from novelizer.canon.proposal_service import ProposalService
+    rt.proposals = ProposalService(rt.events)
     try:
         return await fn(rt)
     finally:
@@ -345,7 +349,7 @@ def proposals(ctx):
 def approve(ctx, proposal_id: str):
     """Approve a pending proposal — appends its target event + proposal.approved."""
     async def _run(rt: Runtime):
-        result = await commands.approve(rt.events, rt.read, proposal_id)
+        result = await commands.approve(rt.proposals, rt.read, proposal_id)
         console.print(f"[green]{result}[/green]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
@@ -356,7 +360,7 @@ def approve(ctx, proposal_id: str):
 def reject(ctx, proposal_id: str):
     """Reject a pending proposal — appends proposal.rejected."""
     async def _run(rt: Runtime):
-        result = await commands.reject(rt.events, rt.read, proposal_id)
+        result = await commands.reject(rt.proposals, rt.read, proposal_id)
         console.print(f"[yellow]{result}[/yellow]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
