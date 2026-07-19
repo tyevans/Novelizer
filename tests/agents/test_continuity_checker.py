@@ -246,7 +246,7 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     matrix = await read.knowledge_matrix()
     row = secret_row(secret, characters, matrix).plain
     assert "●" not in row          # no filled cell — Kestrel hasn't learned it
-    assert "no one knows" in row
+    assert "0/1" in row            # spread meter shows 0 knowers among 1 character
 
 
 from novelizer.brain.mining import MINED_SOURCE_TAG
