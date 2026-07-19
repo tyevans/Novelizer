@@ -63,6 +63,10 @@ for name in seed chapters read retcons voices autonomy; do
 done
 
 echo "==> Running: novelizer voices (empty config, fresh DB path)"
+# NOTE: NOVELIZER_DB_PATH is NOT a real env override (no EnvOverrides field) —
+# it is inert. The actual isolation here comes from cd-ing into $RUN_DIR, since
+# with no config the CLI resolves its story location relative to cwd. The var is
+# kept only as belt-and-suspenders documentation of intent.
 DB_PATH="$RUN_DIR/smoke.db"
 voices_output="$(cd "$RUN_DIR" && XDG_CONFIG_HOME="$XDG_CONFIG_HOME_ISOLATED" NOVELIZER_DB_PATH="$DB_PATH" "$BINARY" voices 2>&1)"
 voices_exit=$?

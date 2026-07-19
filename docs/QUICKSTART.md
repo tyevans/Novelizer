@@ -122,7 +122,8 @@ novelizer autonomy full_auto
 ```
 
 or, from the TUI command input: `autonomy full_auto` (optionally with a per-agent override,
-e.g. `autonomy gated_retcons Editor`).
+e.g. `autonomy gated_retcons editor` — the agent id is lowercase; a display-cased name like
+`Editor` creates a silently-ineffective override).
 
 *Verified against: `novelizer/director/cli.py`'s `autonomy` command and the level names in
 `novelizer/canon/autonomy.py`'s `AutonomyLevel`.*
