@@ -393,6 +393,11 @@ The lifecycle the blueprint enables, all in the existing steering model:
 8. **Converge** — as beats fulfill and windows close, the Plotter steers
    remaining threads toward the climax window; `blueprint.retargeted` if the
    book is running long or short.
+9. **Land** — when the completion criteria hold (beats fulfilled, promises
+   paid or released, arcs resolved), the room writes the denouement and the
+   story is declared complete (`book.completed`, specced in M11). The
+   blueprint is what makes an *ending* a first-class, detectable state
+   rather than the Director deciding to stop the loop.
 
 Steps 4–7 loop; the blueprint is a living aggregate, not a waterfall artifact.
 
@@ -427,20 +432,28 @@ Standing rule: **all test runs in a worktree, never the main checkout.**
 
 ## Milestones
 
-- **M6a — Ledger & resolution pacing** (smallest slice, immediate value, no
-  new agent): promise events + `thread.resolution_planned` +
-  `secret.reveal_planned`, projections, `ledger.py` +
-  `resolution_pacing.py`, Threads-tab extensions. The Author gains
-  `PromiseIntent` (it plants and pays off in prose); the ContinuityChecker
-  gains both intents via mining; resolution windows come from Director
-  signals until the Plotter exists in M6b.
-- **M6b — Blueprint & Plotter**: blueprint/beat/brief aggregates, the Plotter
-  agent, Author brief consumption, `beat_drift.py` + `tension_target.py`,
-  Outline board tab, OutlineBackend. Requires pull-tools §4 wiring first.
-- **M6c — Arcs**: arc aggregate, CharacterKeeper ArcIntent, `arc_alignment.py`,
-  Arcs tab.
-- **M6d — Skills & workspace**: skills packs, `/workspace/` mount, per-agent
-  skills assignment, chat-persona craft access.
+This design is the spine of **Phase 2 — The Room Authors (M6–M11)** in
+[`docs/MILESTONES.md`](../../MILESTONES.md), which is authoritative for
+sequencing, "done when" acceptance, and status. Mapping:
+
+- **M6 — Deep Read**: pull-tools §4 wiring (the prerequisite, shipped as its
+  own value slice — long-book coherence improves before any planning exists).
+- **M7 — The Ledger**: promise events + `thread.resolution_planned` +
+  `secret.reveal_planned`, projections, `ledger.py` + `resolution_pacing.py`,
+  Threads-tab extensions. The Author gains `PromiseIntent` (it plants and
+  pays off in prose); the ContinuityChecker gains both intents via mining;
+  resolution windows come from Director signals until the Plotter exists in
+  M8. Needs only intents — can run in parallel with M6.
+- **M8 — The Blueprint**: blueprint/beat/brief aggregates, the Plotter agent,
+  Author brief consumption, `beat_drift.py` + `tension_target.py`, Outline
+  board tab, OutlineBackend. Requires M6.
+- **M9 — Arcs**: arc aggregate, CharacterKeeper ArcIntent,
+  `arc_alignment.py`, Arcs tab.
+- **M10 — Craft**: skills packs, `/workspace/` mount, per-agent skills
+  assignment, chat-persona craft access.
+- **M11 — Landing**: completion criteria over the blueprint, retargeting
+  flow, `book.completed`, Frame step in the setup wizard, Outline board as
+  the home Brain tab — the phase's endgame (a book that *finishes*).
 
 Each milestone follows spec → plan → red/green TDD → review, per the standing
 gates.
