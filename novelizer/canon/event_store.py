@@ -82,3 +82,10 @@ class EventStore:
             )
         rows = await cur.fetchall()
         return [_row_to_event(r) for r in rows]
+
+    async def events_for_aggregate(self, aggregate_id: str) -> list[StoredEvent]:
+        cur = await self._conn.execute(
+            f"SELECT {_COLS} FROM events WHERE aggregate_id=? ORDER BY sequence",
+            (aggregate_id,),
+        )
+        return [_row_to_event(r) for r in await cur.fetchall()]

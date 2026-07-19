@@ -18,6 +18,8 @@ from novelizer.agents.continuity_checker import (
 from novelizer.agents.retconner import Retconner, build_retconner_runner
 from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
 from novelizer.voices.loader import load_voice_pack
+from novelizer.chat.service import ChatService
+from novelizer.chat.runners import build_chat_runner
 
 
 class Runtime:
@@ -42,6 +44,8 @@ class Runtime:
         self.scheduler: Optional[Scheduler] = None
         self.voice_pack = None
         self.active_prose_profile = None
+        self.chat: Optional[ChatService] = None
+        self._chat_runner_cache: dict[str, object] = {}
 
     def _runner_for(self, name: str, builder):
         if self._runners is not None:
@@ -54,6 +58,16 @@ class Runtime:
         if name == "author" and self._runner is not None:
             return self._runner
         return builder(self.settings)
+
+    def _chat_runner_for(self, agent_name: str):
+        """Lazy per-agent chat runner. Injected fakes use key 'chat_<name>' in
+        the runners dict; real runners are built on first use and cached."""
+        key = f"chat_{agent_name}"
+        if self._runners is not None and key in self._runners:
+            return self._runners[key]
+        if key not in self._chat_runner_cache:
+            self._chat_runner_cache[key] = build_chat_runner(self.settings, agent_name)
+        return self._chat_runner_cache[key]
 
     async def start(self) -> None:
         await self.events.init()
@@ -110,6 +124,10 @@ class Runtime:
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
         self.scheduler = Scheduler(self.agents, self.read)
+        self.chat = ChatService(
+            self.events, self.read, self.committer, self._chat_runner_for,
+            lambda name: self.voice_pack.agent_personalities.get(name, ""),
+        )
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -176,6 +194,8 @@ class Runtime:
             self.continuity_checker._mining_runner = build_continuity_mining_runner(stored)
             self.retconner._runner = build_retconner_runner(stored)
             self.structure_analyst._runner = build_structure_analyst_runner(stored)
+        if ("agent_temperature" in changed or "author_temperature" in changed) and rebuild:
+            self._chat_runner_cache.clear()
 
         if self.author is not None and self.author.provenance is not None:
             self.author.provenance = {
