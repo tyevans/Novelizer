@@ -107,6 +107,38 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_trace_line_formats_tool_call_events():
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "query text"})
+    assert "search_web" in trace_line(started)
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2, "output_chars": 200})
+    assert "search_web" in trace_line(finished)
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                 {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                  "duration_s": 0.5, "error_type": "ValueError", "error_message": "bad"})
+    assert "search_web" in trace_line(failed)
+
+
+def test_trace_line_sanitizes_tool_call_input_summary():
+    """Fix 5: newlines in a tool's input_summary must not break the single-line
+    trace rendering, and long inputs must be capped for display."""
+    noisy = _ev(9, TelemetryEventType.TOOL_CALL_STARTED,
+                {"run_id": "r1", "agent_name": "author", "tool_name": "grep",
+                 "input_summary": "line one\nline two\nline three"})
+    line = trace_line(noisy)
+    assert "\n" not in line
+    assert "␤" in line
+
+    long_input = _ev(10, TelemetryEventType.TOOL_CALL_STARTED,
+                      {"run_id": "r1", "agent_name": "author", "tool_name": "grep",
+                       "input_summary": "x" * 500})
+    long_line = trace_line(long_input)
+    assert len(long_line) < 500 + 50
+
+
 @given(st.lists(st.sampled_from([
     TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FINISHED,
     TelemetryEventType.LLM_CALL_STARTED, TelemetryEventType.LLM_CALL_FINISHED,

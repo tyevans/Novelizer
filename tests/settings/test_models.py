@@ -60,9 +60,22 @@ def test_prior_chapter_summary_chars_default_is_200():
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS
 
 
+def test_keeper_prose_chars_default_is_6000():
+    assert EffectiveSettings().keeper_prose_chars == 6000
+    assert "keeper_prose_chars" in STORY_OVERRIDABLE_KEYS
+
+
 def test_staleness_and_sag_spike_defaults():
     s = EffectiveSettings()
     assert s.staleness_threshold_chapters == 3
     assert s.sag_spike_delta == 0.3
     assert "staleness_threshold_chapters" in STORY_OVERRIDABLE_KEYS
     assert "sag_spike_delta" in STORY_OVERRIDABLE_KEYS
+
+
+def test_author_and_checker_tools_enabled_defaults():
+    s = EffectiveSettings()
+    assert s.author_tools_enabled is True
+    assert s.checker_tools_enabled is True
+    assert "author_tools_enabled" in STORY_OVERRIDABLE_KEYS
+    assert "checker_tools_enabled" in STORY_OVERRIDABLE_KEYS

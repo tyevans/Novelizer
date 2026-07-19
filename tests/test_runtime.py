@@ -460,3 +460,47 @@ async def test_mining_runner_falls_back_to_parent_checker_fake(settings):
         assert rt.continuity_checker._mining_runner is checker_fake
     finally:
         await rt.close()
+
+
+async def test_runtime_flags_on_wire_pull_mode_for_author_and_checker(settings):
+    settings = settings.model_copy(update={
+        "author_tools_enabled": True, "checker_tools_enabled": True,
+    })
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        assert rt.author.pull_mode is True
+        assert rt.continuity_checker.pull_mode is True
+    finally:
+        await rt.close()
+
+
+async def test_runtime_flags_off_leave_pull_mode_false(settings):
+    settings = settings.model_copy(update={
+        "author_tools_enabled": False, "checker_tools_enabled": False,
+    })
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        assert rt.author.pull_mode is False
+        assert rt.continuity_checker.pull_mode is False
+    finally:
+        await rt.close()
+
+
+async def test_runtime_start_completes_with_flags_on_and_no_fake_author(settings):
+    """Flags on, author NOT in the injected runners dict: start() must build
+    the real author via the toolkit-wrapped closure without touching the
+    network (builders construct lazily; nothing calls ainvoke here)."""
+    settings = settings.model_copy(update={
+        "author_tools_enabled": True, "checker_tools_enabled": True,
+    })
+    runners = _all_fake_runners()
+    runners.pop("author", None)
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.author is not None
+        assert rt.author.pull_mode is True
+    finally:
+        await rt.close()

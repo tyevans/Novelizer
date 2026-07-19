@@ -13,8 +13,9 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "author_temperature", "agent_temperature",
     "author_interval", "default_agent_interval",
     "continuity_interval", "structure_analyst_interval", "projector_interval", "muse_interval",
-    "prior_chapter_summary_chars", "staleness_threshold_chapters", "sag_spike_delta",
+    "prior_chapter_summary_chars", "keeper_prose_chars", "staleness_threshold_chapters", "sag_spike_delta",
     "muse_era", "muse_exclusion_hands",
+    "author_tools_enabled", "checker_tools_enabled",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -45,6 +46,10 @@ class EffectiveSettings(BaseModel):
     llm_max_tokens: int = 4096
     # Chars of prior-chapter prose shown to the Author as context.
     prior_chapter_summary_chars: int = 200
+    # Chars of each recent chapter shown to the Character Keeper. Must cover
+    # whole chapters — characters introduced late in a chapter are invisible
+    # to discovery otherwise.
+    keeper_prose_chars: int = 6000
     # Chapters elapsed since a thread's last touch before it's flagged stale.
     staleness_threshold_chapters: int = 3
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
@@ -73,3 +78,7 @@ class EffectiveSettings(BaseModel):
     default_stories_dir: str = "stories"
     last_opened_story: str | None = None
     suppress_flat_migration_prompt: bool = False
+
+    # Tool enablement: whether Author and Checker agents can use external tools.
+    author_tools_enabled: bool = True
+    checker_tools_enabled: bool = True

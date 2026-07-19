@@ -127,6 +127,9 @@ elsewhere to cut schema weight.
 
 - Chapter excerpts in `poll()`-built prompts → map lines:
   `- [id] 'Title' (status) cast: names`.
+  *(As delivered in CPT-M4 the cast field carries `character_ids`, not
+  names — ids feed the cite-ids discipline and names live one `read_file`
+  away.)*
 - System prompts gain a short retrieval instruction: the map is an index;
   read or search what you need before writing/judging.
 - World/character/brain notes (staleness, who-knows-what, causal flags,
