@@ -102,3 +102,12 @@ def test_render_theme():
     out = render_theme(th)
     assert "id: th1" in out and "kind: theme" in out
     assert "touch_count: 2" in out and "last_chapter_id: ch4" in out
+
+
+def test_frontmatter_values_with_newlines_cannot_inject_lines():
+    c = Character(name="Mara", traits="stubborn\nid: fake-id\n---\nrogue: line")
+    out = render_character(c, {}, [])
+    fm_block = out.split("---")[1]
+    id_lines = [l for l in fm_block.splitlines() if l.startswith("id:")]
+    assert id_lines == [f"id: {c.id}"]
+    assert "rogue: line" not in fm_block

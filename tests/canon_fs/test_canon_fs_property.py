@@ -34,3 +34,5 @@ def test_render_chapter_always_carries_exact_id(title, prose):
     out = render_chapter(ch)
     assert f"id: {ch.id}" in out
     assert out.startswith("---\n")
+    fm_block = out.split("---")[1]
+    assert [l for l in fm_block.splitlines() if l.startswith("id:")] == [f"id: {ch.id}"]

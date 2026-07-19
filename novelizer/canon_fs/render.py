@@ -4,7 +4,8 @@ from novelizer.canon.secrets import knowledge_cell_state
 
 
 def _frontmatter(pairs: list[tuple[str, str]]) -> str:
-    lines = "\n".join(f"{k}: {v}" for k, v in pairs if v != "")
+    sanitized = [(k, " ".join(str(v).split())) for k, v in pairs]
+    lines = "\n".join(f"{k}: {v}" for k, v in sanitized if v != "")
     return f"---\n{lines}\n---\n"
 
 
