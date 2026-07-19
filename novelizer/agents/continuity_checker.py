@@ -267,14 +267,14 @@ class ContinuityChecker(BaseAgent):
         await self.commit(out, ctx, mined)
 
 
-def build_continuity_checker_runner(settings):
+def build_continuity_checker_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens)
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
 
 
-def build_continuity_mining_runner(settings):
+def build_continuity_mining_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from langchain.agents.structured_output import ProviderStrategy
     from novelizer.agents.llm import build_chat_model
@@ -284,7 +284,7 @@ def build_continuity_mining_runner(settings):
     # at completion_tokens=4096).
     model = build_chat_model(
         settings.agent_model, settings.llm_base_url, settings.llm_api_key,
-        temperature=0.2, max_tokens=settings.llm_max_tokens,
+        temperature=0.2, max_tokens=settings.llm_max_tokens, callbacks=callbacks,
     )
     # ProviderStrategy pushes the schema to the endpoint as OpenAI json_schema
     # response_format; llama.cpp grammar-constrains decoding, so local models
