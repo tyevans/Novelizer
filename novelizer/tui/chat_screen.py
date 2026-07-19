@@ -1,8 +1,11 @@
 from __future__ import annotations
 import asyncio
+import logging
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Footer, Input, RichLog, Tab, Tabs
+
+logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL = 0.5
 
@@ -72,8 +75,8 @@ class ChatScreen(Screen):
         while True:
             try:
                 await self._refresh()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("chat screen refresh failed: %s", e)
             await asyncio.sleep(_POLL_INTERVAL)
 
     async def _refresh(self) -> None:
