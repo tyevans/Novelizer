@@ -677,3 +677,30 @@ def test_no_pass_means_plain_interval_gate():
 def test_pass_constants():
     assert PASS_BACKOFF_MULTIPLIER == 3
     assert DEFAULT_PASS_REMARK == "Nothing needs my attention — carry on with the story."
+
+
+class _WatermarkAgent(BaseAgent):
+    def __init__(self, fp):
+        super().__init__(runner=None, read_store=None, committer=None, interval=0)
+        self.fp = fp
+
+    async def _fingerprint(self):
+        return self.fp
+
+    async def readiness(self) -> float:
+        return await self._gate_on_watermark(0.5)
+
+
+async def test_watermark_zeroes_readiness_until_state_changes():
+    agent = _WatermarkAgent((1, "ch1"))
+    assert await agent.readiness() == 0.5      # never ran: full score
+    await agent._record_watermark()
+    assert await agent.readiness() == 0.0      # same state: gated
+    agent.fp = (2, "ch2")
+    assert await agent.readiness() == 0.5      # external change: restored
+
+
+async def test_default_fingerprint_disables_watermarking():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=0)
+    await agent._record_watermark()
+    assert await agent._gate_on_watermark(0.7) == 0.7

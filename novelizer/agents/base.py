@@ -57,6 +57,7 @@ class BaseAgent:
         self.paused = False
         self._last_run = 0.0
         self._backoff_until = 0.0
+        self._last_fingerprint: tuple | None = None
         self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
 
     @staticmethod
@@ -86,6 +87,21 @@ class BaseAgent:
         if now is None:
             now = time.monotonic()
         self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
+
+    async def _fingerprint(self) -> tuple | None:
+        """External story state this agent's work depends on. None (default)
+        disables watermarking. Subclasses return a small tuple; captured
+        AFTER the agent's own commits, so its own writes never re-trigger it."""
+        return None
+
+    async def _gate_on_watermark(self, score: float) -> float:
+        fp = await self._fingerprint()
+        if fp is not None and fp == self._last_fingerprint:
+            return 0.0
+        return score
+
+    async def _record_watermark(self) -> None:
+        self._last_fingerprint = await self._fingerprint()
 
     async def readiness(self) -> float:
         return 0.0
