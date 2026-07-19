@@ -1,8 +1,8 @@
 import os
 import pytest
 import tempfile
-from novelizer.store.embeddings import EmbeddingStore
-from novelizer.store.models import WorldEntry, ThemeRecord, ThreadRecord, SecretRecord
+from novelizer.store.embeddings import EmbeddingStore, SearchHit
+from novelizer.store.models import WorldEntry, ThemeRecord, ThreadRecord, SecretRecord, Chapter, Character
 from tests.conftest import FakeEmbeddingFunction
 
 
@@ -62,3 +62,27 @@ async def test_upsert_and_delete_thread_and_secret(fake_store):
     await fake_store.delete("s1", "secrets")
     assert fake_store._threads.count() == 0
     assert fake_store._secrets.count() == 0
+
+
+async def test_search_merges_kinds_sorted_by_distance(fake_store):
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="The Drowned Bell", prose="The bell rang over the water."))
+    await fake_store.upsert_character(Character(id="mara", name="Mara", traits="bell-ringer"))
+    await fake_store.upsert_secret(SecretRecord(id="s1", title="The bell is cracked"))
+    hits = await fake_store.search("bell", n=10)
+    assert len(hits) == 3
+    assert [type(h) for h in hits] == [SearchHit] * 3
+    assert {(h.kind, h.id) for h in hits} == {("chapter", "ch1"), ("character", "mara"), ("secret", "s1")}
+    assert hits == sorted(hits, key=lambda h: h.distance)
+
+
+async def test_search_kind_filter_and_empty(fake_store):
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="One", prose="alpha beta"))
+    only_secrets = await fake_store.search("alpha", kinds=["secret"])
+    assert only_secrets == []
+    only_chapters = await fake_store.search("alpha", kinds=["chapter"])
+    assert [h.id for h in only_chapters] == ["ch1"]
+
+
+async def test_search_unknown_kind_raises(fake_store):
+    with pytest.raises(ValueError):
+        await fake_store.search("x", kinds=["novel"])

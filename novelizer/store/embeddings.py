@@ -1,7 +1,16 @@
 from __future__ import annotations
+from dataclasses import dataclass
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from novelizer.store.models import WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord
+
+
+@dataclass
+class SearchHit:
+    kind: str
+    id: str
+    title: str
+    distance: float
 
 
 class EmbeddingStore:
@@ -110,3 +119,33 @@ class EmbeddingStore:
             meta = results["metadatas"][0][i]
             chapters.append(Chapter(id=doc_id, title=meta.get("title", ""), prose=results["documents"][0][i]))
         return chapters
+
+    def _collections_by_kind(self) -> dict:
+        return {
+            "chapter": self._chapters,
+            "character": self._chars,
+            "world": self._world,
+            "thread": self._threads,
+            "secret": self._secrets,
+            "theme": self._themes,
+        }
+
+    async def search(self, query: str, kinds: list[str] | None = None, n: int = 8) -> list[SearchHit]:
+        by_kind = self._collections_by_kind()
+        wanted = list(by_kind) if kinds is None else kinds
+        unknown = [k for k in wanted if k not in by_kind]
+        if unknown:
+            raise ValueError(f"Unknown kinds: {unknown}. Valid: {sorted(by_kind)}")
+        hits: list[SearchHit] = []
+        for kind in wanted:
+            col = by_kind[kind]
+            if col.count() == 0:
+                continue
+            results = col.query(query_texts=[query], n_results=min(n, col.count()))
+            for i, doc_id in enumerate(results["ids"][0]):
+                meta = results["metadatas"][0][i] or {}
+                title = meta.get("title") or meta.get("name") or ""
+                hits.append(SearchHit(kind=kind, id=doc_id, title=title,
+                                      distance=results["distances"][0][i]))
+        hits.sort(key=lambda h: h.distance)
+        return hits[:n]
