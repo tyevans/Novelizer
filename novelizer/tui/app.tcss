@@ -2,7 +2,8 @@
 #left { width: 3fr; }
 #right { width: 2fr; }
 #feed { height: 3fr; border: round $primary; }
-#proposals_banner { height: 1; padding: 0 1; }
+#proposals_banner { height: 1; padding: 0 1; display: none; }
+#proposals_banner.open { display: block; }
 #brain { height: 16; max-height: 45%; border: round $secondary; }
 #brain TabPane { padding: 0 1; }
 #shape_spark { height: 1; }
