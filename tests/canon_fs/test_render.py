@@ -22,3 +22,15 @@ def test_render_world_entry_has_domain_and_body():
     assert "domain: social" in out
     assert "tags: cult" in out
     assert "They ring at dusk." in out
+
+
+def test_empty_list_fields_omit_frontmatter_lines():
+    ch = Chapter(title="Solo", prose="p")
+    out = render_chapter(ch)
+    assert "characters:" not in out
+    assert f"id: {ch.id}" in out
+
+    e = WorldEntry(title="Bare", body="b")
+    out = render_world_entry(e)
+    assert "tags:" not in out
+    assert f"id: {e.id}" in out
