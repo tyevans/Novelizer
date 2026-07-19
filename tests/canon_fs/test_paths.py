@@ -1,3 +1,5 @@
+import pytest
+
 from novelizer.canon_fs.paths import slugify, build_path_index
 from novelizer.store.models import (
     Chapter, Character, SecretRecord, ThemeRecord, ThreadRecord, WorldEntry,
@@ -56,3 +58,16 @@ def test_three_way_name_collision_all_survive():
     index = _index(characters=trio)
     assert len(index) == 3
     assert {record_id for _, record_id in index.values()} == {c.id for c in trio}
+
+
+def test_duplicate_record_ids_raise_instead_of_silently_dropping():
+    dup = Character(name="Mara")
+    with pytest.raises(ValueError):
+        _index(characters=[dup, dup.model_copy()])
+
+
+def test_non_ascii_names_fall_back_to_untitled_with_suffix():
+    cjk = [Character(name="鈴の呪い"), Character(name="鐘の記憶")]
+    index = _index(characters=cjk)
+    assert len(index) == 2
+    assert all(p.startswith("/characters/untitled") for p in index)

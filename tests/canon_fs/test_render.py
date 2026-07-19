@@ -1,5 +1,10 @@
-from novelizer.canon_fs.render import render_chapter, render_world_entry, render_character
-from novelizer.store.models import Chapter, Domain, WorldEntry, Character, CharacterRelationship, SecretRecord
+from novelizer.canon_fs.render import (
+    render_chapter, render_world_entry, render_character, render_secret, render_theme, render_thread,
+)
+from novelizer.store.models import (
+    Chapter, Domain, WorldEntry, Character, CharacterRelationship, SecretRecord,
+    ThemeRecord, ThreadRecord, ThreadState,
+)
 
 
 def test_render_chapter_has_id_status_cast_and_full_prose():
@@ -68,10 +73,6 @@ def test_render_character_revealed_secret_excluded_from_knows():
     assert "s1" not in out
 
 
-from novelizer.canon_fs.render import render_secret, render_theme, render_thread
-from novelizer.store.models import ThemeRecord, ThreadRecord, ThreadState
-
-
 def test_render_thread_state_and_touches():
     t = ThreadRecord(id="t1", name="Bell's Curse", state=ThreadState.touched,
                      touch_count=3, last_note="rang again", last_chapter_id="ch9")
@@ -111,3 +112,10 @@ def test_frontmatter_values_with_newlines_cannot_inject_lines():
     id_lines = [l for l in fm_block.splitlines() if l.startswith("id:")]
     assert id_lines == [f"id: {c.id}"]
     assert "rogue: line" not in fm_block
+
+
+def test_render_character_aliases_and_voice_in_frontmatter():
+    c = Character(name="Mara", aliases=["The Bell-Ringer", "M"], voice="clipped, dry")
+    out = render_character(c, {}, [])
+    assert "aliases: The Bell-Ringer, M" in out
+    assert "voice: clipped, dry" in out
