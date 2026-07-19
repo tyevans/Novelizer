@@ -204,7 +204,13 @@ async def _read_after_catchup(db_path: str):
     await events.init()
     projector = Projector(events, db_path)
     await projector.init()
-    await projector.catch_up()
+    try:
+        await projector.catch_up()
+    finally:
+        # The projector holds its own aiosqlite connection and is only needed
+        # for this one catch_up; leaving it to the GC trips aiosqlite's
+        # Connection.__del__ complaint under `pytest -W error`.
+        await projector.close()
     read = ReadStore(db_path)
     await read.init()
     return events, read
