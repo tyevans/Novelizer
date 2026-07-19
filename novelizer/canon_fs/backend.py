@@ -9,6 +9,7 @@ from deepagents.backends.protocol import (
     FileInfo,
     FileUploadResponse,
     GlobResult,
+    GrepMatch,
     GrepResult,
     LsResult,
     ReadResult,
@@ -169,3 +170,23 @@ class CanonBackend(BackendProtocol):
             if wcglob.globmatch(p.lstrip("/"), full, flags=wcglob.GLOBSTAR)
         ]
         return GlobResult(matches=matches)
+
+    async def agrep(
+        self, pattern: str, path: str | None = None, glob: str | None = None
+    ) -> GrepResult:
+        snap = await self._snapshot()
+        base = "/" + (path or "").strip("/")
+        prefix = "/" if base == "/" else base + "/"
+        matches: list[GrepMatch] = []
+        for p in sorted(snap.index):
+            if not p.startswith(prefix):
+                continue
+            if glob and not wcglob.globmatch(p.lstrip("/"), glob, flags=wcglob.GLOBSTAR):
+                continue
+            kind, record_id = snap.index[p]
+            for line_no, text in enumerate(
+                self._render(snap, kind, record_id).splitlines(), start=1
+            ):
+                if pattern in text:
+                    matches.append(GrepMatch(path=p, line=line_no, text=text))
+        return GrepResult(matches=matches)

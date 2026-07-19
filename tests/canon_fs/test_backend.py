@@ -197,3 +197,32 @@ async def test_aglob_no_matches_is_empty_not_error(stack):
     backend = CanonBackend(read)
     result = await backend.aglob("*.txt")
     assert result.error is None and result.matches == []
+
+
+async def test_agrep_finds_literal_across_kinds(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.agrep("bell")
+    paths = {m["path"] for m in result.matches}
+    assert "/chapters/001-the-drowned-bell.md" in paths  # "Mara heard the bell."
+    for m in result.matches:
+        assert "bell" in m["text"] and m["line"] >= 1
+
+
+async def test_agrep_path_scopes_and_glob_filters(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    scoped = await backend.agrep("Mara", path="/characters")
+    assert {m["path"] for m in scoped.matches} == {"/characters/mara.md"}
+    filtered = await backend.agrep("id:", glob="secrets/*.md")
+    assert {m["path"] for m in filtered.matches} == {"/secrets/the-scar.md"}
+
+
+async def test_agrep_is_literal_not_regex(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.agrep("b.ll")
+    assert result.matches == []
