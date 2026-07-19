@@ -170,6 +170,17 @@ def render_event(ev: StoredEvent) -> Text:
             line.append(CONTINUATION, style="dim")
         return line
 
+    if ev.event_type == EventType.CHAT_AGENT_REPLIED:
+        text, truncated = clamp_text(_s(ev.payload.get("text")))
+        line = _speaker(_s(ev.payload.get("agent_name")) or "system")
+        line.append("💬 replied: ", style="dim italic")
+        body = md_inline(f'"{text}"')
+        body.stylize("dim italic")
+        line.append_text(body)
+        if truncated:
+            line.append(CONTINUATION, style="dim")
+        return line
+
     speaker = _EVENT_SPEAKERS.get(ev.event_type, "system")
     if ev.event_type in _ALARM_EVENTS:
         badge, rest = parse_source_badge(_s(ev.payload.get("description")))

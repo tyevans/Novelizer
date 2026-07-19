@@ -16,6 +16,8 @@ _NEVER_GATED = {
     EventType.DIRECTOR_SIGNAL_CREATED,
     EventType.DIRECTOR_SIGNAL_CONSUMED,
     EventType.AGENT_REMARKED,
+    EventType.CHAT_USER_MESSAGED,
+    EventType.CHAT_AGENT_REPLIED,
     EventType.THREAD_PLANTED,
     EventType.THREAD_TOUCHED,
     EventType.THREAD_PAID_OFF,
@@ -28,6 +30,11 @@ _NEVER_GATED = {
     EventType.CHAPTER_MINED,
     EventType.THEME_INTRODUCED,
     EventType.THEME_DEVELOPED,
+    # mechanical bookkeeping from a deterministic no-LLM agent, same class as chapter.mined
+    EventType.INSPIRATION_DRAWN,
+    EventType.INSPIRATION_HAND_CONSUMED,
+    EventType.INSPIRATION_HAND_SUPERSEDED,
+    EventType.INSPIRATION_UPTAKE_RECORDED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

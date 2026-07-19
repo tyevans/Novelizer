@@ -248,6 +248,19 @@ class MinedCausalFact(BaseModel):
     note: str = ""
 
 
+class MinedInspirationFact(BaseModel):
+    """A dealt Muse inspiration item the prose visibly uses, extracted by the
+    mining pass. `item` must repeat a dealt entry from the chapter's hand (the
+    prompt lists them); a non-matching item is dropped at commit time with a
+    logged info line, never a retcon — uptake is a health metric, not canon.
+    Name uptake is NOT mined: it's recorded mechanically at CharacterKeeper
+    mint time, so `kind` has no "names" arm.
+    """
+
+    kind: Literal["professions", "settings", "beats"]
+    item: str
+
+
 class MinedFactsOutput(BaseModel):
     """Structured output from the prose-mining pass of the Continuity Checker.
 
@@ -261,4 +274,5 @@ class MinedFactsOutput(BaseModel):
     reveal_facts: list[MinedRevealFact] = Field(default_factory=list)
     thread_facts: list[MinedThreadFact] = Field(default_factory=list)
     causal_facts: list[MinedCausalFact] = Field(default_factory=list)
+    inspiration_facts: list[MinedInspirationFact] = Field(default_factory=list)
     feed_note: str = ""

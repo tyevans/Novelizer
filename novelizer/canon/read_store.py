@@ -1,9 +1,11 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
+from novelizer.canon import db
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
-    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord,
+    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
+    InspirationHandRecord, InspirationUptakeRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -14,8 +16,7 @@ class ReadStore:
         self._conn: Optional[aiosqlite.Connection] = None
 
     async def init(self) -> None:
-        self._conn = await aiosqlite.connect(self._path)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = await db.connect(self._path)
 
     async def close(self) -> None:
         if self._conn:
@@ -165,5 +166,65 @@ class ReadStore:
         cur = await self._conn.execute(query, params)
         return [
             SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
+            for r in await cur.fetchall()
+        ]
+
+    async def list_chat_messages(self, agent_name: str, limit: int = 200) -> list[ChatMessageRecord]:
+        cur = await self._conn.execute(
+            "SELECT agent_name, role, text, message_id FROM chat_messages "
+            "WHERE agent_name=? ORDER BY rowid DESC LIMIT ?",
+            (agent_name, limit),
+        )
+        rows = list(await cur.fetchall())[::-1]
+        return [
+            ChatMessageRecord(agent_name=r[0], role=r[1], text=r[2], message_id=r[3]) for r in rows
+        ]
+
+    async def count_chat_messages(self, agent_name: str) -> int:
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) FROM chat_messages WHERE agent_name=?", (agent_name,)
+        )
+        return (await cur.fetchone())[0]
+
+    async def list_chat_conversations(self) -> list[str]:
+        cur = await self._conn.execute(
+            "SELECT DISTINCT agent_name FROM chat_messages ORDER BY agent_name"
+        )
+        return [r[0] for r in await cur.fetchall()]
+
+    async def get_active_hand(self) -> Optional[InspirationHandRecord]:
+        cur = await self._conn.execute(
+            "SELECT data FROM inspiration_hands WHERE status='active' ORDER BY rowid DESC LIMIT 1"
+        )
+        row = await cur.fetchone()
+        return InspirationHandRecord.model_validate_json(row[0]) if row else None
+
+    async def get_hand(self, hand_id: str) -> Optional[InspirationHandRecord]:
+        cur = await self._conn.execute("SELECT data FROM inspiration_hands WHERE id=?", (hand_id,))
+        row = await cur.fetchone()
+        return InspirationHandRecord.model_validate_json(row[0]) if row else None
+
+    async def list_hands(self, status: Optional[str] = None) -> list[InspirationHandRecord]:
+        # rowid order reflects last projection write (INSERT OR REPLACE), which
+        # matches deal order only because a hand's status flips before the next
+        # hand is dealt.
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM inspiration_hands WHERE status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM inspiration_hands ORDER BY rowid")
+        return [InspirationHandRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_uptake(self, hand_id: Optional[str] = None) -> list[InspirationUptakeRecord]:
+        query = "SELECT hand_id, kind, item, chapter_id FROM inspiration_uptake"
+        params: tuple = ()
+        if hand_id is not None:
+            query += " WHERE hand_id=?"
+            params = (hand_id,)
+        query += " ORDER BY rowid"
+        cur = await self._conn.execute(query, params)
+        return [
+            InspirationUptakeRecord(hand_id=r[0], kind=r[1], item=r[2], chapter_id=r[3])
             for r in await cur.fetchall()
         ]

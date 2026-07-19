@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import os
 import uuid
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import aiosqlite
 from pydantic import BaseModel
+from novelizer.canon import db
 from novelizer.canon.events import StoredEvent
 
 _CREATE = """
@@ -38,10 +40,13 @@ class EventStore:
             os.makedirs(d, exist_ok=True)
         self._path = path
         self._conn: Optional[aiosqlite.Connection] = None
+        # Concurrent appends share this connection; the lock keeps one append's
+        # INSERT/COMMIT (and any rollback-on-retry) from interleaving with
+        # another task's in-flight transaction.
+        self._write_lock = asyncio.Lock()
 
     async def init(self) -> None:
-        self._conn = await aiosqlite.connect(self._path)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = await db.connect(self._path)
         await self._conn.executescript(_CREATE)
         # Additive migration: pre-telemetry DBs lack run_id; existing rows stay NULL.
         cur = await self._conn.execute("PRAGMA table_info(events)")
@@ -58,13 +63,21 @@ class EventStore:
                       run_id: Optional[str] = None) -> StoredEvent:
         eid = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
-        cur = await self._conn.execute(
-            "INSERT INTO events (id, event_type, aggregate_id, payload, created_at, run_id) VALUES (?,?,?,?,?,?)",
-            (eid, event_type, aggregate_id, payload_json, created_at, run_id),
-        )
-        await self._conn.commit()
+
+        async def txn() -> int:
+            if self._conn.in_transaction:
+                await self._conn.execute("ROLLBACK")
+            cur = await self._conn.execute(
+                "INSERT INTO events (id, event_type, aggregate_id, payload, created_at, run_id) VALUES (?,?,?,?,?,?)",
+                (eid, event_type, aggregate_id, payload_json, created_at, run_id),
+            )
+            await self._conn.commit()
+            return cur.lastrowid
+
+        async with self._write_lock:
+            sequence = await db.retry_locked(txn)
         return StoredEvent(
-            sequence=cur.lastrowid, id=eid, event_type=event_type,
+            sequence=sequence, id=eid, event_type=event_type,
             aggregate_id=aggregate_id, payload=json.loads(payload_json), created_at=created_at,
             run_id=run_id,
         )
@@ -106,3 +119,10 @@ class EventStore:
             )
         rows = await cur.fetchall()
         return [_row_to_event(r) for r in rows]
+
+    async def events_for_aggregate(self, aggregate_id: str) -> list[StoredEvent]:
+        cur = await self._conn.execute(
+            f"SELECT {_COLS} FROM events WHERE aggregate_id=? ORDER BY sequence",
+            (aggregate_id,),
+        )
+        return [_row_to_event(r) for r in await cur.fetchall()]

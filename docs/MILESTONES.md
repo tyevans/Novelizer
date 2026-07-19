@@ -12,7 +12,7 @@ gets its own spec → plan → red/green TDD → code review cycle before the ne
 | M2 | **Voices** | TOML voice packs (prose profiles + agent personalities), The Room drill-in view, character voice cards v1 | Recasting an agent visibly changes the feed; switching prose profile changes the next chapter | ✅ complete |
 | M3 | **Shape & Threads** | Story brain phase 1: structure + thread faculties, Story Shape + Thread Board views, brain context in agent prompts | A stale thread surfaces and the Author picks it back up unprompted | ✅ complete |
 | M4 | **Knowledge & Cause** | Story brain phase 2: who-knows-what matrix + causal graph, Who-Knows-What + Causeway views, upgraded Continuity Checker | A planted knowledge leak is auto-caught and routed to the retcon queue | ✅ complete (CI-proven; live end-to-end smoke deferred — see M4 doc) |
-| M5 | **Finish** | Theme tracking, voice enforcement maturity, UX polish, performance, packaging, docs | A stranger installs it, casts a room, seeds a world, reads a coherent novella a day later | ⬜ not started |
+| M5 | **Finish** | Theme tracking, voice enforcement maturity, UX polish, performance, packaging, docs | A stranger installs it, casts a room, seeds a world, reads a coherent novella a day later | ✅ complete (walkthrough steps 1–4 executed live, incl. prose-mining + voice-drift live smokes; the day-long run + human coherence read handed to the user — see M5 doc closeout) |
 
 ## Standing principles (all milestones)
 

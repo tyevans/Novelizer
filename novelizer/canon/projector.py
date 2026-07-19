@@ -4,9 +4,10 @@ import json
 import logging
 from typing import Optional
 import aiosqlite
+from novelizer.canon import db
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord
+from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus, InspirationHandRecord
 from novelizer.canon.threads import TERMINAL_STATES
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,16 @@ CREATE TABLE IF NOT EXISTS causal_edges (
 CREATE TABLE IF NOT EXISTS structure_scores (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_messages (
+    message_id TEXT PRIMARY KEY, agent_name TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inspiration_hands (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS inspiration_uptake (
+    hand_id TEXT NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
+    chapter_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (hand_id, kind, item)
+);
 """
 
 
@@ -73,10 +84,13 @@ class Projector:
         self._path = path
         self._conn: Optional[aiosqlite.Connection] = None
         self._running = False
+        # catch_up is called from both the projector loop and command paths;
+        # the lock keeps two runs from interleaving transactions on this
+        # connection (and from double-applying non-idempotent projections).
+        self._write_lock = asyncio.Lock()
 
     async def init(self) -> None:
-        self._conn = await aiosqlite.connect(self._path)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = await db.connect(self._path)
         await self._conn.executescript(_CREATE)
         await self._conn.execute(
             "INSERT OR IGNORE INTO projector_state (id, last_sequence) VALUES ('singleton', 0)"
@@ -92,30 +106,41 @@ class Projector:
         return (await cur.fetchone())[0]
 
     async def _set_last_sequence(self, seq: int) -> None:
-        await self._conn.execute(
-            "UPDATE projector_state SET last_sequence=? WHERE id='singleton'", (seq,)
-        )
-        await self._conn.commit()
+        # No rollback-on-retry here: _reset_state relies on this commit to
+        # flush its preceding DELETEs; re-running UPDATE+COMMIT is idempotent.
+        async def txn() -> None:
+            await self._conn.execute(
+                "UPDATE projector_state SET last_sequence=? WHERE id='singleton'", (seq,)
+            )
+            await self._conn.commit()
+
+        await db.retry_locked(txn)
 
     async def _reset_state(self) -> None:
         """Testing/rebuild helper: forget position and clear projections."""
+        async with self._write_lock:
+            await self._reset_state_locked()
+
+    async def _reset_state_locked(self) -> None:
         for table in (
             "chapters", "world_entries", "characters", "director_signals",
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
-            "causal_edges", "themes",
+            "causal_edges", "themes", "chat_messages", "inspiration_hands",
+            "inspiration_uptake",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
 
     async def catch_up(self) -> int:
-        last = await self._last_sequence()
-        events = await self._events.events_since(last)
-        for ev in events:
-            await self._apply(ev)
-            last = ev.sequence
-        await self._set_last_sequence(last)
-        return last
+        async with self._write_lock:
+            last = await self._last_sequence()
+            events = await self._events.events_since(last)
+            for ev in events:
+                await self._apply(ev)
+                last = ev.sequence
+            await self._set_last_sequence(last)
+            return last
 
     async def run(self, interval: float = 0.5) -> None:
         self._running = True
@@ -127,6 +152,20 @@ class Projector:
         self._running = False
 
     async def _apply(self, ev: StoredEvent) -> None:
+        """Project one event atomically: BEGIN IMMEDIATE takes the write lock
+        up front (subject to busy_timeout) so the event's reads and writes see
+        one consistent snapshot, retrying if another connection holds the file
+        past the busy window."""
+        async def txn() -> None:
+            if self._conn.in_transaction:
+                await self._conn.execute("ROLLBACK")
+            await self._conn.execute("BEGIN IMMEDIATE")
+            await self._project(ev)
+            await self._conn.commit()
+
+        await db.retry_locked(txn)
+
+    async def _project(self, ev: StoredEvent) -> None:
         data = json.dumps(ev.payload)
         p = ev.payload
         t = ev.event_type
@@ -329,8 +368,54 @@ class Projector:
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
                 (p["chapter_id"], data),
             )
+        elif t == EventType.CHAT_USER_MESSAGED or t == EventType.CHAT_AGENT_REPLIED:
+            role = "user" if t == EventType.CHAT_USER_MESSAGED else "agent"
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO chat_messages (message_id, agent_name, role, text) VALUES (?,?,?,?)",
+                (p["message_id"], p["agent_name"], role, p.get("text", "")),
+            )
+        elif t == EventType.INSPIRATION_DRAWN:
+            cur = await self._conn.execute("SELECT id FROM inspiration_hands WHERE id=?", (p["hand_id"],))
+            existing = await cur.fetchone()
+            if existing is None:
+                record = InspirationHandRecord(
+                    id=p["hand_id"], seed=p["seed"], corpus_version=p["corpus_version"],
+                    era=p["era"], names=p.get("names", []), professions=p.get("professions", []),
+                    settings=p.get("settings", []), beats=p.get("beats", []),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                    (record.id, record.model_dump_json(), record.status.value),
+                )
+            # else: a hand id is minted exactly once — first-mint-wins, same
+            # rule as thread.planted/secret.created/theme.introduced.
+        elif t in (EventType.INSPIRATION_HAND_CONSUMED, EventType.INSPIRATION_HAND_SUPERSEDED):
+            cur = await self._conn.execute("SELECT data FROM inspiration_hands WHERE id=?", (p["hand_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = InspirationHandRecord.model_validate_json(row[0])
+                if record.status == HandStatus.active:
+                    if t == EventType.INSPIRATION_HAND_CONSUMED:
+                        updated = record.model_copy(update={
+                            "status": HandStatus.consumed,
+                            "consumed_chapter_id": p.get("chapter_id", ""),
+                        })
+                    else:
+                        updated = record.model_copy(update={"status": HandStatus.superseded})
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.status.value),
+                    )
+                # else: consumed/superseded are absorbing — the event is a fact
+                # in the log, but the projection does not change.
+            # else: no row for this id (shouldn't happen under correct Muse
+            # behavior) — nothing to project, no error raised.
+        elif t == EventType.INSPIRATION_UPTAKE_RECORDED:
+            await self._conn.execute(
+                "INSERT OR IGNORE INTO inspiration_uptake (hand_id, kind, item, chapter_id) VALUES (?,?,?,?)",
+                (p["hand_id"], p["kind"], p["item"], p.get("chapter_id", "")),
+            )
         elif t == EventType.AUTONOMY_CHANGED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)
             )
-        await self._conn.commit()

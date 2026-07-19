@@ -4,6 +4,7 @@ from novelizer.agents.schemas import WorldEntriesDraft
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.muse.prompts import architect_settings_note
 from novelizer.store.models import WorldEntry
 
 SYSTEM_PROMPT = """You are the World Architect for an ever-expanding fictional world.
@@ -32,13 +33,15 @@ class WorldArchitect(BaseAgent):
         return {
             "entries": await self._read.list_world_entries(),
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
+            "hand": await self._read.get_active_hand(),
         }
 
     async def work(self, ctx: dict) -> WorldEntriesDraft | None:
         existing = "\n".join(f"- [{e.domain}] {e.title}: {e.body[:100]}" for e in ctx["entries"][:20]) or "The world is empty."
         seeds = "\n".join(f"Director seed: {s.body}" for s in ctx["signals"]) or "None."
         cast = self._guarded_line("In character", self.personality)
-        msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}{cast}\n\nGenerate new world entries."
+        sparks = architect_settings_note(ctx.get("hand"))
+        msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}{sparks}{cast}\n\nGenerate new world entries."
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

@@ -117,3 +117,13 @@ async def test_theme_introduced_is_never_gated(level):
 async def test_theme_developed_is_never_gated(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("editor", EventType.THEME_DEVELOPED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.INSPIRATION_DRAWN, EventType.INSPIRATION_HAND_CONSUMED,
+    EventType.INSPIRATION_HAND_SUPERSEDED, EventType.INSPIRATION_UPTAKE_RECORDED,
+])
+async def test_inspiration_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("muse", event_type) is False

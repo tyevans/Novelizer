@@ -1,19 +1,47 @@
+<!--
+verified against (2026-07-19): novelizer/director/cli.py (full read), novelizer/tui/app.py
+(BINDINGS + command dispatch), novelizer/director/commands.py (dispatch()), 
+novelizer/tui/settings_screen.py, novelizer/tui/setup_wizard.py, novelizer/tui/widgets/
+(browser_model.py, roster.py, thread_board.py, story_shape.py, who_knows_what.py,
+causeway.py, engine_room.py), docs/superpowers/specs/2026-07-17-novelizer-vision-design.md,
+docs/submilestones/M5-finish.md, docs/MILESTONES.md
+-->
+
 # Novelizer
 
-An autonomous world-building and storytelling agent system. An event-sourced world log is
-the sole source of truth; an Author agent drafts chapters against it, and a terminal
-Mission Control UI shows the story unfold live.
+Novelizer is a **director's control room for an autonomous writers' room**: seven AI
+agents — Author, Editor, World Architect, Character Keeper, Continuity Checker, Retconner,
+and Structure Analyst — collaboratively build a living world and write a novel inside it,
+coordinating exclusively through an append-only event log that is the world's sole source
+of truth (its canon). A terminal Mission Control UI shows the room at work live: chapters
+drafting, threads and secrets bookkeeping themselves, retcons getting filed and resolved,
+and a **Story Brain** deriving narrative shape — tension and pacing, thread staleness,
+who-knows-what, cause and effect — from that same canon. The human director steers with
+seeds and focus signals, adjudicates retcons, dials how much autonomy the room gets, and
+reads the book as it emerges.
 
-Currently at milestone **M0 (Heartbeat)**: an event-sourced store, an Author agent running
-on [deepagents](https://github.com/langchain-ai/deepagents) against an OpenAI-compatible
-endpoint, and a skeletal TUI that tails the event log. See
-[`docs/MILESTONES.md`](docs/MILESTONES.md) for the roadmap.
+The project is feature-complete through milestone M5 (see
+[`docs/MILESTONES.md`](docs/MILESTONES.md) for the full roadmap and closeout notes) — this
+README describes the shipped product. New here? Start with
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md) for the exact install-to-first-run path.
 
 ## Installation
+
+For contributors working in this checkout:
 
 ```bash
 uv sync
 ```
+
+To install the `novelizer` command itself (end users, or anyone who just wants the binary
+on `PATH` without a dev environment), install this checkout as a uv tool:
+
+```bash
+uv tool install .
+```
+
+There is no published PyPI package yet, so `uv tool install novelizer` (without a path)
+does not currently work — install from a local checkout as above until publication lands.
 
 ## Requirements
 
@@ -63,19 +91,28 @@ novelizer
 
 ### Mission Control
 
-The dashboard displays four synchronized panes:
-- **Activity Feed** (`#feed`, left pane) — real-time event log of agent actions (chapters drafted, retcons filed, etc.)
-- **Story Browser** (`#browser`, right pane) — organized chapters, characters, world entries, and retcons; click to inspect
-- **Agent Roster** (`#roster`, bottom-left) — agents' names, autonomy status, and current task
-- **Detail Pane** (`#detail`, bottom-right) — full text of the selected item from the browser
+The left column stacks the live feed and the Story Brain panes; the right column is the
+Story Browser and its detail pane:
+- **Activity Feed** (`#feed`) — real-time event log of agent actions (chapters drafted, retcons filed, etc.), plus in-personality remarks from the room
+- **Story Browser** (`#browser`) — chapters, characters, world entries, retcons, and themes, each a section in the tree; click to inspect
+- **Detail Pane** (`#detail`) — full text of the selected item from the browser
+- **Story Brain views** (below the feed) — see the dedicated section below
+- **Status bar** — current autonomy level and a one-line command reference
+- **Activity strip** — a one-line "what's happening right now" summary (see Engine Room, below)
 
-Command palette (focus with `Ctrl+K` or `:`, then type):
+Command palette (focus with `Ctrl+K`, then type — the `:` prefix shown in the status bar is
+cosmetic, `Ctrl+K` alone focuses the input):
 - `seed <text>` — inject a narrative seed
 - `focus <agent>` — inject a focus/steer signal that agents pick up as context on their next run
 - `pause <agent>` — pause an agent
 - `resume <agent>` — resume a paused agent
+- `autonomy <level> [agent]` — set the global autonomy level, or a per-agent override
+- `approve <id>` / `reject <id>` — resolve a pending proposal
+- `settings` — open the settings screen (see Configuration, above)
 
-Toggle Room drill-in view with `r`.
+Toggle Room drill-in view (full-screen feed, agents speaking in their cast personalities)
+with `r`; toggle Reading mode (clean chapter-prose view) with `v`. Room and Reading are
+mutually exclusive with each other and with the normal two-column layout.
 
 Toggle the Engine Room view with `e` — a live machinery pane (which agent is running,
 the model's tokens streaming in, call vitals) over a durable trace of every run, LLM
@@ -85,6 +122,26 @@ inspection of the exact prompt for the call in flight (off by default). The one-
 activity strip above the command bar shows the same signal at a glance: `▶ author ·
 drafting · 3.4k tok · 52s` while a run is live, `idle · next: editor in 12s` between
 runs, and a red crash notice if an agent fails.
+
+### Story Brain views
+
+The Story Brain derives narrative shape from canon with no separate source of truth —
+every view below reads straight from the event log's projections, the same data the agent
+prompts see. All four sit stacked in the left column of Mission Control, below the feed:
+
+- **Thread Board** — every plot thread, its state (`planted → touched* →
+  paid_off|abandoned`), and a `STALE` marker once three chapters have passed with no
+  touch/pay-off/abandonment.
+- **Story Shape** — every scored chapter's tension and pacing label (from the Structure
+  Analyst agent), with `SAG`/`SPIKE` markers.
+- **Who-Knows-What** — the secret × character knowledge matrix: which characters have
+  learned which secrets, and whether each has been revealed.
+- **Causeway** — the causal-edge ledger: declared `(cause chapter, effect chapter, note)`
+  relationships between chapters.
+
+Theme and motif tracking is not a fifth Brain view — themes live as a section in the Story
+Browser (chapters / characters / world / retcons / **themes**) alongside the rest of the
+canon, per the vision doc's design.
 
 ### Autonomy & Approvals
 
@@ -100,13 +157,13 @@ the canon:
 Set the autonomy level for all agents or for a specific agent:
 
 ```bash
-# TUI command input (focus with `:` or `Ctrl+K`):
+# TUI command input (focus with `Ctrl+K`):
 autonomy full_auto
-autonomy gated_retcons Editor
+autonomy gated_retcons editor
 
 # CLI:
 novelizer autonomy full_auto
-novelizer autonomy gated_retcons Editor
+novelizer autonomy gated_retcons editor
 ```
 
 When an agent's output is gated, it queues as a proposal in the approval-queue pane
@@ -161,9 +218,10 @@ novelizer voices                       # list the active pack's profiles
 novelizer voices --pack my-pack.toml   # inspect another pack
 ```
 
-The active prose profile is chosen per run via `NOVELIZER_PROSE_PROFILE` — restart the
-process to switch. Live in-TUI switching of the active profile, and per-agent
-personality casting (also carried in the pack format today), arrive in M2.3.
+The active pack and profile can also be switched without restarting: open `:settings` in
+the TUI, select the `voice_pack`/`prose_profile` row, and enter a new path/name — both
+apply live, affecting the next draft (they are not in the settings screen's
+restart-required set).
 
 ### Personalities & the living feed
 
@@ -182,10 +240,12 @@ with `r`) as personality-voiced lines:
 💬 Author: "Another storm, another chapter."
 ```
 
-Recasting an agent (editing its entry in `[agent_personalities]` in the
-active voice pack) changes both what it says in the feed and how it
-approaches its next turn of work — on the next process start, per M2.2's
-scope; live in-TUI recasting lands with the voice browser in M2.3.
+Recasting an agent (editing its entry in `[agent_personalities]` in the active voice pack
+file directly — there is no in-TUI personality editor) changes both what it says in the
+feed and how it approaches its next turn of work. The pack is only re-read when the
+`voice_pack`/`prose_profile` *setting* changes (via `:settings` or config edit), not on a
+timer, so editing personality text in place inside the same pack file takes effect the
+next time the app restarts or the settings screen re-points at that path.
 
 ### Character voices & the voice browser
 
@@ -221,10 +281,11 @@ written straight to a user pack file (never the shipped default pack):
 novelizer voice-scaffold brisk "Fast, punchy, present-tense action prose." --pack stories/user_pack.toml
 ```
 
-Switch to it the same way any prose profile is activated (`NOVELIZER_VOICE_PACK`
-and `NOVELIZER_PROSE_PROFILE` in `.env`, per the Configuration table above).
-A dedicated in-TUI voice-editing/scaffolding pane, live in-run profile
-switching, and LLM-expanded scaffolded profiles are deferred past M2.3.
+Activate it via `:settings` (set `voice_pack` to the file you scaffolded into and
+`prose_profile` to the new profile's name — see above) or via `NOVELIZER_VOICE_PACK`/
+`NOVELIZER_PROSE_PROFILE`. There is deliberately no in-TUI voice-editing/scaffolding pane
+— `voice-scaffold` plus the settings screen is the whole casting flow; LLM-expanded
+scaffolded profiles remain out of scope.
 
 ### The thread ledger (Story Brain, Phase 1)
 
@@ -245,9 +306,9 @@ A thread's state machine is `planted → touched* → paid_off|abandoned`, with
 citing its id are recorded in the log but don't reopen it. Thread identity
 follows a first-plant-wins rule: re-planting an existing thread id is a
 no-op that doesn't change its state, and if an agent's plant collides with
-a known-active id, the intent is downgraded to a touch. Story Brain
-surfaces (staleness detection, the Story Shape/Thread Board TUI views, and
-prompt injection of stale threads back to the Author) are M3.2/M3.3.
+a known-active id, the intent is downgraded to a touch. Story Brain surfaces built on this
+bookkeeping — staleness detection, the Story Shape/Thread Board TUI views, and prompt
+injection of stale threads back to the Author — are described in the next two sections.
 
 ### Staleness & pacing analysis (Story Brain, Phase 1 continued)
 
@@ -257,8 +318,7 @@ is stale once 3 chapters have passed since its last plant/touch, with no
 pay-off/abandon in between) and `sag_spike.detect_sag_spike` (flags a chapter
 whose tension score deviates sharply from the surrounding average). Both are
 pure functions over `ReadStore` data, computed live rather than persisted, so
-every consumer — agent prompts and TUI views alike, from M3.3 onward — shares
-one answer.
+every consumer — agent prompts and TUI views alike — shares one answer.
 
 A 7th scheduled agent, the **Structure Analyst**, produces the tension/pacing
 scores those functions consume: it reads recently-drafted, not-yet-scored
@@ -267,9 +327,6 @@ chapter, committing `annotation.structure_scored` events — never gated by
 autonomy level, same as thread bookkeeping. It participates in the same
 readiness-scored scheduler tick as the other six agents, with its own
 interval (`NOVELIZER_STRUCTURE_ANALYST_INTERVAL`, default 180s).
-
-Story Shape/Thread Board TUI views and prompt injection of stale threads and
-pacing flags back to the Author/Editor are M3.3.
 
 ### Story Shape & Thread Board, and brain context in prompts
 
@@ -336,23 +393,36 @@ which characters have `learned` it and whether it has been `revealed`
 — including ones created after the reveal — never written per character).
 `secret.referenced` events are the durable record of a character using a
 secret in a chapter; the causal-edge ledger (`ReadStore.list_causal_edges()`)
-is a strict, never-deduped append of every declared edge. Leak/paradox
-detection over these ledgers, and their TUI views, are M4.2/M4.3.
+is a strict, never-deduped append of every declared edge. Leak (a secret referenced by a
+character who never learned it) and paradox detection run over these ledgers; findings
+surface as retcon requests in the approval queue and are visible live in the Who-Knows-What
+and Causeway Story Brain views.
+
+The Continuity Checker also runs a **prose-mining pass**: alongside its free-text review,
+it asks the LLM which secret uses/learns/reveals, thread touches, and causal links the
+prose *shows* but the log has no covering event for yet, and commits those as ordinary
+events tagged `source="mined"` — the same deterministic leak/paradox detectors then see
+mined facts exactly as they'd see agent-declared ones. A mined `secret.revealed` never
+auto-commits at any autonomy level (a prose-inferred reveal is less trustworthy than a
+declared one); it always escalates to a retcon request instead.
 
 ## Architecture
 
 - **`novelizer/canon/`** — World Canon bounded context: `EventStore` (append-only log, sole
   source of truth), `Projector` (sole writer of read-side projections), `ReadStore` (query
   interface over projections).
-- **`novelizer/agents/`** — Agent Roster bounded context. The Author (M0) drafts chapters via
-  a deepagents `Runner` against the configured OpenAI-compatible endpoint; more agents land
-  in M1.
-- **`novelizer/tui/`** — Mission Control TUI (Textual): a skeletal live feed tailing the
-  event log as of M0; full multi-pane layout lands in M1.
-- **`novelizer/director/`** — CLI entry point (`novelizer`, `novelizer seed`, `novelizer chapters`,
-  `novelizer read`).
+- **`novelizer/agents/`** — Agent Roster bounded context: the seven scheduled agents (Author,
+  Editor, World Architect, Character Keeper, Continuity Checker, Retconner, Structure
+  Analyst), each a deepagents `Runner` against the configured OpenAI-compatible endpoint,
+  coordinated only through the event log.
+- **`novelizer/brain/`** — Story Brain: deterministic analyzers (staleness, sag/spike,
+  leak/paradox detection) and prompt-context builders over `ReadStore` projections.
+- **`novelizer/tui/`** — Mission Control TUI (Textual): the full multi-pane dashboard,
+  Story Brain views, Engine Room, settings screen, setup wizard, and story picker.
+- **`novelizer/director/`** — CLI entry point (`novelizer` plus its subcommands — see
+  Usage, above).
 - **`novelizer/runtime.py`** — Wires the above into a running `Runtime` (store + projector +
-  read store + author), shared by the TUI and CLI.
+  read store + scheduler + all seven agents), shared by the TUI and CLI.
 
 All contexts communicate only through domain events on the log and read-side queries —
 never direct calls into each other's internals.
