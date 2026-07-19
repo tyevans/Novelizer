@@ -13,6 +13,7 @@ from novelizer.tui.widgets.roster import command_hint, status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import banner_line
+from novelizer.tui.approval_screen import ApprovalScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -42,6 +43,7 @@ class NovelizerApp(App):
     # so "ctrl+k" is used to focus the command input instead.
     BINDINGS = [
         ("ctrl+k", "focus_command", "Command"),
+        ("a", "approvals", "Approve"),
         ("r", "toggle_room", "Room"),
         ("e", "toggle_engine", "Engine Room"),
         ("p", "toggle_prompt", "Prompt"),
@@ -302,6 +304,16 @@ class NovelizerApp(App):
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))
+
+    async def action_approvals(self) -> None:
+        # Guard: never stack the modal over itself or over another pushed
+        # screen (e.g. SettingsScreen). App bindings still fire while a modal
+        # is up for keys the modal doesn't consume, so this must be checked.
+        if self.screen is not self.default_screen:
+            return
+        if not await self.runtime.read.list_proposals(status="open"):
+            return
+        self.push_screen(ApprovalScreen(self.runtime))
 
     def action_toggle_room(self) -> None:
         # Room and reading are mutually exclusive: room hides #right, reading

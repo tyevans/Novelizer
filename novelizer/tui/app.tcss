@@ -33,3 +33,7 @@
 #edit_value { height: 3; }
 #feed, #browser { border-title-style: bold; }
 #brain, #detail_scroll { border-title-color: $text-muted; }
+ApprovalScreen { align: center middle; }
+#approval_box { width: 80%; max-width: 100; height: 70%; border: round $primary; background: $surface; border-title-style: bold; }
+#approval_list { height: 1fr; }
+#approval_context { height: auto; max-height: 10; padding: 0 1; }
