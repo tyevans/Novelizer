@@ -421,6 +421,29 @@ async def test_agent_run_via_runtime_lands_run_events_in_telemetry_log(tmp_path)
         await rt.close()
 
 
+async def test_runtime_backfills_and_ticks_indexer(tmp_path):
+    """Injected EmbeddingStore seam: start() backfills any pre-existing events,
+    index_catch_up() incrementally indexes new ones, and is safe to call twice."""
+    from novelizer.store.embeddings import EmbeddingStore
+    from novelizer.store.models import Chapter
+    from tests.conftest import FakeEmbeddingFunction
+
+    store = EmbeddingStore(str(tmp_path / "emb"), embedding_function=FakeEmbeddingFunction())
+    settings = Settings(db_path=str(tmp_path / "world.db"))
+    rt = Runtime(settings, runners=_all_fake_runners(), embedding_store=store)
+    await rt.start()
+    try:
+        await rt.events.append(EventType.CHAPTER_CREATED, "ch1",
+                               Chapter(id="ch1", title="One", prose="The bell rang."))
+        await rt.projector.catch_up()
+        await rt.index_catch_up()
+        hits = await store.search("bell", kinds=["chapter"])
+        assert [h.id for h in hits] == ["ch1"]
+        await rt.index_catch_up()  # idempotent, never raises
+    finally:
+        await rt.close()
+
+
 async def test_mining_runner_falls_back_to_parent_checker_fake(settings):
     """Post-M5.3-merge fix: an injected runners dict WITHOUT a dedicated
     "continuity_checker_mining" key must reuse the parent "continuity_checker"

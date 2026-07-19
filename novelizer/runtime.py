@@ -25,10 +25,15 @@ from novelizer.agents.muse import Muse
 from novelizer.voices.loader import load_voice_pack
 from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
+from novelizer.store.embeddings import EmbeddingStore
+from novelizer.store.indexer import CanonIndexer
 
 
 class Runtime:
-    def __init__(self, settings: EffectiveSettings, runner=None, runners: Optional[dict] = None) -> None:
+    def __init__(
+        self, settings: EffectiveSettings, runner=None, runners: Optional[dict] = None,
+        embedding_store=None,
+    ) -> None:
         self.settings = settings
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
@@ -56,6 +61,8 @@ class Runtime:
         self.active_prose_profile = None
         self.chat: Optional[ChatService] = None
         self._chat_runner_cache: dict[str, object] = {}
+        self.embeddings = embedding_store   # None => built in start()
+        self.indexer = None
 
     def _runner_for(self, name: str, builder, fallback_name: str | None = None):
         if self._runners is not None:
@@ -93,6 +100,18 @@ class Runtime:
         await self.read.init()
         await self.telemetry_store.init()
         await self.projector.catch_up()
+        if self.embeddings is None:
+            self.embeddings = EmbeddingStore(
+                str(Path(self.settings.db_path).with_name("embeddings")),
+                embed_model=self.settings.embed_model,
+                base_url=self.settings.llm_base_url,
+                api_key=self.settings.llm_api_key,
+            )
+        self.indexer = CanonIndexer(
+            self.events, self.read, self.embeddings,
+            str(Path(self.settings.db_path).with_name("embed_cursor.json")),
+        )
+        await self.index_catch_up()  # backfill; failure-tolerant by contract
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
         self.proposals = ProposalService(self.events)
@@ -251,6 +270,13 @@ class Runtime:
 
         self.settings = stored
         return {"applied": applied, "restart_required": restart, "errors": errors}
+
+    async def index_catch_up(self) -> None:
+        """Periodic-caller-safe embedding catch-up: no-op without an indexer,
+        and never raises (CanonIndexer.catch_up swallows batch failures)."""
+        if self.indexer is None:
+            return
+        await self.indexer.catch_up()
 
     async def close(self) -> None:
         await self.read.close()
