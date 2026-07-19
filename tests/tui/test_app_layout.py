@@ -230,7 +230,7 @@ async def test_story_brain_secrets_matrix_and_causeway_tabs_populate():
             strip_text = str(app.query_one("#brain_strip", Static).renderable)
             assert "The Heir Lives" in secrets_text
             assert "M" in secrets_text.splitlines()[0]       # Mara's initial in the header
-            assert "●" in secrets_text and "1 knows" in secrets_text
+            assert "●" in secrets_text and "1/1" in secrets_text
             assert "the-heir-lives" not in secrets_text      # no ids on the dashboard
             assert 'ch 2 "Two" ──▶ ch 1 "One"' in causeway_text
             assert "⚠ PARADOX" in causeway_text

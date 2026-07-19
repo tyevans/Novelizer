@@ -213,10 +213,25 @@ def matrix_header(characters: list[Character]) -> Text:
     return Text(" " * TITLE_WIDTH + cells.rstrip(), style=DIM)
 
 
+def spread_meter(known: int, total: int) -> Text:
+    """Per-secret spread meter: one ● per knower, ○ per still-dark character,
+    'k/N'. Heats as spread approaches everyone — ALARM_STYLE when at most one
+    character is left in the dark (the Keeper's leak-proximity signal, shared
+    with the P3 Pulse card), WARN_STYLE once half the cast knows."""
+    glyphs = "●" * known + "○" * (total - known)
+    if known and total - known <= 1:
+        style = ALARM_STYLE
+    elif known and known / total >= 0.5:
+        style = WARN_STYLE
+    else:
+        style = DIM
+    return Text(f"{glyphs} {known}/{total}", style=style)
+
+
 def secret_row(secret: SecretRecord, characters: list[Character], matrix: dict[str, dict]) -> Text:
     """One matrix row: clipped secret TITLE, one glyph cell per character
-    (state from knowledge_cell_state — never re-derived), dim who-knows
-    summary. No ids anywhere."""
+    (state from knowledge_cell_state — never re-derived), heat-colored spread
+    meter. No ids anywhere."""
     row = Text(_clip_title(secret.title).ljust(TITLE_WIDTH))
     known = 0
     cells = []
@@ -225,13 +240,10 @@ def secret_row(secret: SecretRecord, characters: list[Character], matrix: dict[s
         known += state == "known"
         cells.append(CELL_GLYPHS[state].ljust(_COL))
     row.append(" ".join(cells).rstrip())
-    if known == 0:
-        summary = "no one knows"
-    elif known == 1:
-        summary = "1 knows"
-    else:
-        summary = f"{known} know"
-    row.append(f"   {summary}", style=DIM)
+    if characters:
+        meter = spread_meter(known, len(characters))
+        row.append("   ")
+        row.append(meter.plain, style=meter.style)
     return row
 
 

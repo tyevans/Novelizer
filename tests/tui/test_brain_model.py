@@ -297,6 +297,7 @@ from novelizer.tui.widgets.brain_model import (
     matrix_header,
     secret_row,
     secrets_tab,
+    spread_meter,
 )
 
 
@@ -318,28 +319,44 @@ def test_matrix_header_aligns_initials_after_title_gutter():
     assert str(header.style) == "dim"
 
 
-def test_secret_row_glyph_cells_align_under_header_and_count_knowers():
+def test_spread_meter_heats_as_spread_approaches_everyone():
+    assert spread_meter(0, 4).plain == "○○○○ 0/4"
+    assert str(spread_meter(0, 4).style) == "dim"
+    assert spread_meter(2, 4).plain == "●●○○ 2/4"
+    assert str(spread_meter(2, 4).style) == WARN_STYLE   # half know: warming
+    assert spread_meter(3, 4).plain == "●●●○ 3/4"
+    assert str(spread_meter(3, 4).style) == ALARM_STYLE  # one reveal from public
+    assert str(spread_meter(4, 4).style) == ALARM_STYLE  # everyone knows
+    assert str(spread_meter(1, 4).style) == "dim"        # 1/4: still quiet
+    assert str(spread_meter(1, 1).style) == ALARM_STYLE  # the whole cast of one knows
+
+
+def test_secret_row_glyph_cells_align_under_header_and_show_spread_meter():
     chars = [Character(id="elara", name="Elara"), Character(id="boy", name="The Boy")]
     secret = SecretRecord(id="the-heir-lives", title="The Heir Lives")
     matrix = {"the-heir-lives": {"revealed": False, "known_by": {"elara"}}}
     row = secret_row(secret, chars, matrix)
-    assert row.plain == "The Heir Lives".ljust(TITLE_WIDTH) + "●  ○" + "   1 knows"
+    assert row.plain == "The Heir Lives".ljust(TITLE_WIDTH) + "●  ○" + "   ●○ 1/2"
     assert "the-heir-lives" not in row.plain
 
 
-def test_secret_row_known_to_no_one():
+def test_secret_row_known_to_no_one_has_a_cold_meter():
     secret = SecretRecord(id="s", title="The Map Is Forged")
     matrix = {"s": {"revealed": False, "known_by": set()}}
     row = secret_row(secret, [Character(id="k", name="Kestrel")], matrix)
-    assert row.plain.endswith("no one knows")
-    assert "●" not in row.plain and "○" in row.plain
+    assert row.plain.endswith("○ 0/1")
+    meter_spans = [(row.plain[s.start:s.end], str(s.style)) for s in row.spans]
+    assert ("○ 0/1", "dim") in meter_spans
 
 
-def test_secret_row_plural_summary_matches_spec_sketch():
+def test_secret_row_two_of_three_know_is_leak_hot():
     chars = [Character(id="a", name="Ana"), Character(id="b", name="Bram"), Character(id="c", name="Cole")]
     secret = SecretRecord(id="s", title="The Tide Debt")
     matrix = {"s": {"revealed": False, "known_by": {"a", "b"}}}
-    assert secret_row(secret, chars, matrix).plain.endswith("2 know")
+    row = secret_row(secret, chars, matrix)
+    assert row.plain.endswith("●●○ 2/3")
+    meter_spans = [(row.plain[s.start:s.end], str(s.style)) for s in row.spans]
+    assert ("●●○ 2/3", ALARM_STYLE) in meter_spans
 
 
 def test_secret_row_clips_long_titles():
@@ -391,7 +408,10 @@ def test_matrix_rows_cover_every_secret_by_character_pair(n_secrets, n_chars):
     rows = [line for line in tab.lines if line.plain.startswith("S")]
     assert len(rows) == n_secrets
     for row in rows:
-        assert row.plain.count("○") + row.plain.count("●") == n_chars
+        cells = row.plain.count("○") + row.plain.count("●")
+        assert cells == (2 * n_chars if n_chars else 0)   # matrix cells + meter cells
+        if n_chars:
+            assert row.plain.endswith(f"0/{n_chars}")
 
 
 def test_causeway_line_uses_chapter_titles_and_arrow_never_ids():
