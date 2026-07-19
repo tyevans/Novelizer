@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated
+from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated, ThemeIntroduced
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
 from novelizer.store.models import Chapter, EditorialStatus, Character
 
 
@@ -188,6 +188,22 @@ async def test_editor_commit_drops_pay_off_for_unknown_thread_id(stack):
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_editor_commits_theme_develop_intent(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        theme_intents=[ThemeIntent(action="develop", id="loss")],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    theme = await read.get_theme("loss")
+    assert theme.touch_count == 1
 
 
 async def test_editor_commit_with_no_thread_intents_emits_no_thread_events(stack):

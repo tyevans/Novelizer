@@ -4,7 +4,7 @@ import pytest
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, ThemeIntroduced
 from novelizer.store.models import Chapter, Character, WorldEntry, RetconRequest, RetconStatus
 from novelizer.tui.widgets.browser_model import browser_sections, detail_text
 
@@ -27,11 +27,30 @@ async def test_sections_cover_all_categories(stack):
     await events.append(EventType.RETCON_REQUEST_CREATED, "r1", RetconRequest(id="r1", description="scar mismatch", conflicting_entry_ids=[], proposed_resolution="left hand"))
     await proj.catch_up()
     secs = await browser_sections(read)
-    assert [s["key"] for s in secs] == ["chapters", "characters", "world", "retcons"]
+    assert [s["key"] for s in secs] == ["chapters", "characters", "world", "retcons", "themes"]
     assert secs[0]["items"][0]["label"].startswith("One")
     assert "Mira" in secs[1]["items"][0]["label"]
     assert "Brinemarsh" in secs[2]["items"][0]["label"]
     assert "scar mismatch" in secs[3]["items"][0]["label"]
+
+
+async def test_browser_sections_includes_themes(stack):
+    events, proj, read = stack
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss of Innocence"))
+    await proj.catch_up()
+    secs = await browser_sections(read)
+    themes_section = [s for s in secs if s["key"] == "themes"][0]
+    assert themes_section["label"] == "Themes (1)"
+    assert themes_section["items"][0]["id"] == "loss"
+    assert "Loss of Innocence" in themes_section["items"][0]["label"]
+
+
+async def test_detail_text_renders_theme(stack):
+    events, proj, read = stack
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss of Innocence"))
+    await proj.catch_up()
+    d = await detail_text(read, "themes", "loss")
+    assert "Loss of Innocence" in d
 
 
 async def test_detail_text_for_chapter_and_character(stack):

@@ -39,6 +39,7 @@ class Editor(BaseAgent):
             "secrets": await self._read.list_secrets(),
             "chapters": await self._read.list_chapters(),
             "causal_edges": await self._read.list_causal_edges(),
+            "themes": await self._read.list_themes(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -96,6 +97,8 @@ class Editor(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_theme_ids = {t.id for t in ctx["themes"]}
+        await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
         await self._commit_knowledge_intents(verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id)
         valid_chapter_ids = {c.id for c in ctx["chapters"]}

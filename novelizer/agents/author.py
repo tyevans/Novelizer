@@ -58,6 +58,7 @@ class Author(BaseAgent):
             "threads": await self._read.list_threads(),
             "secrets": await self._read.list_secrets(),
             "knowledge_matrix": await self._read.knowledge_matrix(),
+            "themes": await self._read.list_themes(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -76,6 +77,8 @@ class Author(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter.id)
+        active_theme_ids = {t.id for t in ctx["themes"]}
+        await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
         await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter.id)
         valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}

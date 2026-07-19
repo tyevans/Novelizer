@@ -29,6 +29,7 @@ class ChapterDraft(BaseModel):
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
+    theme_intents: list[ThemeIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):

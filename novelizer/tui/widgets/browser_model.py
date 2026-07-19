@@ -11,6 +11,7 @@ async def browser_sections(read) -> list:
     characters = await read.list_characters()
     world = await read.list_world_entries()
     retcons = await read.list_retcon_requests(status="open")
+    themes = await read.list_themes()
     return [
         {"key": "chapters", "label": f"Chapters ({len(chapters)})",
          "items": [{"id": c.id, "label": f"{c.title} [{_enum_val(c.editorial_status)}]"} for c in chapters]},
@@ -20,6 +21,8 @@ async def browser_sections(read) -> list:
          "items": [{"id": e.id, "label": f"[{_enum_val(e.domain)}] {e.title}"} for e in world]},
         {"key": "retcons", "label": f"Retcons ({len(retcons)})",
          "items": [{"id": r.id, "label": r.description[:40]} for r in retcons]},
+        {"key": "themes", "label": f"Themes ({len(themes)})",
+         "items": [{"id": t.id, "label": t.title} for t in themes]},
     ]
 
 
@@ -45,4 +48,9 @@ async def detail_text(read, section_key: str, item_id: str) -> str:
             if r.id == item_id:
                 return f"{r.description}\n\nProposed: {r.proposed_resolution}\nStatus: {_enum_val(r.status)}"
         return ""
+    if section_key == "themes":
+        theme = await read.get_theme(item_id)
+        if not theme:
+            return ""
+        return f"{theme.title}\n\nTouched {theme.touch_count}x. Last note: {theme.last_note}"
     return ""
