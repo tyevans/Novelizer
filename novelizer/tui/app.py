@@ -7,84 +7,33 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
-from novelizer.canon.autonomy import AutonomyState
 from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
 from novelizer.tui.chat_screen import ChatScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
-from novelizer.tui.widgets.roster import roster_summary
+from novelizer.tui.widgets.roster import command_hint, status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
-from novelizer.tui.widgets.browser_model import detail_text
-from novelizer.tui.widgets.proposals_model import pending_lines
-from novelizer.tui.widgets.thread_board import ThreadBoard
-from novelizer.tui.widgets.story_shape import StoryShape
-from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
-from novelizer.tui.widgets.causeway import Causeway
+from novelizer.tui.widgets.browser_model import detail_view
+from novelizer.tui.widgets.proposals_model import banner_line
+from novelizer.tui.approval_screen import ApprovalScreen
+from novelizer.tui.widgets.brain_panel import BrainPanel
+from novelizer.tui.widgets.feed_model import (
+    render_event,
+    chapter_rule,
+    welcome_lines,
+    worker_error_line,
+)
 from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
     LiveRunState, apply_bus_item, seed_state, trace_line, trace_detail,
 )
 
-_LABELS = {
-    EventType.CHAPTER_CREATED: "Author",
-    EventType.WORLD_ENTRY_CREATED: "Architect",
-    EventType.CHARACTER_CREATED: "Keeper",
-    EventType.DIRECTOR_SIGNAL_CREATED: "Director",
-    EventType.RETCON_REQUEST_CREATED: "Retcon",
-    EventType.CHAPTER_STATUS_CHANGED: "Editor",
-}
-
-_AGENT_LABELS = {
-    "author": "Author",
-    "editor": "Editor",
-    "world_architect": "Architect",
-    "character_keeper": "Keeper",
-    "continuity_checker": "Continuity",
-    "retconner": "Retconner",
-}
-
-
-def _agent_label(agent_name: str) -> str:
-    return _AGENT_LABELS.get(agent_name, agent_name.replace("_", " ").title())
-
 
 def format_event(ev: StoredEvent) -> str:
-    p = ev.payload
-    if ev.event_type == EventType.AGENT_REMARKED:
-        label = _agent_label(p.get("agent_name", "?"))
-        note = p.get("note", "")
-        return f'💬 {label}: "{note}"'
-    if ev.event_type == EventType.CHAT_AGENT_REPLIED:
-        label = _agent_label(p.get("agent_name", "?"))
-        text = p.get("text", "")
-        preview = text[:80] + ("…" if len(text) > 80 else "")
-        return f'💬 {label} replied: "{preview}"'
-    who = _LABELS.get(ev.event_type, "System")
-    if ev.event_type == EventType.CHAPTER_CREATED:
-        detail = f"new chapter: {p.get('title', '')}"
-    elif ev.event_type == EventType.WORLD_ENTRY_CREATED:
-        detail = f"lore: {p.get('title', '')}"
-    elif ev.event_type == EventType.DIRECTOR_SIGNAL_CREATED:
-        detail = f"signal: {p.get('body', '')}"
-    elif ev.event_type == EventType.RETCON_REQUEST_CREATED:
-        detail = f"retcon: {p.get('description', '')}"
-    elif ev.event_type == EventType.CHAPTER_STATUS_CHANGED:
-        detail = f"chapter reviewed: {p.get('title', '')}"
-    else:
-        detail = ev.event_type
-    return f"◆ {who} — {detail}"
-
-
-def _status_line(state: AutonomyState) -> str:
-    base = (
-        f"AUTONOMY: {state.global_level.value}   ·   :seed <text> · :focus <x> · "
-        f":pause <agent> · :autonomy <level> [agent] · :approve/:reject <id> · :settings · @agent <msg>"
-    )
-    if state.overrides:
-        summary = ", ".join(f"{k}={v.value}" for k, v in state.overrides.items())
-        base += f"  (overrides: {summary})"
-    return base
+    """Plain-text rendering of a feed line — the string surface app.messages
+    and the existing tests assert on. Styling lives in render_event."""
+    return render_event(ev).plain
 
 
 class NovelizerApp(App):
@@ -96,17 +45,24 @@ class NovelizerApp(App):
     # so "ctrl+k" is used to focus the command input instead.
     BINDINGS = [
         ("ctrl+k", "focus_command", "Command"),
+        ("a", "approvals", "Approve"),
         ("r", "toggle_room", "Room"),
         ("e", "toggle_engine", "Engine Room"),
         ("p", "toggle_prompt", "Prompt"),
         ("v", "toggle_reading", "Reading"),
+        ("1", "brain_tab('tab_shape')", "Shape"),
+        ("2", "brain_tab('tab_threads')", "Threads"),
+        ("3", "brain_tab('tab_secrets')", "Secrets"),
+        ("4", "brain_tab('tab_causeway')", "Cause"),
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime, hint_index: int = 0) -> None:
         super().__init__()
         self.runtime = runtime
+        self._hint_index = hint_index
         self._last_seq = 0
+        self._chapter_count = 0
         self.messages: list[str] = []
         self._live_state = LiveRunState()
         self._trace_events: deque = deque(maxlen=200)
@@ -115,22 +71,28 @@ class NovelizerApp(App):
         yield Header()
         with Horizontal(id="body"):
             with Vertical(id="left"):
-                yield RichLog(highlight=False, markup=False, id="feed")
-                yield Static("no pending proposals", id="proposals")
-                yield ThreadBoard("no threads yet", id="thread_board")
-                yield StoryShape("no chapters scored yet", id="story_shape")
-                yield WhoKnowsWhat("no secrets yet", id="who_knows_what")
-                yield Causeway("no causal edges yet", id="causeway")
+                feed = RichLog(highlight=False, markup=False, id="feed")
+                feed.border_title = "THE ROOM"
+                yield feed
+                banner = Static(id="proposals_banner")
+                banner.display = False
+                yield banner
+                brain = BrainPanel(id="brain")
+                brain.border_title = "STORY BRAIN"
+                yield brain
                 yield EngineRoom(id="engine_room")
             with Vertical(id="right"):
-                yield StoryBrowser("Story", id="browser")
-                with VerticalScroll(id="detail_scroll"):
+                browser = StoryBrowser("Story", id="browser")
+                browser.border_title = "STORY"
+                yield browser
+                with VerticalScroll(id="detail_scroll") as detail_scroll:
+                    detail_scroll.border_title = "DETAIL"
                     yield Static("Select an item to view details.", id="detail")
-        yield Static("AUTONOMY: loading…", id="statusbar")
+        yield Static("loading…", id="statusbar")
         yield ActivityStrip("idle", id="activity_strip")
         # compact=True drops Input's default tall border, which would consume
         # both edges of the single row #command gets and leave 0 content lines.
-        yield Input(id="command", placeholder="command… (seed/focus/pause/resume)", compact=True)
+        yield Input(id="command", placeholder=command_hint(self._hint_index), compact=True)
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -140,22 +102,19 @@ class NovelizerApp(App):
         self.run_worker(self._browser_loop(), exclusive=False)
         self.run_worker(self._proposals_loop(), exclusive=False)
         self.run_worker(self._statusbar_loop(), exclusive=False)
-        self.run_worker(self._thread_board_loop(), exclusive=False)
-        self.run_worker(self._story_shape_loop(), exclusive=False)
+        self.run_worker(self._brain_loop(), exclusive=False)
         self.run_worker(self._settings_watch_loop(), exclusive=False)
-        self.run_worker(self._who_knows_what_loop(), exclusive=False)
-        self.run_worker(self._causeway_loop(), exclusive=False)
         self.run_worker(self._telemetry_bus_loop(), exclusive=False)
         self.run_worker(self._telemetry_refresh_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
-        line = f"⚠ {worker_name} error: {e}"
+        line = worker_error_line(worker_name, e)
         try:
             log = self.query_one("#feed", RichLog)
             log.write(line)
         except Exception:
             pass
-        self.messages.append(line)
+        self.messages.append(line.plain)
 
     async def _projector_loop(self) -> None:
         while True:
@@ -190,6 +149,13 @@ class NovelizerApp(App):
 
     async def _feed_loop(self) -> None:
         log = self.query_one("#feed", RichLog)
+        try:
+            if not await self.runtime.events.events_since(0):
+                for line in welcome_lines():
+                    log.write(line)
+                    self.messages.append(line.plain)
+        except Exception as e:
+            self._report_worker_error("feed", e)
         while True:
             try:
                 events = await self.runtime.events.events_since(self._last_seq)
@@ -197,9 +163,14 @@ class NovelizerApp(App):
                     self._last_seq = ev.sequence
                     if ev.event_type == EventType.CHAT_USER_MESSAGED:
                         continue
-                    rendered = format_event(ev)
+                    if ev.event_type == EventType.CHAPTER_CREATED:
+                        self._chapter_count += 1
+                        rule = chapter_rule(self._chapter_count, ev.payload.get("title", ""))
+                        log.write(rule)
+                        self.messages.append(rule.plain)
+                    rendered = render_event(ev)
                     log.write(rendered)
-                    self.messages.append(rendered)
+                    self.messages.append(rendered.plain)
             except Exception as e:
                 self._report_worker_error("feed", e)
             await asyncio.sleep(0.3)
@@ -207,7 +178,10 @@ class NovelizerApp(App):
     async def _browser_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#browser", StoryBrowser).refresh_sections(self.runtime.read)
+                await self.query_one("#browser", StoryBrowser).refresh_sections(
+                    self.runtime.read,
+                    staleness_threshold=self.runtime.settings.staleness_threshold_chapters,
+                )
             except Exception as e:
                 self._report_worker_error("browser", e)
             await asyncio.sleep(1.0)
@@ -215,8 +189,11 @@ class NovelizerApp(App):
     async def _proposals_loop(self) -> None:
         while True:
             try:
-                lines = await pending_lines(self.runtime.read)
-                self.query_one("#proposals", Static).update("\n".join(lines) or "no pending proposals")
+                open_count = len(await self.runtime.read.list_proposals(status="open"))
+                banner = self.query_one("#proposals_banner", Static)
+                if open_count:
+                    banner.update(banner_line(open_count))
+                banner.display = bool(open_count)
             except Exception as e:
                 self._report_worker_error("proposals", e)
             await asyncio.sleep(0.5)
@@ -225,30 +202,22 @@ class NovelizerApp(App):
         while True:
             try:
                 state = await self.runtime.read.get_autonomy_state()
-                agents = roster_summary(self.runtime.scheduler.status())
-                self.query_one("#statusbar", Static).update(f"{agents}   |   {_status_line(state)}")
+                strip = status_strip(self.runtime.scheduler.status(), state)
+                self.query_one("#statusbar", Static).update(strip)
             except Exception as e:
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
 
-    async def _thread_board_loop(self) -> None:
+    async def _brain_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#thread_board", ThreadBoard).refresh_from(
-                    self.runtime.read, threshold=self.runtime.settings.staleness_threshold_chapters
+                await self.query_one("#brain", BrainPanel).refresh_from(
+                    self.runtime.read,
+                    threshold=self.runtime.settings.staleness_threshold_chapters,
+                    delta=self.runtime.settings.sag_spike_delta,
                 )
             except Exception as e:
-                self._report_worker_error("thread_board", e)
-            await asyncio.sleep(1.0)
-
-    async def _story_shape_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#story_shape", StoryShape).refresh_from(
-                    self.runtime.read, delta=self.runtime.settings.sag_spike_delta
-                )
-            except Exception as e:
-                self._report_worker_error("story_shape", e)
+                self._report_worker_error("brain", e)
             await asyncio.sleep(1.0)
 
     async def _settings_watch_loop(self) -> None:
@@ -288,22 +257,6 @@ class NovelizerApp(App):
                 line = f"⚙ settings error: {'; '.join(result['errors'])}"
                 log.write(line)
                 self.messages.append(line)
-
-    async def _who_knows_what_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#who_knows_what", WhoKnowsWhat).refresh_from(self.runtime.read)
-            except Exception as e:
-                self._report_worker_error("who_knows_what", e)
-            await asyncio.sleep(1.0)
-
-    async def _causeway_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#causeway", Causeway).refresh_from(self.runtime.read)
-            except Exception as e:
-                self._report_worker_error("causeway", e)
-            await asyncio.sleep(1.0)
 
     def _next_hint(self) -> str:
         try:
@@ -359,6 +312,16 @@ class NovelizerApp(App):
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))
 
+    async def action_approvals(self) -> None:
+        # Guard: never stack the modal over itself or over another pushed
+        # screen (e.g. SettingsScreen). App bindings still fire while a modal
+        # is up for keys the modal doesn't consume, so this must be checked.
+        if self.screen is not self.default_screen:
+            return
+        if not await self.runtime.read.list_proposals(status="open"):
+            return
+        self.push_screen(ApprovalScreen(self.runtime))
+
     def action_toggle_room(self) -> None:
         # Room and reading are mutually exclusive: room hides #right, reading
         # hides #left — both at once would blank the whole body.
@@ -377,6 +340,9 @@ class NovelizerApp(App):
     def action_toggle_prompt(self) -> None:
         if self.query_one("#body").has_class("engine"):
             self.query_one("#engine_room", EngineRoom).toggle_prompt()
+
+    def action_brain_tab(self, pane_id: str) -> None:
+        self.query_one("#brain", BrainPanel).activate_tab(pane_id)
 
     async def _run_command(self, line: str) -> None:
         stripped = line.strip()
@@ -440,14 +406,21 @@ class NovelizerApp(App):
         data = event.node.data
         if not data or not data.get("id"):
             return
-        text = await detail_text(self.runtime.read, data["section"], data["id"])
-        self._update_detail(text or "(no detail)")
+        view = await detail_view(self.runtime.read, data["section"], data["id"])
+        if view.title:
+            self._update_detail(view.body, view.title)
+        else:
+            self._update_detail("(no detail)")
 
-    def _update_detail(self, text: str) -> None:
-        self.query_one("#detail", Static).update(text)
+    def _update_detail(self, content, title: str = "") -> None:
+        self.query_one("#detail", Static).update(content)
+        # The pane self-labels: border title is the selected item's
+        # UPPERCASED title, reset to DETAIL when nothing is selected.
+        scroll = self.query_one("#detail_scroll", VerticalScroll)
+        scroll.border_title = title.upper() if title else "DETAIL"
         # New selection: start reading at the top, not wherever the previous
         # entry was scrolled to.
-        self.query_one("#detail_scroll", VerticalScroll).scroll_home(animate=False)
+        scroll.scroll_home(animate=False)
 
     async def on_data_table_row_selected(self, event) -> None:
         if event.data_table.id != "er_trace":

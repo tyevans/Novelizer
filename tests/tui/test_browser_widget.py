@@ -15,7 +15,7 @@ class _Host(App):
     def compose(self) -> ComposeResult:
         yield StoryBrowser("Story", id="browser")
     async def on_mount(self):
-        await self.query_one(StoryBrowser).refresh_sections(self._read)
+        await self.query_one(StoryBrowser).refresh_sections(self._read, staleness_threshold=3)
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_expansion_preserved_when_item_count_changes():
 
             await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p2"))
             await proj.catch_up()
-            await tree.refresh_sections(read)
+            await tree.refresh_sections(read, staleness_threshold=3)
 
             chapters_node = next(n for n in tree.root.children if "Chapters" in str(n.label))
             assert chapters_node.is_expanded is True

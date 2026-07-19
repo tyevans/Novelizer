@@ -569,7 +569,7 @@ async def test_m5_2_done_when_mechanical_chain_themes(stack):
     assert len([e for e in log if e.event_type == EventType.THEME_INTRODUCED]) == 1
 
     # --- browser-visible clause: the theme shows up in browser_sections().
-    sections = await browser_sections(read)
+    sections = await browser_sections(read, staleness_threshold=3)
     themes_section = next(s for s in sections if s["key"] == "themes")
     assert any(item["id"] == "loss" and item["label"] == "Loss" for item in themes_section["items"])
 

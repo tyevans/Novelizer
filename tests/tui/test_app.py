@@ -33,19 +33,19 @@ def test_format_chapter_status_changed_labels_editor():
     assert "One" in line and "Editor" in line
 
 
-def test_status_line_shows_real_autonomy_level():
-    from novelizer.tui.app import _status_line
+def test_dial_shows_real_autonomy_level_never_a_guess():
+    from novelizer.tui.widgets.roster import dial_meter
     from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
-    line = _status_line(AutonomyState(global_level=AutonomyLevel.gated_canon))
+    line = dial_meter(AutonomyState(global_level=AutonomyLevel.gated_canon)).plain
     assert "gated_canon" in line
     assert "full-auto" not in line
 
 
-def test_status_line_summarizes_overrides():
-    from novelizer.tui.app import _status_line
+def test_dial_summarizes_overrides():
+    from novelizer.tui.widgets.roster import dial_meter
     from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
-    line = _status_line(AutonomyState(global_level=AutonomyLevel.full_auto,
-                                       overrides={"retconner": AutonomyLevel.gated_all}))
+    line = dial_meter(AutonomyState(global_level=AutonomyLevel.full_auto,
+                                    overrides={"retconner": AutonomyLevel.gated_all})).plain
     assert "retconner=gated_all" in line
 
 

@@ -79,5 +79,8 @@ def test_format_event_previews_agent_reply_and_feed_skips_user_message():
         created_at="now",
     )
     rendered = format_event(reply)
-    assert rendered.startswith("💬 Author replied:")
-    assert len(rendered) < 120
+    # New feed contract: identity speaker column, then a dim remark-style
+    # reply preview; the 200-char text is clamped, never shown whole.
+    assert rendered.startswith("✎ Author")
+    assert '💬 replied: "' in rendered
+    assert "x" * 200 not in rendered

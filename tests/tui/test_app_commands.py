@@ -85,3 +85,37 @@ async def test_command_input_has_visible_content_row():
             )
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_command_placeholder_is_hint_zero_by_default():
+    from novelizer.tui.widgets.roster import PLACEHOLDER_HINTS
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)  # default hint_index=0: deterministic under test
+    try:
+        async with app.run_test():
+            from textual.widgets import Input
+            assert app.query_one("#command", Input).placeholder == PLACEHOLDER_HINTS[0]
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_command_placeholder_rotates_with_hint_index():
+    from novelizer.tui.widgets.roster import PLACEHOLDER_HINTS
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt, hint_index=2)
+    try:
+        async with app.run_test():
+            from textual.widgets import Input
+            assert app.query_one("#command", Input).placeholder == PLACEHOLDER_HINTS[2]
+    finally:
+        await rt.close(); os.unlink(path)

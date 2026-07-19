@@ -202,11 +202,11 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     a FakeRunner preset to return no LLM-found contradictions -> assert the
     resulting retcon_request.created event lands via the Committer, its
     description starting with LEAK_SOURCE_TAG -> assert it appears in
-    list_retcon_requests(status=open) -> assert the Who-Knows-What widget's
-    render-time helper still shows the character as not-having-learned the
+    list_retcon_requests(status=open) -> assert the Secrets matrix render-time helper (brain_model.secret_row)
+    still shows the character as not-having-learned the
     secret (the leak is flagged, not silently resolved). No live model call.
     """
-    from novelizer.tui.widgets.who_knows_what import who_knows_what_line
+    from novelizer.tui.widgets.brain_model import secret_row
     from novelizer.store.models import Character
 
     events, proj, read, committer = stack
@@ -238,15 +238,15 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     # Step 3: it's visible in the open retcon queue.
     assert leak_reqs[0].status == RetconStatus.open
 
-    # Step 4: the Who-Knows-What widget's render-time helper still shows
+    # Step 4: the Secrets matrix render-time helper (brain_model.secret_row) still shows
     # Kestrel as not having learned the secret -- the leak is flagged, not
     # silently resolved.
     secret = await read.get_secret("the-heir-lives")
     characters = await read.list_characters()
     matrix = await read.knowledge_matrix()
-    line = who_knows_what_line(secret, characters, matrix)
-    assert "Kestrel" not in line
-    assert "known to no one" in line
+    row = secret_row(secret, characters, matrix).plain
+    assert "●" not in row          # no filled cell — Kestrel hasn't learned it
+    assert "no one knows" in row
 
 
 from novelizer.brain.mining import MINED_SOURCE_TAG

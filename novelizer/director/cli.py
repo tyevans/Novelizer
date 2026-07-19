@@ -162,12 +162,15 @@ def cli(ctx, story_path: str | None):
 
 
 def _launch_tui(settings: EffectiveSettings) -> None:
+    import random
+
     from novelizer.tui.app import NovelizerApp
+    from novelizer.tui.widgets.roster import PLACEHOLDER_HINTS
 
     async def _boot():
         rt = Runtime(settings)
         await rt.start()
-        app = NovelizerApp(rt)
+        app = NovelizerApp(rt, hint_index=random.randrange(len(PLACEHOLDER_HINTS)))
         try:
             await app.run_async()
         finally:

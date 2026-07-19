@@ -1,0 +1,82 @@
+# Testing the TUI (and running the full suite without losing a night to it)
+
+Practical notes from the Mission Control design-pass work (2026-07-18/19), where two
+full-suite runs sat "blocked" for 30 minutes and ~12 hours respectively. Most of this
+is generic to the repo's test setup; the war story at the bottom explains the specific
+hang signature so nobody re-diagnoses it from scratch.
+
+## The layers
+
+- **Pure model tests** (`tests/tui/test_*_model.py`, `test_roster.py`, `test_identity.py`):
+  plain functions in, `rich.Text`/strings out. No Textual runtime, milliseconds each.
+  This is where almost all visual logic lives and where new rendering behavior gets its
+  red/green tests first. Assert on `.plain` for content and on `.spans` for styling —
+  widgets are thin enough that everything visual is checkable here.
+- **Widget/pilot tests** (`test_app_layout.py`, `test_approval_screen.py`, etc.):
+  Textual's `run_test()` pilot drives the real app headlessly. These are seconds each;
+  the whole `tests/tui` suite is ~100s. Pilot tests cover wiring only (bindings, screen
+  stack, loops writing into the right widget) — not rendering detail.
+- **Screenshot verification** (manual, not in CI): copy a real story DB, run the app
+  with no-op fake runners under a pilot, `app.save_screenshot()` → SVG → cairosvg PNG.
+  Ty's `stories/` churns between sessions — always `ls stories/` for a current DB and
+  always copy it; never point the app at a live DB.
+
+## The gates
+
+- Run the TUI suite as: `uv run pytest tests/tui -q -W error`
+- **Zero warnings is a hard gate** (`-W error`). Textual deprecations and un-awaited
+  coroutines surface as failures, on purpose.
+- `live_llm`-marked tests are deselected by `addopts = "-m 'not live_llm'"` in
+  `pyproject.toml`; a full run reporting "N deselected" is normal.
+
+## Running the FULL suite (read this before you background it)
+
+The full suite (`uv run pytest -q -W error`) takes ~2 minutes of CPU but has a known
+failure mode where the *process outlives the test run*: chromadb's Rust core spawns a
+large pool of `tokio-rt-worker` threads (observed: 112), and under some orderings the
+interpreter wedges at or near shutdown — all tests done, process asleep on a futex,
+forever. Two rules follow:
+
+1. **Never pipe a long pytest run through `tail`/`head`.** The pipe only flushes on
+   EOF; if the process wedges at exit you get an empty file and zero visibility into
+   1000 tests that may all have passed. Redirect to a file instead:
+
+   ```sh
+   timeout -s KILL 1500 uv run pytest -v -W error \
+       -o faulthandler_timeout=120 > /tmp/fullsuite.log 2>&1
+   ```
+
+2. **Always wrap in `timeout -s KILL`** and set `-o faulthandler_timeout=120`:
+   pytest's built-in faulthandler then dumps *every thread's stack* into the log if any
+   single test stalls >120s, which distinguishes "a test is hung" from "the suite
+   finished but the process won't die". With `-v` output going straight to the log, the
+   last line always names the last test started.
+
+### Diagnosing a wedged run (no sudo, `ptrace_scope=1`, so no py-spy)
+
+- `ps -o etime,time`: huge elapsed + tiny CPU (~90s) means the suite *finished its
+  work* and is wedged, not slow.
+- `cat /proc/<pid>/task/*/comm | sort | uniq -c` — a pile of `tokio-rt-worker`
+  threads fingerprints the chromadb shutdown wedge.
+- `ls -l /proc/<pid>/fd` — open `data_level0.bin`/`header.bin` etc. are chroma
+  segment files; deleted-but-open pytest tmpdirs tell you which tests touched chroma.
+- `/proc/<pid>/net/tcp` is **namespace-wide**, not per-process — don't mistake other
+  processes' connections (e.g. live novelizer sessions on the same box) for test
+  network activity. Match the socket inode numbers from `/proc/<pid>/fd` instead.
+- The chroma test file (`tests/agents/test_base.py -k theme_intents`) exits cleanly in
+  isolation; the wedge only reproduces in larger runs, so bisect with directory
+  subsets, each under `timeout`.
+
+## Pilot-test conventions worth keeping
+
+- Widget visibility asserts via the `display` property work whether visibility is set
+  inline or via CSS classes — but *setting* `widget.display = ...` writes the inline
+  style layer, which silently out-ranks every stylesheet rule (e.g. mode-scoped
+  `#body.engine ... { display: none }`). Toggle classes from Python; let the
+  stylesheet own `display`. Test the interaction (mode + state) explicitly — a test
+  for each flag alone will pass while the combination is broken.
+- Fake time/agents: pilot tests inject no-op fake runners; loops read settings every
+  cycle, so tests pass thresholds explicitly (keyword-only params, no defaults).
+- Bindings under a modal: `App.query_one` resolves against the default screen, so
+  refresh loops keep working while a modal is up; guard modal-opening actions with
+  `self.screen is not self.default_screen`.

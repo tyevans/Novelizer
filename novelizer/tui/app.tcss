@@ -2,14 +2,14 @@
 #left { width: 3fr; }
 #right { width: 2fr; }
 #feed { height: 3fr; border: round $primary; }
-#proposals { height: auto; max-height: 6; border: round $secondary; }
-#thread_board { height: auto; max-height: 8; border: round $secondary; }
-#story_shape { height: auto; max-height: 8; border: round $secondary; }
-#who_knows_what { height: auto; max-height: 8; border: round $secondary; }
-#causeway { height: auto; max-height: 8; border: round $secondary; }
+#proposals_banner { height: 1; padding: 0 1; }
+#brain { height: 16; max-height: 45%; border: round $secondary; }
+#brain TabPane { padding: 0 1; }
+#shape_spark { height: 1; }
+#brain_strip { height: 1; padding: 0 1; }
 #browser { height: 2fr; border: round $primary; }
 #detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }
-#detail { height: auto; }
+#detail { height: auto; max-width: 80; }
 #statusbar { height: 1; background: $panel; color: $text; }
 #activity_strip { height: 1; background: $boost; color: $text; padding: 0 1; }
 #command { height: 1; padding: 0 1; }
@@ -20,9 +20,8 @@
 #body.reading #detail_scroll { width: 3fr; height: 1fr; }
 #engine_room { display: none; }
 #body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
-#body.engine #feed, #body.engine #roster, #body.engine #proposals,
-#body.engine #thread_board, #body.engine #story_shape,
-#body.engine #who_knows_what, #body.engine #causeway { display: none; }
+#body.engine #feed, #body.engine #proposals_banner,
+#body.engine #brain { display: none; }
 #er_vitals { height: 1; background: $boost; padding: 0 1; }
 #er_stream_scroll { height: 2fr; }
 #er_stream { height: auto; }
@@ -32,6 +31,12 @@
 #settings_table { height: 1fr; }
 #settings_msg { height: 1; }
 #edit_value { height: 3; }
+#feed, #browser { border-title-style: bold; }
+#brain, #detail_scroll { border-title-color: $text-muted; }
+ApprovalScreen { align: center middle; }
+#approval_box { width: 80%; max-width: 100; height: 70%; border: round $primary; background: $surface; border-title-style: bold; }
+#approval_list { height: 1fr; }
+#approval_context { height: auto; max-height: 10; padding: 0 1; }
 
 ChatScreen #chat_log {
     height: 1fr;
