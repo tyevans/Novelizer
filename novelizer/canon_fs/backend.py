@@ -15,6 +15,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.utils import create_file_data, slice_read_response
+from wcmatch import glob as wcglob
 
 from novelizer.canon_fs.paths import build_path_index
 from novelizer.canon_fs.render import (
@@ -154,3 +155,17 @@ class CanonBackend(BackendProtocol):
         return LsResult(entries=[
             FileInfo(path=p, is_dir=False) for p in sorted(snap.index) if p.startswith(prefix)
         ])
+
+    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
+        snap = await self._snapshot()
+        if pattern.startswith("/"):
+            full = pattern.lstrip("/")
+        else:
+            base = (path or "/").strip("/")
+            full = f"{base}/{pattern}" if base else pattern
+        matches = [
+            FileInfo(path=p, is_dir=False)
+            for p in sorted(snap.index)
+            if wcglob.globmatch(p.lstrip("/"), full, flags=wcglob.GLOBSTAR)
+        ]
+        return GlobResult(matches=matches)

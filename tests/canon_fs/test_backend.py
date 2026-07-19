@@ -170,3 +170,30 @@ async def test_als_empty_string_treated_as_root(stack):
     assert [e["path"] for e in result.entries] == [
         "/chapters", "/characters", "/world", "/threads", "/secrets", "/themes",
     ]
+
+
+async def test_aglob_absolute_and_relative(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    absolute = await backend.aglob("/chapters/*.md")
+    assert [m["path"] for m in absolute.matches] == ["/chapters/001-the-drowned-bell.md"]
+    relative = await backend.aglob("*.md", path="/secrets")
+    assert [m["path"] for m in relative.matches] == ["/secrets/the-scar.md"]
+
+
+async def test_aglob_globstar_spans_directories(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.aglob("**/*.md")
+    assert len(result.matches) == 6  # every canon file
+    assert result.matches == sorted(result.matches, key=lambda m: m["path"])
+
+
+async def test_aglob_no_matches_is_empty_not_error(stack):
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    backend = CanonBackend(read)
+    result = await backend.aglob("*.txt")
+    assert result.error is None and result.matches == []
