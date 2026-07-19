@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.brain.context import open_retcons_note
 from novelizer.canon.characters import slugify_character_name
@@ -25,7 +25,7 @@ You receive the current cast (with traits and arcs) and recent prose chapters. Y
 Return new_characters, updated_characters (id + revised arc_status, and any corrected
 traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
 proposed_resolution). You may also be shown retcon requests already filed and still open:
-do not re-report those issues, even reworded."""
+do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
 
 
 class CharacterKeeper(BaseAgent):
@@ -46,7 +46,13 @@ class CharacterKeeper(BaseAgent):
             # Prose exists but the cast is empty: bootstrapping the cast is
             # the Keeper's most urgent work — nothing else mints characters.
             return 0.8
-        return 0.5 if (chars and chapters) else 0.2
+        score = 0.5 if (chars and chapters) else 0.2
+        return await self._gate_on_watermark(score)
+
+    async def _fingerprint(self) -> tuple:
+        chapters = await self._read.list_chapters()
+        open_retcons = await self._read.list_retcon_requests(status=RetconStatus.open)
+        return (len(chapters), chapters[-1].id if chapters else "", len(open_retcons))
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
@@ -71,6 +77,10 @@ class CharacterKeeper(BaseAgent):
 
     async def commit(self, out: KeeperOutput | None, ctx: dict) -> None:
         if out is None:
+            return
+        if out.no_action:
+            await self._remark(out.feed_note or DEFAULT_PASS_REMARK)
+            self.note_pass()
             return
         # Re-read the cast at commit time (not from ctx): the LLM call in
         # work() is slow enough that a concurrent cycle may have minted
@@ -135,6 +145,7 @@ class CharacterKeeper(BaseAgent):
         ctx = await self.poll()
         out = await self.work(ctx)
         await self.commit(out, ctx)
+        await self._record_watermark()
 
 
 def build_character_keeper_runner(settings, callbacks=None):
