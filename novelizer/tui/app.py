@@ -16,7 +16,12 @@ from novelizer.tui.widgets.thread_board import ThreadBoard
 from novelizer.tui.widgets.story_shape import StoryShape
 from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
 from novelizer.tui.widgets.causeway import Causeway
-from novelizer.tui.widgets.feed_model import render_event
+from novelizer.tui.widgets.feed_model import (
+    render_event,
+    chapter_rule,
+    welcome_lines,
+    worker_error_line,
+)
 
 
 def format_event(ev: StoredEvent) -> str:
@@ -54,6 +59,7 @@ class NovelizerApp(App):
         super().__init__()
         self.runtime = runtime
         self._last_seq = 0
+        self._chapter_count = 0
         self.messages: list[str] = []
 
     def compose(self) -> ComposeResult:
@@ -90,13 +96,13 @@ class NovelizerApp(App):
         self.run_worker(self._causeway_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
-        line = f"⚠ {worker_name} error: {e}"
+        line = worker_error_line(worker_name, e)
         try:
             log = self.query_one("#feed", RichLog)
             log.write(line)
         except Exception:
             pass
-        self.messages.append(line)
+        self.messages.append(line.plain)
 
     async def _projector_loop(self) -> None:
         while True:
@@ -116,13 +122,25 @@ class NovelizerApp(App):
 
     async def _feed_loop(self) -> None:
         log = self.query_one("#feed", RichLog)
+        try:
+            if not await self.runtime.events.events_since(0):
+                for line in welcome_lines():
+                    log.write(line)
+                    self.messages.append(line.plain)
+        except Exception as e:
+            self._report_worker_error("feed", e)
         while True:
             try:
                 events = await self.runtime.events.events_since(self._last_seq)
                 for ev in events:
-                    rendered = format_event(ev)
+                    if ev.event_type == EventType.CHAPTER_CREATED:
+                        self._chapter_count += 1
+                        rule = chapter_rule(self._chapter_count, ev.payload.get("title", ""))
+                        log.write(rule)
+                        self.messages.append(rule.plain)
+                    rendered = render_event(ev)
                     log.write(rendered)
-                    self.messages.append(rendered)
+                    self.messages.append(rendered.plain)
                     self._last_seq = ev.sequence
             except Exception as e:
                 self._report_worker_error("feed", e)
