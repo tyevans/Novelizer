@@ -561,6 +561,38 @@ async def test_runtime_chat_pull_mode_off_uses_bare_chat_runner(settings, monkey
         await rt.close()
 
 
+async def test_chat_runner_for_follows_pull_mode_not_live_settings_flag(settings, monkeypatch):
+    """CPT-M5 final-review fix: a mid-session chat_tools_enabled flip on the
+    live settings must NOT split-brain the tooling away from the pull_mode
+    pinned at start() -- _chat_runner_for gates on rt.chat.pull_mode, not
+    rt.settings.chat_tools_enabled."""
+    settings = settings.model_copy(update={"chat_tools_enabled": True})
+    runners = _all_fake_runners()
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.chat.pull_mode is True
+
+        # Simulate a live flag flip without a restart (pull_mode stays pinned).
+        rt.settings = rt.settings.model_copy(update={"chat_tools_enabled": False})
+
+        seen_kwargs: list[dict] = []
+
+        def _spy_build_chat_runner(settings, agent_name, callbacks=None, backend=None, tools=None):
+            seen_kwargs.append({"backend": backend, "tools": tools})
+            return _FakeAgentRunner()
+
+        monkeypatch.setattr("novelizer.runtime.build_chat_runner", _spy_build_chat_runner)
+
+        rt._chat_runner_for("editor")
+
+        assert len(seen_kwargs) == 1
+        assert seen_kwargs[0]["backend"] is rt._canon_backend
+        assert seen_kwargs[0]["tools"] is rt._canon_tools
+    finally:
+        await rt.close()
+
+
 async def test_chat_runner_for_falls_back_to_bare_before_start(settings, monkeypatch):
     """_chat_runner_for can be invoked without start() having run (no
     self._canon_backend/_canon_tools yet) -- must fall back to the bare

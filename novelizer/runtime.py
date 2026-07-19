@@ -117,7 +117,8 @@ class Runtime:
         if key not in self._chat_runner_cache:
             backend = getattr(self, "_canon_backend", None)
             tools = getattr(self, "_canon_tools", None)
-            if self.settings.chat_tools_enabled and backend is not None and tools is not None:
+            pull_mode = self.chat is not None and self.chat.pull_mode
+            if pull_mode and backend is not None and tools is not None:
                 self._chat_runner_cache[key] = build_chat_runner(
                     self.settings, agent_name, callbacks=self._llm_callbacks,
                     backend=backend, tools=tools,

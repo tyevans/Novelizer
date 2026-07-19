@@ -19,6 +19,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
     model = build_chat_model(
         model_name, settings.llm_base_url, settings.llm_api_key,
         settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
     )
     persona = CHAT_PERSONAS[agent_name]
     system_prompt = CHAT_SYSTEM_PROMPT.format(role_prompt=persona.role_prompt)

@@ -75,7 +75,7 @@ class EffectiveSettings(BaseModel):
     last_opened_story: str | None = None
     suppress_flat_migration_prompt: bool = False
 
-    # Tool enablement: whether Author and Checker agents can use external tools.
+    # Tool enablement: whether Author, Checker, and chat personas can use external tools.
     author_tools_enabled: bool = True
     checker_tools_enabled: bool = True
     chat_tools_enabled: bool = True
