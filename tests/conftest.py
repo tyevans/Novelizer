@@ -15,6 +15,28 @@ class FakeEmbeddingFunction:
 
     _DIM = 16
 
+    @staticmethod
+    def is_legacy() -> bool:
+        # chromadb's modern EmbeddingFunction protocol probes this; without it
+        # every collection op emits a DeprecationWarning (suite is zero-warning).
+        return False
+
+    @staticmethod
+    def get_config() -> dict:
+        return {}
+
+    @staticmethod
+    def default_space() -> str:
+        return "l2"
+
+    @staticmethod
+    def supported_spaces() -> list[str]:
+        return ["l2", "cosine", "ip"]
+
+    @staticmethod
+    def build_from_config(config: dict) -> "FakeEmbeddingFunction":
+        return FakeEmbeddingFunction()
+
     def __call__(self, input: list[str]) -> list[list[float]]:
         return [self._embed(text) for text in input]
 
