@@ -117,3 +117,8 @@ def test_parse_story_accepts_author_and_checker_tools_enabled():
     cfg = parse_story({"author_tools_enabled": False, "checker_tools_enabled": False}, source="s.toml")
     assert cfg.author_tools_enabled is False
     assert cfg.checker_tools_enabled is False
+
+
+def test_parse_story_accepts_chat_tools_enabled():
+    cfg = parse_story({"chat_tools_enabled": False}, source="s.toml")
+    assert cfg.chat_tools_enabled is False

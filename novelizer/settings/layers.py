@@ -48,6 +48,7 @@ class GlobalConfig(BaseModel):
     max_concurrent_agents: int | None = None
     author_tools_enabled: bool | None = None
     checker_tools_enabled: bool | None = None
+    chat_tools_enabled: bool | None = None
 
 
 class StoryConfig(BaseModel):
@@ -76,6 +77,7 @@ class StoryConfig(BaseModel):
     muse_exclusion_hands: int | None = None
     author_tools_enabled: bool | None = None
     checker_tools_enabled: bool | None = None
+    chat_tools_enabled: bool | None = None
 
 
 def global_config_path() -> Path:
