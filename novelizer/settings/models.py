@@ -16,6 +16,8 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "prior_chapter_summary_chars", "keeper_prose_chars", "staleness_threshold_chapters", "sag_spike_delta",
     "muse_era", "muse_exclusion_hands",
     "author_tools_enabled", "checker_tools_enabled", "chat_tools_enabled",
+    "world_architect_tools_enabled", "character_keeper_tools_enabled", "editor_tools_enabled",
+    "retconner_tools_enabled", "structure_analyst_tools_enabled",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -83,3 +85,9 @@ class EffectiveSettings(BaseModel):
     author_tools_enabled: bool = True
     checker_tools_enabled: bool = True
     chat_tools_enabled: bool = True
+    # Phase-B per-agent tool enablement flags
+    world_architect_tools_enabled: bool = True
+    character_keeper_tools_enabled: bool = True
+    editor_tools_enabled: bool = True
+    retconner_tools_enabled: bool = True
+    structure_analyst_tools_enabled: bool = True
