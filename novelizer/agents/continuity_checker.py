@@ -25,7 +25,9 @@ world. Read one chapter's prose plus the current knowledge matrix, active secret
 edges. Report facts the prose SHOWS but the log has no covering event for: a character using or learning
 a secret, a secret being revealed, a thread being touched or paid off, or a causal link between chapters.
 Cite existing ids only -- set known_id=False if you cannot confidently match the fact to an existing
-secret/thread id. Return empty lists if the prose shows nothing new."""
+secret/thread id. A character ACTING on a secret the prose never showed them learning is a 'uses' fact,
+not 'learn' -- report 'learn' only when the chapter shows the moment of learning on the page. Return
+empty lists if the prose shows nothing new."""
 
 # Thread actions mined prose can report ("touch", "planted", "paid_off" -- see
 # MinedThreadFact) map onto ThreadIntent's authoring vocabulary ("touch",
@@ -274,6 +276,13 @@ def build_continuity_checker_runner(settings):
 
 def build_continuity_mining_runner(settings):
     from deepagents import create_deep_agent
+    from langchain.agents.structured_output import ProviderStrategy
     from novelizer.agents.llm import build_chat_model
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature)
-    return create_deep_agent(model=model, system_prompt=MINING_SYSTEM_PROMPT, response_format=MinedFactsOutput)
+    # ProviderStrategy pushes the schema to the endpoint as OpenAI json_schema
+    # response_format; llama.cpp grammar-constrains decoding, so local models
+    # cannot emit fenced-JSON text instead of the structured channel (observed
+    # live with the default tool-calling strategy: correct facts, None
+    # structured_response). Mining is single-shot with no tools, so
+    # constraining generation is safe here.
+    return create_deep_agent(model=model, system_prompt=MINING_SYSTEM_PROMPT, response_format=ProviderStrategy(MinedFactsOutput))
