@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from typing import Optional
 from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
 from novelizer.canon.event_store import EventStore
@@ -8,6 +9,9 @@ from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.scheduler import Scheduler
+from novelizer.telemetry.bus import TelemetryBus
+from novelizer.telemetry.recorder import TelemetryRecorder
+from novelizer.telemetry.callbacks import TelemetryCallbackHandler
 from novelizer.agents.author import Author, build_author_runner
 from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
 from novelizer.agents.character_keeper import CharacterKeeper, build_character_keeper_runner
@@ -26,6 +30,10 @@ class Runtime:
         self.events = EventStore(settings.db_path)
         self.projector = Projector(self.events, settings.db_path)
         self.read = ReadStore(settings.db_path)
+        self.telemetry_store = EventStore(str(Path(settings.db_path).with_name("telemetry.db")))
+        self.telemetry_bus = TelemetryBus()
+        self.telemetry = TelemetryRecorder(self.telemetry_store, self.telemetry_bus)
+        self._llm_callbacks = [TelemetryCallbackHandler(self.telemetry)]
         self.policy: Optional[AutonomyPolicy] = None
         self.proposals: Optional[ProposalService] = None
         self.committer = None  # constructed in start(), once self.read is initialized
@@ -50,15 +58,16 @@ class Runtime:
             # Any name absent from an injected runners dict falls back to the real
             # builder (not just "continuity_checker_mining", which motivated this) —
             # builders construct lazily and never touch the network before ainvoke().
-            return builder(self.settings)
+            return builder(self.settings, callbacks=self._llm_callbacks)
         if name == "author" and self._runner is not None:
             return self._runner
-        return builder(self.settings)
+        return builder(self.settings, callbacks=self._llm_callbacks)
 
     async def start(self) -> None:
         await self.events.init()
         await self.projector.init()
         await self.read.init()
+        await self.telemetry_store.init()
         await self.projector.catch_up()
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
@@ -109,7 +118,9 @@ class Runtime:
             self.world_architect, self.character_keeper, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
-        self.scheduler = Scheduler(self.agents, self.read)
+        for agent in self.agents:
+            agent.telemetry = self.telemetry
+        self.scheduler = Scheduler(self.agents, self.read, telemetry=self.telemetry)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -167,15 +178,15 @@ class Runtime:
 
         rebuild = self._runners is None and self._runner is None
         if "author_temperature" in changed and rebuild:
-            self.author._runner = build_author_runner(stored)
+            self.author._runner = build_author_runner(stored, callbacks=self._llm_callbacks)
         if "agent_temperature" in changed and rebuild:
-            self.world_architect._runner = build_world_architect_runner(stored)
-            self.character_keeper._runner = build_character_keeper_runner(stored)
-            self.editor._runner = build_editor_runner(stored)
-            self.continuity_checker._runner = build_continuity_checker_runner(stored)
-            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored)
-            self.retconner._runner = build_retconner_runner(stored)
-            self.structure_analyst._runner = build_structure_analyst_runner(stored)
+            self.world_architect._runner = build_world_architect_runner(stored, callbacks=self._llm_callbacks)
+            self.character_keeper._runner = build_character_keeper_runner(stored, callbacks=self._llm_callbacks)
+            self.editor._runner = build_editor_runner(stored, callbacks=self._llm_callbacks)
+            self.continuity_checker._runner = build_continuity_checker_runner(stored, callbacks=self._llm_callbacks)
+            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored, callbacks=self._llm_callbacks)
+            self.retconner._runner = build_retconner_runner(stored, callbacks=self._llm_callbacks)
+            self.structure_analyst._runner = build_structure_analyst_runner(stored, callbacks=self._llm_callbacks)
 
         if self.author is not None and self.author.provenance is not None:
             self.author.provenance = {
@@ -191,4 +202,5 @@ class Runtime:
     async def close(self) -> None:
         await self.read.close()
         await self.projector.close()
+        await self.telemetry_store.close()
         await self.events.close()

@@ -368,3 +368,52 @@ async def test_runtime_missing_personality_falls_back_to_empty_string():
     finally:
         os.unlink(path)
         os.unlink(custom_pack_path)
+
+
+async def test_runtime_wires_telemetry_store_bus_and_recorder(tmp_path):
+    from novelizer.settings import EffectiveSettings as Settings
+    from novelizer.runtime import Runtime
+
+    class _R:
+        async def ainvoke(self, inputs):
+            return {"structured_response": None}
+
+    db = tmp_path / "world.db"
+    settings = Settings(db_path=str(db))
+    rt = Runtime(settings, runners={n: _R() for n in [
+        "author", "world_architect", "character_keeper", "editor",
+        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst"]})
+    await rt.start()
+    try:
+        assert rt.telemetry is not None and rt.telemetry_bus is not None
+        # telemetry.db lands beside the domain db — never inside it
+        assert (tmp_path / "telemetry.db").exists()
+        # every agent got the recorder injected; scheduler too
+        assert all(a.telemetry is rt.telemetry for a in rt.agents)
+        assert rt.scheduler._telemetry is rt.telemetry
+    finally:
+        await rt.close()
+
+
+async def test_agent_run_via_runtime_lands_run_events_in_telemetry_log(tmp_path):
+    from novelizer.settings import EffectiveSettings as Settings
+    from novelizer.runtime import Runtime
+    from novelizer.telemetry.events import TelemetryEventType
+
+    class _R:
+        async def ainvoke(self, inputs):
+            return {"structured_response": None}
+
+    settings = Settings(db_path=str(tmp_path / "world.db"))
+    rt = Runtime(settings, runners={n: _R() for n in [
+        "author", "world_architect", "character_keeper", "editor",
+        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst"]})
+    await rt.start()
+    try:
+        await rt.author.run_once()
+        tel = await rt.telemetry_store.events_since(0)
+        types = [e.event_type for e in tel]
+        assert TelemetryEventType.AGENT_RUN_STARTED in types
+        assert TelemetryEventType.AGENT_RUN_FINISHED in types
+    finally:
+        await rt.close()
