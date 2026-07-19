@@ -16,3 +16,12 @@
 #settings_table { height: 1fr; }
 #settings_msg { height: 1; }
 #edit_value { height: 3; }
+
+ChatScreen #chat_log {
+    height: 1fr;
+    border: solid $primary;
+    padding: 0 1;
+}
+ChatScreen #chat_input {
+    dock: bottom;
+}

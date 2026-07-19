@@ -280,6 +280,26 @@ class NovelizerApp(App):
         log.write(f"» {result}")
         self.messages.append(f"» {result}")
 
+    async def send_chat_message(self, agent_name: str, text: str) -> None:
+        """Send a chat message and schedule reply generation (completed in the
+        chat-routing change; ChatScreen calls this)."""
+        message_id = await self.runtime.chat.send(agent_name, text)
+        self.run_worker(self._chat_reply_worker(agent_name, message_id), exclusive=False)
+
+    async def _chat_reply_worker(self, agent_name: str, replying_to: str) -> None:
+        try:
+            await self.runtime.chat.generate_reply(agent_name, replying_to)
+        except Exception as e:
+            line = f"⚠ {agent_name} reply failed: {e}"
+            try:
+                self.query_one("#feed", RichLog).write(line)
+            except Exception:
+                pass
+            self.messages.append(line)
+            from novelizer.tui.chat_screen import ChatScreen
+            if isinstance(self.screen, ChatScreen):
+                self.screen.add_error(agent_name, line)
+
     async def on_input_submitted(self, event) -> None:
         if event.input.id == "command":
             await self._run_command(event.value)
