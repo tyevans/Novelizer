@@ -41,6 +41,24 @@ class ThreadIntent(BaseModel):
     note: str = ""
 
 
+class ThemeIntent(BaseModel):
+    """One agent-declared theme action from structured output.
+
+    `introduce` mints a new theme from a freeform `title` (the system slugs it
+    into an id — see novelizer.canon.themes.slugify_theme_name); `develop`
+    must cite an existing theme's `id` rather than inventing one. Unlike
+    threads/secrets, themes have no terminal states (no pay_off/abandon/reveal).
+    `BaseAgent._commit_theme_intents` turns validated intents into theme.*
+    commits (see novelizer/agents/base.py). This plan/schema implements
+    M5.2 Locked decision 6 (theme action vocabulary).
+    """
+
+    action: Literal["introduce", "develop"]
+    title: str = ""
+    id: str = ""
+    note: str = ""
+
+
 class KnowledgeIntent(BaseModel):
     """One agent-declared secret-knowledge action from structured output.
 
@@ -91,6 +109,19 @@ class KeeperOutput(BaseModel):
     feed_note: str = ""
 
 
+class VoiceDriftFlag(BaseModel):
+    """One agent-declared instance of a character's prose voice violating its
+    voice card, from Editor structured output. Cited at commit time as a
+    tagged retcon_request.created (see novelizer/agents/editor.py's
+    VOICE_SOURCE_TAG), never a direct canon mutation.
+    """
+
+    character_id: str
+    line: str
+    trait_violated: str
+    note: str = ""
+
+
 class EditorVerdict(BaseModel):
     verdict: Literal["approve", "revise"] = "approve"
     notes: str = ""
@@ -98,6 +129,8 @@ class EditorVerdict(BaseModel):
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
+    theme_intents: list[ThemeIntent] = Field(default_factory=list)
+    voice_drift_flags: list[VoiceDriftFlag] = Field(default_factory=list)
 
 
 class ContinuityOutput(BaseModel):

@@ -5,9 +5,9 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, ThreadPlanted
+from novelizer.canon.events import EventType, ThreadPlanted, ThemeIntroduced
 from novelizer.agents.author import Author, ChapterDraft
-from novelizer.agents.schemas import ThreadIntent
+from novelizer.agents.schemas import ThreadIntent, ThemeIntent
 from novelizer.store.models import Chapter, DirectorSignal, SignalKind
 
 
@@ -200,6 +200,19 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_commits_theme_introduce_intent(stack):
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="T", prose="P",
+        theme_intents=[ThemeIntent(action="introduce", title="Loss")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    theme = await read.get_theme("loss")
+    assert theme is not None and theme.title == "Loss"
 
 
 async def test_author_prompt_includes_stale_threads_note_when_present(stack):

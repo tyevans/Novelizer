@@ -6,11 +6,13 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus
+from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest, RetconStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
 notes: if revising, specific actionable feedback; if approving, brief praise."""
+
+VOICE_SOURCE_TAG = "[source: voice_drift]"
 
 
 class Editor(BaseAgent):
@@ -39,6 +41,7 @@ class Editor(BaseAgent):
             "secrets": await self._read.list_secrets(),
             "chapters": await self._read.list_chapters(),
             "causal_edges": await self._read.list_causal_edges(),
+            "themes": await self._read.list_themes(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -96,10 +99,29 @@ class Editor(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_theme_ids = {t.id for t in ctx["themes"]}
+        await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
         await self._commit_knowledge_intents(verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id)
         valid_chapter_ids = {c.id for c in ctx["chapters"]}
         await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
+        if verdict.voice_drift_flags:
+            # The Editor re-targets the same draft chapter every cycle until it is
+            # revised, so an unchanged drift would re-file forever -- dedup by
+            # description against the open queue, same as the Continuity Checker's
+            # leak/paradox paths.
+            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+            seen_descriptions = {r.description for r in open_reqs}
+            for flag in verdict.voice_drift_flags:
+                description = (
+                    f"{VOICE_SOURCE_TAG} {flag.trait_violated} violated by {flag.character_id}: \"{flag.line}\""
+                    + (f" — {flag.note}" if flag.note else "")
+                )
+                if description in seen_descriptions:
+                    continue
+                seen_descriptions.add(description)
+                req = RetconRequest(description=description, conflicting_entry_ids=[flag.character_id], proposed_resolution="")
+                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
         await self._remark(verdict.feed_note)
 
     async def run_once(self) -> None:

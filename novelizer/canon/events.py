@@ -31,6 +31,8 @@ class EventType:
     CAUSAL_EDGE_DECLARED = "causal_edge.declared"
     ANNOTATION_STRUCTURE_SCORED = "annotation.structure_scored"
     CHAPTER_MINED = "chapter.mined"
+    THEME_INTRODUCED = "theme.introduced"
+    THEME_DEVELOPED = "theme.developed"
 
 
 class StoredEvent(BaseModel):
@@ -104,6 +106,43 @@ class ThreadAbandoned(BaseModel):
     id: str
     chapter_id: str = ""
     note: str = ""
+
+
+class ThemeIntroduced(BaseModel):
+    """Payload for theme.introduced — mints a new theme's identity.
+
+    `id` is the slug minted from `title` (see
+    novelizer.canon.themes.slugify_theme_name) at introduce time; every
+    later theme.* event for this theme must cite this id, never re-derive
+    it. Themes have no terminal state (M5.2 Locked decision 6) — unlike
+    ThreadPlanted's descendants, there is no paid_off/abandoned equivalent.
+    """
+
+    id: str
+    title: str
+    chapter_id: str = ""
+    note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    a hypothetical future mining extension ('mined') -- plumbing only, see
+    M5.2 Decision Note D1; nothing in M5.2 ever sets this to 'mined'."""
+
+
+class ThemeDeveloped(BaseModel):
+    """Payload for theme.developed — an existing theme advances, cited by id.
+
+    No terminal state (M5.2 Locked decision 6): a theme can be developed
+    indefinitely across the manuscript, unlike thread.touched's eventual
+    paid_off/abandoned absorption.
+    """
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+    source: str = "declared"
+    """source distinguishes agent-declared facts ('declared', default) from
+    a hypothetical future mining extension ('mined') -- plumbing only, see
+    M5.2 Decision Note D1; nothing in M5.2 ever sets this to 'mined'."""
 
 
 class SecretCreated(BaseModel):

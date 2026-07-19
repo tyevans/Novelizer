@@ -5,10 +5,12 @@ from pydantic import BaseModel, Field
 from novelizer.canon.events import (
     EventType, AgentRemark, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
+    ThemeIntroduced, ThemeDeveloped,
 )
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent
+from novelizer.canon.themes import slugify_theme_name
+from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class ChapterDraft(BaseModel):
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
+    theme_intents: list[ThemeIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):
@@ -148,6 +151,62 @@ class BaseAgent:
             else:
                 payload = payload_cls(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source)
             await self._committer.commit(self.name, event_type, intent.id, payload)
+
+    async def _commit_theme_intents(
+        self,
+        intents: list[ThemeIntent],
+        active_theme_ids: set[str],
+        chapter_id: str = "",
+        source: str = "declared",
+    ) -> None:
+        """Turn agent-declared ThemeIntent entries into theme.* commits.
+
+        `introduce` mints a new id via slugify_theme_name(intent.title) and is
+        dropped only if the title is blank. `develop` must cite an id present
+        in `active_theme_ids` — an intent naming an unknown id is dropped
+        with a logged warning and no event is committed. No-op on an empty
+        list. Themes have no terminal state (M5.2 Locked decision 6).
+        """
+        for intent in intents:
+            if intent.action == "introduce":
+                if not intent.title.strip():
+                    logger.warning("%s: dropped theme introduce intent with empty title", self.name)
+                    continue
+                theme_id = slugify_theme_name(intent.title)
+                if theme_id in active_theme_ids:
+                    # A theme id is minted exactly once, at theme.introduced. This
+                    # introduce collides with an id that's already live, so the agent
+                    # clearly means "this theme is live" — downgrade to a develop
+                    # instead of committing an introduced event the projection would
+                    # just no-op.
+                    logger.info(
+                        "%s: introduce %r collides with active theme id %r, downgrading to develop",
+                        self.name, intent.title, theme_id,
+                    )
+                    await self._committer.commit(
+                        self.name, EventType.THEME_DEVELOPED, theme_id,
+                        ThemeDeveloped(id=theme_id, chapter_id=chapter_id, note=intent.note, source=source),
+                    )
+                    continue
+                logger.warning(
+                    "%s: introduce %r mints id %r; if this id already exists (unknown to the "
+                    "caller) the commit will be a projection no-op",
+                    self.name, intent.title, theme_id,
+                )
+                await self._committer.commit(
+                    self.name, EventType.THEME_INTRODUCED, theme_id,
+                    ThemeIntroduced(id=theme_id, title=intent.title, chapter_id=chapter_id, note=intent.note, source=source),
+                )
+                continue
+            if intent.id not in active_theme_ids:
+                logger.warning(
+                    "%s: dropped theme %s intent for unknown id %r", self.name, intent.action, intent.id
+                )
+                continue
+            await self._committer.commit(
+                self.name, EventType.THEME_DEVELOPED, intent.id,
+                ThemeDeveloped(id=intent.id, chapter_id=chapter_id, note=intent.note, source=source),
+            )
 
     async def _commit_knowledge_intents(
         self,
