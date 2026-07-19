@@ -1,5 +1,5 @@
-from novelizer.canon_fs.render import render_chapter, render_world_entry
-from novelizer.store.models import Chapter, Domain, WorldEntry
+from novelizer.canon_fs.render import render_chapter, render_world_entry, render_character
+from novelizer.store.models import Chapter, Domain, WorldEntry, Character, CharacterRelationship, SecretRecord
 
 
 def test_render_chapter_has_id_status_cast_and_full_prose():
@@ -34,3 +34,26 @@ def test_empty_list_fields_omit_frontmatter_lines():
     out = render_world_entry(e)
     assert "tags:" not in out
     assert f"id: {e.id}" in out
+
+
+def test_render_character_dossier_and_knows():
+    c = Character(
+        name="Mara", traits="stubborn", motivations="find the bell", arc_status="rising",
+        relationships=[CharacterRelationship(target_character_id="c2", description="rival")],
+    )
+    secrets = [SecretRecord(id="s1", title="The scar's origin"), SecretRecord(id="s2", title="Hidden door")]
+    matrix = {"s1": {"revealed": False, "known_by": {c.id}}, "s2": {"revealed": False, "known_by": set()}}
+    out = render_character(c, matrix, secrets)
+    assert f"id: {c.id}" in out
+    assert "kind: character" in out
+    assert "# Mara" in out
+    assert "traits: stubborn" in out
+    assert "- c2: rival" in out
+    assert "- s1 (The scar's origin)" in out
+    assert "s2" not in out.split("## Knows")[1]
+
+
+def test_render_character_no_secrets_omits_knows_section():
+    c = Character(name="Bo")
+    out = render_character(c, {}, [])
+    assert "## Knows" not in out
