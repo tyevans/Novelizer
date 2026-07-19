@@ -40,6 +40,7 @@ class GlobalConfig(BaseModel):
     muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
+    keeper_prose_chars: int | None = None
     staleness_threshold_chapters: int | None = None
     sag_spike_delta: float | None = None
     muse_era: str | None = None
@@ -68,6 +69,7 @@ class StoryConfig(BaseModel):
     muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
+    keeper_prose_chars: int | None = None
     staleness_threshold_chapters: int | None = None
     sag_spike_delta: float | None = None
     muse_era: str | None = None

@@ -102,6 +102,11 @@ def test_parse_global_accepts_prior_chapter_summary_chars():
     assert cfg.prior_chapter_summary_chars == 100
 
 
+def test_parse_global_accepts_keeper_prose_chars():
+    cfg = parse_global({"keeper_prose_chars": 2500}, source="g.toml")
+    assert cfg.keeper_prose_chars == 2500
+
+
 def test_parse_story_accepts_staleness_and_sag_spike_settings():
     cfg = parse_story({"staleness_threshold_chapters": 5, "sag_spike_delta": 0.2}, source="s.toml")
     assert cfg.staleness_threshold_chapters == 5

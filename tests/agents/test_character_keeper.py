@@ -232,6 +232,33 @@ async def test_work_invokes_runner_when_cast_empty_but_chapters_exist(stack):
     assert "None yet" in sent
 
 
+async def test_work_prompt_includes_characters_introduced_late_in_a_chapter(stack):
+    events, proj, read, committer = stack
+    filler = "The rain kept falling on the empty street outside the chapel. " * 20
+    prose = filler + "Silas Vane stepped out of the shadows and spoke."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" in sent
+
+
+async def test_work_prompt_caps_prose_at_configured_prose_chars(stack):
+    events, proj, read, committer = stack
+    prose = ("x" * 150) + " Silas Vane arrived."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer, prose_chars=100)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" not in sent
+
+
 async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "silas-vane", Character(id="silas-vane", name="Silas Vane", traits="stoic"))

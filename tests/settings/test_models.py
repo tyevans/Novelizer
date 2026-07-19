@@ -60,6 +60,11 @@ def test_prior_chapter_summary_chars_default_is_200():
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS
 
 
+def test_keeper_prose_chars_default_is_6000():
+    assert EffectiveSettings().keeper_prose_chars == 6000
+    assert "keeper_prose_chars" in STORY_OVERRIDABLE_KEYS
+
+
 def test_staleness_and_sag_spike_defaults():
     s = EffectiveSettings()
     assert s.staleness_threshold_chapters == 3

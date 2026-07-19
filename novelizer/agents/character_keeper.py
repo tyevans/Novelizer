@@ -36,8 +36,13 @@ class CharacterKeeper(BaseAgent):
         committer: Committer,
         interval: int = 120,
         personality: str = "",
+        prose_chars: int = 6000,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="character_keeper", personality=personality)
+        # Discovery needs the whole chapter: a character introduced in the
+        # final scene is as canonical as one in the opening line. The cap
+        # only bounds tokens for outlier-length chapters.
+        self._prose_chars = prose_chars
 
     async def readiness(self) -> float:
         chars = await self._read.list_characters()
@@ -62,7 +67,7 @@ class CharacterKeeper(BaseAgent):
         if not ctx["characters"] and not ctx["recent"]:
             return None
         chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"]) or "None yet."
-        chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
+        chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:self._prose_chars]}" for c in ctx["recent"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
