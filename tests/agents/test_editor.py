@@ -7,8 +7,9 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated, ThemeIntroduced
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
-from novelizer.store.models import Chapter, EditorialStatus, Character
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, VoiceDriftFlag
+from novelizer.agents.editor import VOICE_SOURCE_TAG
+from novelizer.store.models import Chapter, EditorialStatus, Character, RetconStatus
 
 
 class FakeRunner:
@@ -378,3 +379,64 @@ async def test_editor_prompt_lists_active_secret_ids_for_citation(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Active secrets you may cite by id" in sent
     assert "- the-heir-lives ('The Heir Lives')" in sent
+
+
+async def test_editor_voice_drift_flag_commits_tagged_retcon(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve",
+        notes="clean",
+        voice_drift_flags=[
+            VoiceDriftFlag(
+                character_id="mara",
+                line="I dunno, whatever.",
+                trait_violated="formal, clipped diction",
+                note="drops into casual slang",
+            )
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 1
+    assert "formal, clipped diction" in tagged[0].description
+
+
+async def test_editor_voice_drift_flag_cites_character_in_conflicting_entry_ids(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve",
+        notes="clean",
+        voice_drift_flags=[
+            VoiceDriftFlag(
+                character_id="mara",
+                line="I dunno, whatever.",
+                trait_violated="formal, clipped diction",
+                note="drops into casual slang",
+            )
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert tagged[0].conflicting_entry_ids == ["mara"]
+
+
+async def test_editor_no_voice_drift_flags_commits_no_extra_retcon(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    agent = Editor(FakeRunner(EditorVerdict(verdict="approve", notes="clean")), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert tagged == []
