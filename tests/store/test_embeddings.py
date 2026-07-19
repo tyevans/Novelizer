@@ -15,6 +15,13 @@ async def store():
         s.close()
 
 
+@pytest.fixture
+async def fake_store(tmp_path):
+    s = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
+    yield s
+    s.close()
+
+
 def test_embedding_store_accepts_injectable_embedding_function(tmp_path):
     store = EmbeddingStore(path=str(tmp_path), embedding_function=FakeEmbeddingFunction())
     store.close()
@@ -46,15 +53,12 @@ async def test_delete(store):
     assert len(results) == 0
 
 
-async def test_upsert_and_delete_thread_and_secret():
-    with tempfile.TemporaryDirectory() as tmp_path:
-        store = EmbeddingStore(path=tmp_path, embedding_function=FakeEmbeddingFunction())
-        await store.upsert_thread(ThreadRecord(id="t1", name="Bell's Curse", last_note="rang again"))
-        await store.upsert_secret(SecretRecord(id="s1", title="The Scar"))
-        assert store._threads.count() == 1
-        assert store._secrets.count() == 1
-        await store.delete("t1", "threads")
-        await store.delete("s1", "secrets")
-        assert store._threads.count() == 0
-        assert store._secrets.count() == 0
-        store.close()
+async def test_upsert_and_delete_thread_and_secret(fake_store):
+    await fake_store.upsert_thread(ThreadRecord(id="t1", name="Bell's Curse", last_note="rang again"))
+    await fake_store.upsert_secret(SecretRecord(id="s1", title="The Scar"))
+    assert fake_store._threads.count() == 1
+    assert fake_store._secrets.count() == 1
+    await fake_store.delete("t1", "threads")
+    await fake_store.delete("s1", "secrets")
+    assert fake_store._threads.count() == 0
+    assert fake_store._secrets.count() == 0
