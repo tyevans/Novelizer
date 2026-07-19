@@ -22,6 +22,9 @@ class Retconner(BaseAgent):
         personality: str = "",
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="retconner", personality=personality)
+        # Requests that failed an attempt (exception or empty response) are
+        # deferred so one poisoned request can't block the whole queue.
+        self._deferred: set[str] = set()
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
@@ -29,7 +32,14 @@ class Retconner(BaseAgent):
 
     async def poll(self) -> dict:
         open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
-        return {"target": open_reqs[0] if open_reqs else None, "world": await self._read.list_world_entries()}
+        self._deferred &= {r.id for r in open_reqs}
+        candidates = [r for r in open_reqs if r.id not in self._deferred]
+        if not candidates and open_reqs:
+            # Every open request has failed one attempt — start a fresh pass
+            # rather than idling forever with readiness pinned at 1.0.
+            self._deferred.clear()
+            candidates = open_reqs
+        return {"target": candidates[0] if candidates else None, "world": await self._read.list_world_entries()}
 
     async def work(self, ctx: dict) -> RetconAmendments | None:
         req = ctx["target"]
@@ -55,8 +65,19 @@ class Retconner(BaseAgent):
 
     async def run_once(self) -> None:
         ctx = await self.poll()
-        out = await self.work(ctx)
-        await self.commit(out, ctx)
+        req = ctx["target"]
+        if req is None:
+            return
+        try:
+            out = await self.work(ctx)
+            if out is None:
+                self._deferred.add(req.id)
+                return
+            await self.commit(out, ctx)
+        except Exception:
+            self._deferred.add(req.id)
+            raise
+        self._deferred.discard(req.id)
 
 
 def build_retconner_runner(settings):

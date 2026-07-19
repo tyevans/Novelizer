@@ -442,6 +442,64 @@ async def test_editor_no_voice_drift_flags_commits_no_extra_retcon(stack):
     assert tagged == []
 
 
+async def test_voice_drift_dedup_survives_reworded_trait(stack):
+    # Regression: the live Editor rephrased trait_violated (and note) on every
+    # pass over the same unrevised draft, so dedup-by-description never matched
+    # and ~6 real complaints stacked into ~20 open retcons. The dedup key must
+    # be the stable (character, line) pair, not the LLM's wording.
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    first = EditorVerdict(verdict="revise", notes="drifting", voice_drift_flags=[
+        VoiceDriftFlag(character_id="the-boy", line="suspended in amber light",
+                       trait_violated="ordinary vocabulary", note="poetic padding"),
+    ])
+    await Editor(FakeRunner(first), read, committer).run_once()
+    await proj.catch_up()
+    reworded = EditorVerdict(verdict="revise", notes="still drifting", voice_drift_flags=[
+        VoiceDriftFlag(character_id="the-boy", line="suspended in amber light",
+                       trait_violated="functional description only", note="atmospheric decoration"),
+    ])
+    await Editor(FakeRunner(reworded), read, committer).run_once()
+    await proj.catch_up()
+    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+              if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 1
+
+
+async def test_voice_drift_dedup_within_a_single_verdict(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean", voice_drift_flags=[
+        VoiceDriftFlag(character_id="the-boy", line="suspended in amber light",
+                       trait_violated="ordinary vocabulary"),
+        VoiceDriftFlag(character_id="the-boy", line="suspended in amber light",
+                       trait_violated="no stylistic thumbprint"),
+    ])
+    await Editor(FakeRunner(verdict), read, committer).run_once()
+    await proj.catch_up()
+    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+              if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 1
+
+
+async def test_voice_drift_distinct_lines_and_characters_all_filed(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(verdict="approve", notes="clean", voice_drift_flags=[
+        VoiceDriftFlag(character_id="the-boy", line="suspended in amber light", trait_violated="t"),
+        VoiceDriftFlag(character_id="the-boy", line="a secret anchor", trait_violated="t"),
+        VoiceDriftFlag(character_id="mara", line="suspended in amber light", trait_violated="t"),
+    ])
+    await Editor(FakeRunner(verdict), read, committer).run_once()
+    await proj.catch_up()
+    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+              if r.description.startswith(VOICE_SOURCE_TAG)]
+    assert len(tagged) == 3
+
+
 async def test_m5_2_done_when_mechanical_chain_themes(stack):
     """M5.2 done-when (a), theme half, traced clause by clause -- see
     docs/submilestones/M5-finish.md's M5.2 done-when cell and

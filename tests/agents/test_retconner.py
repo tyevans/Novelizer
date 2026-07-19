@@ -8,7 +8,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.retconner import Retconner
 from novelizer.agents.schemas import RetconAmendments, WorldEntryDraft
-from novelizer.store.models import WorldEntry, RetconRequest, RetconStatus
+from novelizer.store.models import WorldEntry, RetconRequest, RetconStatus, Domain
 
 
 class FakeRunner:
@@ -19,6 +19,21 @@ class FakeRunner:
     async def ainvoke(self, inputs):
         self.calls.append(inputs)
         return {"structured_response": self._out}
+
+
+class ScriptedRunner:
+    """Returns (or raises) each entry of `script` in order, one per call."""
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        step = self._script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return {"structured_response": step}
 
 
 @pytest.fixture
@@ -50,6 +65,81 @@ async def test_resolves_retcon_and_supersedes_entry(stack):
     # retcon marked resolved
     assert await read.list_retcon_requests(status=RetconStatus.open) == []
     assert len(await read.list_retcon_requests(status=RetconStatus.resolved)) == 1
+
+
+async def test_run_once_survives_llm_inventing_a_domain(stack):
+    # Regression: live retconner wedged in a ValidationError loop because the
+    # LLM answered domain="character" for a voice retcon; commit() must land
+    # the entry as Domain.other and still resolve the request.
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Voice", body="clipped."))
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="voice drift", conflicting_entry_ids=["w1"], proposed_resolution=""))
+    await proj.catch_up()
+    out = RetconAmendments.model_validate({
+        "amended_entries": [{"title": "Voice", "body": "v2", "domain": "character", "supersedes_id": "w1"}]
+    })
+    agent = Retconner(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    assert await read.list_retcon_requests(status=RetconStatus.open) == []
+    new = [e for e in await read.list_world_entries() if e.body == "v2"]
+    assert len(new) == 1
+    assert new[0].domain == Domain.other
+
+
+async def test_failing_head_request_does_not_block_the_queue(stack):
+    # Regression: poll() always took open_reqs[0], so one poisoned request
+    # froze the whole queue while new retcons stacked behind it.
+    events, proj, read, committer = stack
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="poisoned head", conflicting_entry_ids=[], proposed_resolution=""))
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r2",
+                        RetconRequest(id="r2", description="healthy follower", conflicting_entry_ids=[], proposed_resolution=""))
+    await proj.catch_up()
+    runner = ScriptedRunner([RuntimeError("provider exploded"), RetconAmendments()])
+    agent = Retconner(runner, read, committer)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    await agent.run_once()
+    await proj.catch_up()
+    assert "healthy follower" in runner.calls[-1]["messages"][0]["content"]
+    open_ids = {r.id for r in await read.list_retcon_requests(status=RetconStatus.open)}
+    assert open_ids == {"r1"}
+
+
+async def test_none_output_defers_head_request(stack):
+    # A structured_response of None used to leave the head request open and
+    # silently retry it forever — it must be deferred like a failure.
+    events, proj, read, committer = stack
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="gives nothing", conflicting_entry_ids=[], proposed_resolution=""))
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r2",
+                        RetconRequest(id="r2", description="healthy follower", conflicting_entry_ids=[], proposed_resolution=""))
+    await proj.catch_up()
+    runner = ScriptedRunner([None, RetconAmendments()])
+    agent = Retconner(runner, read, committer)
+    await agent.run_once()
+    await agent.run_once()
+    await proj.catch_up()
+    assert "healthy follower" in runner.calls[-1]["messages"][0]["content"]
+    open_ids = {r.id for r in await read.list_retcon_requests(status=RetconStatus.open)}
+    assert open_ids == {"r1"}
+
+
+async def test_deferral_resets_once_every_open_request_has_failed(stack):
+    # Deferral must not become a dead stop: with the whole queue deferred the
+    # retconner would no-op forever while readiness stays 1.0. A fresh pass
+    # starts instead.
+    events, proj, read, committer = stack
+    await events.append(EventType.RETCON_REQUEST_CREATED, "r1",
+                        RetconRequest(id="r1", description="only one", conflicting_entry_ids=[], proposed_resolution=""))
+    await proj.catch_up()
+    runner = ScriptedRunner([None, None])
+    agent = Retconner(runner, read, committer)
+    await agent.run_once()
+    await agent.run_once()
+    assert len(runner.calls) == 2
 
 
 async def test_noop_when_no_open_retcons(stack):

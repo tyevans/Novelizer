@@ -107,19 +107,21 @@ class Editor(BaseAgent):
         await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
         if verdict.voice_drift_flags:
             # The Editor re-targets the same draft chapter every cycle until it is
-            # revised, so an unchanged drift would re-file forever -- dedup by
-            # description against the open queue, same as the Continuity Checker's
-            # leak/paradox paths.
+            # revised, and the LLM rewords trait_violated/note on every pass, so
+            # dedup must key on the stable (character, line) fragment of the
+            # description — not the full reworded string — against the open queue.
             open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
-            seen_descriptions = {r.description for r in open_reqs}
+            open_descriptions = [r.description for r in open_reqs]
+            filed_keys: set[str] = set()
             for flag in verdict.voice_drift_flags:
+                key = f"violated by {flag.character_id}: \"{flag.line}\""
+                if key in filed_keys or any(key in d for d in open_descriptions):
+                    continue
+                filed_keys.add(key)
                 description = (
-                    f"{VOICE_SOURCE_TAG} {flag.trait_violated} violated by {flag.character_id}: \"{flag.line}\""
+                    f"{VOICE_SOURCE_TAG} {flag.trait_violated} {key}"
                     + (f" — {flag.note}" if flag.note else "")
                 )
-                if description in seen_descriptions:
-                    continue
-                seen_descriptions.add(description)
                 req = RetconRequest(description=description, conflicting_entry_ids=[flag.character_id], proposed_resolution="")
                 await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
         await self._remark(verdict.feed_note)
