@@ -6,6 +6,8 @@ from novelizer.tui.widgets.brain_model import (
     SHAPE_GUTTER,
     SPARK_LEVELS,
     THREADS_EMPTY,
+    WARN_STYLE,
+    age_bar,
     chapter_label,
     chapter_number,
     shape_tab,
@@ -163,11 +165,25 @@ def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     assert len(tab.spark.plain) == len(SHAPE_GUTTER) + len(tensions)
 
 
+def test_age_bar_scales_fill_and_heat_with_elapsed_over_threshold():
+    assert age_bar(0, 3).plain == "▱▱▱▱▱"
+    assert str(age_bar(0, 3).style) == "dim"
+    assert age_bar(1, 3).plain == "▰▰▱▱▱"          # round(1/3 · 5) = 2
+    assert age_bar(2, 3).plain == "▰▰▰▱▱"          # round(2/3 · 5) = 3
+    assert str(age_bar(2, 3).style) == WARN_STYLE  # 2/3 ≥ 0.6: warming
+    assert age_bar(3, 3).plain == "▰▰▰▰▰"
+    assert str(age_bar(3, 3).style) == ALARM_STYLE
+    assert age_bar(9, 3).plain == "▰▰▰▰▰"          # clamped past threshold
+    assert age_bar(0, 0).plain == "▱▱▱▱▱"          # degenerate threshold guarded
+
+
 def test_thread_line_stale_names_last_touched_chapter_and_gap():
     chs = _chapters("One", "Two", "Three", "Four", "Five")
     t = ThreadRecord(id="the-locket", name="The Locket", state=ThreadState.planted, last_chapter_id="c1")
     line = thread_line(t, chs)
-    assert line.plain == "⚠ The Locket · stale — last touched ch 1, 4 chapters ago"
+    assert line.plain == (
+        "⚠ " + "The Locket".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 4 chapters ago"
+    )
     assert str(line.style) == ALARM_STYLE
     assert "the-locket" not in line.plain
 
@@ -175,13 +191,29 @@ def test_thread_line_stale_names_last_touched_chapter_and_gap():
 def test_thread_line_stale_with_no_known_chapter_reads_untouched():
     chs = _chapters("One", "Two", "Three")
     t = ThreadRecord(id="t", name="The Boy's Gift", state=ThreadState.planted, last_chapter_id="")
-    assert thread_line(t, chs).plain == "⚠ The Boy's Gift · stale — untouched for 3 chapters"
+    line = thread_line(t, chs)
+    assert line.plain == (
+        "⚠ " + "The Boy's Gift".ljust(20) + "  ▰▰▰▰▰  stale — untouched for 3 chapters"
+    )
 
 
-def test_thread_line_live_shows_name_and_state_no_id():
+def test_thread_line_live_shows_name_bar_state_and_chapter_no_id():
     chs = _chapters("One")
     t = ThreadRecord(id="t", name="Fresh", state=ThreadState.touched, last_chapter_id="c1")
-    assert thread_line(t, chs).plain == "· Fresh · touched"
+    line = thread_line(t, chs)
+    assert line.plain == "· " + "Fresh".ljust(20) + "  ▱▱▱▱▱  touched — ch 1"
+    bar_spans = [(line.plain[s.start:s.end], str(s.style)) for s in line.spans]
+    assert ("▱▱▱▱▱", "dim") in bar_spans
+
+
+def test_thread_line_live_warming_bar_is_warn_styled_and_long_names_clip():
+    chs = _chapters("One", "Two", "Three")          # elapsed since c1 = 2, threshold 3
+    t = ThreadRecord(id="t", name="The Unraveling of Everything",
+                     state=ThreadState.touched, last_chapter_id="c1")
+    line = thread_line(t, chs)
+    assert line.plain.startswith("· The Unraveling of E…")   # clipped to NAME_WIDTH
+    bar_spans = [(line.plain[s.start:s.end], str(s.style)) for s in line.spans]
+    assert ("▰▰▰▱▱", WARN_STYLE) in bar_spans
 
 
 def test_thread_line_terminal_is_dim_and_never_stale():
@@ -204,8 +236,8 @@ def test_threads_tab_pins_stale_first_then_open_then_folds_terminal():
     ]
     tab = threads_tab(threads, chs)
     plains = [line.plain for line in tab.lines]
-    assert plains[0] == "⚠ Stale C · stale — last touched ch 1, 4 chapters ago"
-    assert plains[1] == "· Open A · touched"
+    assert plains[0] == "⚠ " + "Stale C".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 4 chapters ago"
+    assert plains[1] == "· " + "Open A".ljust(20) + "  ▱▱▱▱▱  touched — ch 5"
     assert plains[2] == "✓ 2 paid off · 1 abandoned"
     assert len(plains) == 3
     assert tab.alarm_count == 1
@@ -229,7 +261,7 @@ def test_thread_line_and_threads_tab_respect_explicit_threshold():
     assert "stale" in thread_line(t, chs, threshold=2).plain
     tab = threads_tab([t], chs, threshold=2)
     assert tab.alarm_count == 1
-    assert tab.lines[0].plain == "⚠ T · stale — last touched ch 1, 2 chapters ago"
+    assert tab.lines[0].plain == "⚠ " + "T".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 2 chapters ago"
 
 
 def test_threads_tab_empty_state():

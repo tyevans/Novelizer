@@ -109,24 +109,50 @@ def shape_tab(
     return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts))
 
 
+AGE_BAR_CELLS = 5
+NAME_WIDTH = 20
+WARN_FRACTION = 0.6  # bar warms to WARN_STYLE at this fraction of the staleness threshold
+
+
+def age_bar(elapsed: int, threshold: int) -> Text:
+    """Thread-age heat bar: fill and color scale with elapsed/threshold, so
+    staleness is a visible gradient, not a binary flip. Clamped at full."""
+    ratio = min(elapsed / max(threshold, 1), 1.0)
+    filled = round(ratio * AGE_BAR_CELLS)
+    glyphs = "▰" * filled + "▱" * (AGE_BAR_CELLS - filled)
+    if ratio >= 1.0:
+        style = ALARM_STYLE
+    elif ratio >= WARN_FRACTION:
+        style = WARN_STYLE
+    else:
+        style = DIM
+    return Text(glyphs, style=style)
+
+
 def thread_line(
     thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
 ) -> Text:
-    """One Threads-tab row. Staleness comes from is_thread_stale /
-    chapters_elapsed_since — never re-derived; `threshold` arrives from
-    settings.staleness_threshold_chapters via the app's _brain_loop (M5.3
-    single-sourcing). No slugs/ids anywhere."""
+    """One Threads-tab row: state glyph, padded name, age heat bar, detail.
+    Staleness comes from is_thread_stale / chapters_elapsed_since — never
+    re-derived; `threshold` arrives from settings.staleness_threshold_chapters
+    via the app's _brain_loop. No slugs/ids anywhere."""
+    if thread.state.value in TERMINAL_STATES:
+        return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
+    elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
+    n = chapter_number(thread.last_chapter_id, chapters)
+    bar = age_bar(elapsed, threshold)
+    name = _clip_title(thread.name, NAME_WIDTH).ljust(NAME_WIDTH)
     if is_thread_stale(thread, chapters, threshold):
-        elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
-        n = chapter_number(thread.last_chapter_id, chapters)
         if n is None:
             detail = f"stale — untouched for {elapsed} chapters"
         else:
             detail = f"stale — last touched ch {n}, {elapsed} chapters ago"
-        return Text(f"⚠ {thread.name} · {detail}", style=ALARM_STYLE)
-    if thread.state.value in TERMINAL_STATES:
-        return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
-    return Text(f"· {thread.name} · {thread.state.value}")
+        return Text(f"⚠ {name}  {bar.plain}  {detail}", style=ALARM_STYLE)
+    detail = thread.state.value + (f" — ch {n}" if n is not None else "")
+    row = Text(f"· {name}  ")
+    row.append(bar.plain, style=bar.style)
+    row.append(f"  {detail}")
+    return row
 
 
 @dataclass(frozen=True)
