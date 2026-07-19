@@ -1,5 +1,7 @@
 from __future__ import annotations
 import asyncio
+import time
+from collections import deque
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -16,6 +18,10 @@ from novelizer.tui.widgets.thread_board import ThreadBoard
 from novelizer.tui.widgets.story_shape import StoryShape
 from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
 from novelizer.tui.widgets.causeway import Causeway
+from novelizer.tui.widgets.activity_strip import ActivityStrip
+from novelizer.tui.widgets.engine_room_model import (
+    LiveRunState, apply_bus_item, seed_state,
+)
 
 _LABELS = {
     EventType.CHAPTER_CREATED: "Author",
@@ -91,6 +97,8 @@ class NovelizerApp(App):
         self.runtime = runtime
         self._last_seq = 0
         self.messages: list[str] = []
+        self._live_state = LiveRunState()
+        self._trace_events: deque = deque(maxlen=200)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -107,6 +115,7 @@ class NovelizerApp(App):
                 yield StoryBrowser("Story", id="browser")
                 yield Static("Select an item to view details.", id="detail")
         yield Static("AUTONOMY: loading…", id="statusbar")
+        yield ActivityStrip("idle", id="activity_strip")
         # compact=True drops Input's default tall border, which would consume
         # both edges of the single row #command gets and leave 0 content lines.
         yield Input(id="command", placeholder="command… (seed/focus/pause/resume)", compact=True)
@@ -125,6 +134,8 @@ class NovelizerApp(App):
         self.run_worker(self._settings_watch_loop(), exclusive=False)
         self.run_worker(self._who_knows_what_loop(), exclusive=False)
         self.run_worker(self._causeway_loop(), exclusive=False)
+        self.run_worker(self._telemetry_bus_loop(), exclusive=False)
+        self.run_worker(self._telemetry_refresh_loop(), exclusive=False)
 
     def _report_worker_error(self, worker_name: str, e: Exception) -> None:
         line = f"⚠ {worker_name} error: {e}"
@@ -268,6 +279,48 @@ class NovelizerApp(App):
             except Exception as e:
                 self._report_worker_error("causeway", e)
             await asyncio.sleep(1.0)
+
+    def _next_hint(self) -> str:
+        try:
+            rows = [r for r in self.runtime.scheduler.status() if not r["paused"]]
+            if not rows:
+                return ""
+            soonest = min(rows, key=lambda r: r["next_ready_in"])
+            return f"next: {soonest['name']} in {int(soonest['next_ready_in'])}s"
+        except Exception:
+            return ""
+
+    def _refresh_strip(self) -> None:
+        strip = self.query_one("#activity_strip", ActivityStrip)
+        strip.render_state(self._live_state, time.monotonic(), self._next_hint())
+
+    async def _telemetry_bus_loop(self) -> None:
+        # Seed from the durable log first so a restart never shows a blank view.
+        try:
+            recent = await self.runtime.telemetry_store.events_since(0)
+            self._trace_events.extend(recent[-200:])
+            self._live_state = seed_state(recent[-50:], time.monotonic())
+            self._refresh_strip()
+        except Exception as e:
+            self._report_worker_error("telemetry-seed", e)
+        q = self.runtime.telemetry_bus.subscribe()
+        while True:
+            try:
+                item = await q.get()
+                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                if isinstance(item, StoredEvent):
+                    self._trace_events.append(item)
+                self._refresh_strip()
+            except Exception as e:
+                self._report_worker_error("telemetry", e)
+
+    async def _telemetry_refresh_loop(self) -> None:
+        while True:
+            try:
+                self._refresh_strip()
+            except Exception as e:
+                self._report_worker_error("telemetry-refresh", e)
+            await asyncio.sleep(0.5)
 
     def action_focus_command(self) -> None:
         self.set_focus(self.query_one("#command", Input))
