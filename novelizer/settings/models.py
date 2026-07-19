@@ -12,8 +12,9 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "author_model", "agent_model", "embed_model",
     "author_temperature", "agent_temperature",
     "author_interval", "default_agent_interval",
-    "continuity_interval", "structure_analyst_interval", "projector_interval",
+    "continuity_interval", "structure_analyst_interval", "projector_interval", "muse_interval",
     "prior_chapter_summary_chars", "staleness_threshold_chapters", "sag_spike_delta",
+    "muse_era", "muse_exclusion_hands",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -48,6 +49,10 @@ class EffectiveSettings(BaseModel):
     staleness_threshold_chapters: int = 3
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
     sag_spike_delta: float = 0.3
+    # Muse: era bucket for name draws (victorian/interwar/midcentury/late20th/modern)
+    # and how many recent hands' items are excluded from a fresh deal.
+    muse_era: str = "modern"
+    muse_exclusion_hands: int = 3
     # Scheduler dispatch pool size: how many agents may run concurrently.
     max_concurrent_agents: int = 2
 
@@ -56,6 +61,7 @@ class EffectiveSettings(BaseModel):
     default_agent_interval: int = 120
     continuity_interval: int = 900
     structure_analyst_interval: int = 180
+    muse_interval: int = 60
     projector_interval: float = 0.5
 
     # Voice

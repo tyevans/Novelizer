@@ -17,6 +17,7 @@ from novelizer.agents.continuity_checker import (
 )
 from novelizer.agents.retconner import Retconner, build_retconner_runner
 from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
+from novelizer.agents.muse import Muse
 from novelizer.voices.loader import load_voice_pack
 
 
@@ -39,6 +40,7 @@ class Runtime:
         self.continuity_checker = None
         self.retconner = None
         self.structure_analyst = None
+        self.muse = None
         self.scheduler: Optional[Scheduler] = None
         self.voice_pack = None
         self.active_prose_profile = None
@@ -108,8 +110,13 @@ class Runtime:
             self._runner_for("structure_analyst", build_structure_analyst_runner), self.read, self.committer,
             interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
         )
+        self.muse = Muse(
+            self.read, self.committer,
+            interval=s.muse_interval, era=s.muse_era,
+            exclusion_hands=s.muse_exclusion_hands, personality=personalities.get("muse", ""),
+        )
         self.agents = [
-            self.world_architect, self.character_keeper, self.author,
+            self.world_architect, self.character_keeper, self.muse, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
         self.scheduler = Scheduler(self.agents, self.read, max_concurrent_agents=s.max_concurrent_agents)
@@ -130,6 +137,7 @@ class Runtime:
             "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
             "continuity_interval": [self.continuity_checker],
             "structure_analyst_interval": [self.structure_analyst],
+            "muse_interval": [self.muse],
         }
         for key in changed:
             if key in RESTART_REQUIRED_KEYS:
@@ -142,6 +150,12 @@ class Runtime:
                 # Read fresh per-tick, no cached construction to rebuild --
                 # applies live, same as cadence settings.
                 self.scheduler._max_concurrent = new.max_concurrent_agents
+                applied.append(key)
+            elif key == "muse_era":
+                self.muse._era = new.muse_era
+                applied.append(key)
+            elif key == "muse_exclusion_hands":
+                self.muse._exclusion_hands = new.muse_exclusion_hands
                 applied.append(key)
             else:
                 applied.append(key)

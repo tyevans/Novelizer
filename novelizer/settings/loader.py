@@ -41,10 +41,13 @@ class EnvOverrides(BaseSettings):
     default_agent_interval: int | None = None
     continuity_interval: int | None = None
     structure_analyst_interval: int | None = None
+    muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
     staleness_threshold_chapters: int | None = None
     sag_spike_delta: float | None = None
+    muse_era: str | None = None
+    muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
 
 
