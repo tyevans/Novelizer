@@ -356,3 +356,77 @@ async def test_commit_causal_intents_accepts_explicit_source(stack):
     log = await events.events_since(0, event_types=[EventType.CAUSAL_EDGE_DECLARED])
     assert len(log) == 1
     assert log[0].payload["source"] == "mined"
+
+
+from novelizer.agents.schemas import ThemeIntent
+
+
+async def test_commit_theme_intents_introduce_mints_id(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="Loss of Innocence")], active_theme_ids=set(),
+    )
+    await proj.catch_up()
+    theme = await read.get_theme("loss-of-innocence")
+    assert theme is not None
+    assert theme.title == "Loss of Innocence"
+
+
+async def test_commit_theme_intents_develop_cites_existing_id(stack):
+    events, proj, read, committer = stack
+    from novelizer.canon.events import ThemeIntroduced
+    await events.append(EventType.THEME_INTRODUCED, "t1", ThemeIntroduced(id="t1", title="Loss"))
+    await proj.catch_up()
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="develop", id="t1", note="deepens")], active_theme_ids={"t1"}, chapter_id="c1",
+    )
+    await proj.catch_up()
+    theme = await read.get_theme("t1")
+    assert theme.touch_count == 1
+
+
+async def test_commit_theme_intents_develop_unknown_id_dropped_with_warning(stack, caplog):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="editor")
+    with caplog.at_level("WARNING"):
+        await agent._commit_theme_intents(
+            [ThemeIntent(action="develop", id="ghost")], active_theme_ids=set(),
+        )
+    assert await events.events_since(0) == []
+    assert any("ghost" in rec.message for rec in caplog.records)
+
+
+async def test_commit_theme_intents_introduce_collision_downgrades_to_develop(stack):
+    events, proj, read, committer = stack
+    from novelizer.canon.events import ThemeIntroduced
+    await events.append(EventType.THEME_INTRODUCED, "loss", ThemeIntroduced(id="loss", title="Loss"))
+    await proj.catch_up()
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="Loss")], active_theme_ids={"loss"},
+    )
+    log = await events.events_since(0, event_types=[EventType.THEME_INTRODUCED, EventType.THEME_DEVELOPED])
+    assert len(log) == 2
+    assert log[-1].event_type == EventType.THEME_DEVELOPED
+    assert log[-1].payload["id"] == "loss"
+
+
+async def test_commit_theme_intents_accepts_explicit_source(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents(
+        [ThemeIntent(action="introduce", title="X")], active_theme_ids=set(), source="mined",
+    )
+    await proj.catch_up()
+    log = await events.events_since(0, event_types=[EventType.THEME_INTRODUCED])
+    assert len(log) == 1
+    assert log[0].payload["source"] == "mined"
+
+
+async def test_commit_theme_intents_noop_on_empty_list(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_theme_intents([], active_theme_ids=set())
+    assert await events.events_since(0) == []
