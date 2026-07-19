@@ -14,10 +14,7 @@ from novelizer.tui.widgets.roster import roster_summary
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_text
 from novelizer.tui.widgets.proposals_model import pending_lines
-from novelizer.tui.widgets.thread_board import ThreadBoard
-from novelizer.tui.widgets.story_shape import StoryShape
-from novelizer.tui.widgets.who_knows_what import WhoKnowsWhat
-from novelizer.tui.widgets.causeway import Causeway
+from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
     chapter_rule,
@@ -61,6 +58,10 @@ class NovelizerApp(App):
         ("e", "toggle_engine", "Engine Room"),
         ("p", "toggle_prompt", "Prompt"),
         ("v", "toggle_reading", "Reading"),
+        ("1", "brain_tab('tab_shape')", "Shape"),
+        ("2", "brain_tab('tab_threads')", "Threads"),
+        ("3", "brain_tab('tab_secrets')", "Secrets"),
+        ("4", "brain_tab('tab_causeway')", "Cause"),
         ("q", "quit", "Quit"),
     ]
 
@@ -83,18 +84,9 @@ class NovelizerApp(App):
                 proposals = Static("no pending proposals", id="proposals")
                 proposals.border_title = "PROPOSALS"
                 yield proposals
-                thread_board = ThreadBoard("no threads yet", id="thread_board")
-                thread_board.border_title = "THREADS"
-                yield thread_board
-                story_shape = StoryShape("no chapters scored yet", id="story_shape")
-                story_shape.border_title = "STORY SHAPE"
-                yield story_shape
-                who_knows_what = WhoKnowsWhat("no secrets yet", id="who_knows_what")
-                who_knows_what.border_title = "WHO KNOWS WHAT"
-                yield who_knows_what
-                causeway = Causeway("no causal edges yet", id="causeway")
-                causeway.border_title = "CAUSEWAY"
-                yield causeway
+                brain = BrainPanel(id="brain")
+                brain.border_title = "STORY BRAIN"
+                yield brain
                 yield EngineRoom(id="engine_room")
             with Vertical(id="right"):
                 browser = StoryBrowser("Story", id="browser")
@@ -117,11 +109,8 @@ class NovelizerApp(App):
         self.run_worker(self._browser_loop(), exclusive=False)
         self.run_worker(self._proposals_loop(), exclusive=False)
         self.run_worker(self._statusbar_loop(), exclusive=False)
-        self.run_worker(self._thread_board_loop(), exclusive=False)
-        self.run_worker(self._story_shape_loop(), exclusive=False)
+        self.run_worker(self._brain_loop(), exclusive=False)
         self.run_worker(self._settings_watch_loop(), exclusive=False)
-        self.run_worker(self._who_knows_what_loop(), exclusive=False)
-        self.run_worker(self._causeway_loop(), exclusive=False)
         self.run_worker(self._telemetry_bus_loop(), exclusive=False)
         self.run_worker(self._telemetry_refresh_loop(), exclusive=False)
 
@@ -218,24 +207,16 @@ class NovelizerApp(App):
                 self._report_worker_error("statusbar", e)
             await asyncio.sleep(0.5)
 
-    async def _thread_board_loop(self) -> None:
+    async def _brain_loop(self) -> None:
         while True:
             try:
-                await self.query_one("#thread_board", ThreadBoard).refresh_from(
-                    self.runtime.read, threshold=self.runtime.settings.staleness_threshold_chapters
+                await self.query_one("#brain", BrainPanel).refresh_from(
+                    self.runtime.read,
+                    threshold=self.runtime.settings.staleness_threshold_chapters,
+                    delta=self.runtime.settings.sag_spike_delta,
                 )
             except Exception as e:
-                self._report_worker_error("thread_board", e)
-            await asyncio.sleep(1.0)
-
-    async def _story_shape_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#story_shape", StoryShape).refresh_from(
-                    self.runtime.read, delta=self.runtime.settings.sag_spike_delta
-                )
-            except Exception as e:
-                self._report_worker_error("story_shape", e)
+                self._report_worker_error("brain", e)
             await asyncio.sleep(1.0)
 
     async def _settings_watch_loop(self) -> None:
@@ -275,22 +256,6 @@ class NovelizerApp(App):
                 line = f"⚙ settings error: {'; '.join(result['errors'])}"
                 log.write(line)
                 self.messages.append(line)
-
-    async def _who_knows_what_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#who_knows_what", WhoKnowsWhat).refresh_from(self.runtime.read)
-            except Exception as e:
-                self._report_worker_error("who_knows_what", e)
-            await asyncio.sleep(1.0)
-
-    async def _causeway_loop(self) -> None:
-        while True:
-            try:
-                await self.query_one("#causeway", Causeway).refresh_from(self.runtime.read)
-            except Exception as e:
-                self._report_worker_error("causeway", e)
-            await asyncio.sleep(1.0)
 
     def _next_hint(self) -> str:
         try:
@@ -364,6 +329,9 @@ class NovelizerApp(App):
     def action_toggle_prompt(self) -> None:
         if self.query_one("#body").has_class("engine"):
             self.query_one("#engine_room", EngineRoom).toggle_prompt()
+
+    def action_brain_tab(self, pane_id: str) -> None:
+        self.query_one("#brain", BrainPanel).activate_tab(pane_id)
 
     async def _run_command(self, line: str) -> None:
         cmd = line.strip().lstrip(":").split(maxsplit=1)

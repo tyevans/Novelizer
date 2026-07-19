@@ -112,7 +112,7 @@ async def test_approval_queue_pane_shows_pending_proposal_and_approve_via_comman
 
 
 @pytest.mark.asyncio
-async def test_mission_control_shows_thread_board_and_story_shape_panes():
+async def test_story_brain_threads_and_shape_tabs_populate():
     from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored
     from novelizer.store.models import Chapter
 
@@ -123,27 +123,29 @@ async def test_mission_control_shows_thread_board_and_story_shape_panes():
     for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner", "structure_analyst"]:
         rt.scheduler.pause_agent(name)
     try:
-        await rt.events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+        await rt.events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="The Salt Road", prose="p"))
         await rt.events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
         await rt.events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
                                AnnotationStructureScored(chapter_id="c1", tension=0.6, pacing_label="rising"))
         await rt.projector.catch_up()
         app = NovelizerApp(rt)
         async with app.run_test() as pilot:
-            from textual.widgets import Static
-            assert app.query_one("#thread_board", Static) is not None
-            assert app.query_one("#story_shape", Static) is not None
+            from textual.widgets import Sparkline, Static
             await pilot.pause(0.5)
-            board_text = str(app.query_one("#thread_board", Static).renderable)
-            shape_text = str(app.query_one("#story_shape", Static).renderable)
-            assert "The Locket" in board_text
-            assert "c1" in shape_text and "rising" in shape_text
+            threads_text = str(app.query_one("#threads_body", Static).renderable)
+            shape_text = str(app.query_one("#shape_body", Static).renderable)
+            spark = app.query_one("#shape_spark", Sparkline)
+            assert "The Locket" in threads_text
+            assert "the-locket" not in threads_text          # no ids on the dashboard
+            assert list(spark.data) == [0.6] and spark.display
+            assert "pacing: rising" in shape_text
+            assert "c1" not in shape_text                    # no ids on the dashboard
     finally:
         await rt.close(); os.unlink(path)
 
 
 @pytest.mark.asyncio
-async def test_mission_control_shows_who_knows_what_and_causeway_panes():
+async def test_story_brain_secrets_matrix_and_causeway_tabs_populate():
     from novelizer.canon.events import EventType, SecretCreated, SecretLearned, CausalEdgeDeclared
     from novelizer.store.models import Chapter, Character
 
@@ -165,13 +167,17 @@ async def test_mission_control_shows_who_knows_what_and_causeway_panes():
         app = NovelizerApp(rt)
         async with app.run_test() as pilot:
             from textual.widgets import Static
-            assert app.query_one("#who_knows_what", Static) is not None
-            assert app.query_one("#causeway", Static) is not None
             await pilot.pause(0.5)
-            wkw_text = str(app.query_one("#who_knows_what", Static).renderable)
-            causeway_text = str(app.query_one("#causeway", Static).renderable)
-            assert "The Heir Lives" in wkw_text and "Mara" in wkw_text
-            assert "c2" in causeway_text and "c1" in causeway_text and "PARADOX" in causeway_text
+            secrets_text = str(app.query_one("#secrets_body", Static).renderable)
+            causeway_text = str(app.query_one("#causeway_body", Static).renderable)
+            strip_text = str(app.query_one("#brain_strip", Static).renderable)
+            assert "The Heir Lives" in secrets_text
+            assert "M" in secrets_text.splitlines()[0]       # Mara's initial in the header
+            assert "●" in secrets_text and "1 knows" in secrets_text
+            assert "the-heir-lives" not in secrets_text      # no ids on the dashboard
+            assert 'ch 2 "Two" ──▶ ch 1 "One"' in causeway_text
+            assert "⚠ PARADOX" in causeway_text
+            assert "Cause ⚠1" in strip_text
     finally:
         await rt.close(); os.unlink(path)
 
@@ -191,10 +197,7 @@ async def test_every_pane_has_its_border_title():
             expected = {
                 "#feed": "THE ROOM",
                 "#proposals": "PROPOSALS",
-                "#thread_board": "THREADS",
-                "#story_shape": "STORY SHAPE",
-                "#who_knows_what": "WHO KNOWS WHAT",
-                "#causeway": "CAUSEWAY",
+                "#brain": "STORY BRAIN",
                 "#browser": "STORY",
                 "#detail_scroll": "DETAIL",
             }

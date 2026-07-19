@@ -313,11 +313,11 @@ async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stal
     (asserted on literal prompt text) -> drive the Author with a FakeRunner
     preset whose structured output declares a thread_intents entry touching
     that exact id -> assert the resulting thread.touched event lands via the
-    Committer -> assert the Thread Board's render-time helper (thread_board_line,
+    Committer -> assert the Thread Board's render-time helper (brain_model.thread_line,
     via is_thread_stale) no longer reports the thread stale. No live model call."""
     from novelizer.canon.events import ThreadPlanted
     from novelizer.agents.schemas import ThreadIntent
-    from novelizer.tui.widgets.thread_board import thread_board_line
+    from novelizer.tui.widgets.brain_model import thread_line
 
     events, proj, read, committer = stack
     await events.append(EventType.THREAD_PLANTED, "the-locket", ThreadPlanted(id="the-locket", name="The Locket"))
@@ -328,7 +328,7 @@ async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stal
     # Step 1: staleness is real before we touch anything.
     thread_before = await read.get_thread("the-locket")
     chapters = await read.list_chapters()
-    assert "STALE" in thread_board_line(thread_before, chapters)
+    assert "stale" in thread_line(thread_before, chapters).plain
 
     # Step 2: the Author's prompt names the stale thread by name and id.
     probe_runner = FakeRunner(ChapterDraft(title="T", prose="P"))
@@ -353,7 +353,7 @@ async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stal
     thread_after = await read.get_thread("the-locket")
     assert thread_after.touch_count == 1
     chapters_after = await read.list_chapters()
-    assert "STALE" not in thread_board_line(thread_after, chapters_after)
+    assert "stale" not in thread_line(thread_after, chapters_after).plain
 
 
 from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
