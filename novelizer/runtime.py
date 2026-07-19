@@ -43,13 +43,21 @@ class Runtime:
         self.voice_pack = None
         self.active_prose_profile = None
 
-    def _runner_for(self, name: str, builder):
+    def _runner_for(self, name: str, builder, fallback_name: str | None = None):
         if self._runners is not None:
             if name in self._runners:
                 return self._runners[name]
-            # Any name absent from an injected runners dict falls back to the real
-            # builder (not just "continuity_checker_mining", which motivated this) —
-            # builders construct lazily and never touch the network before ainvoke().
+            # A derived role (e.g. the checker's mining runner) defaults to its
+            # parent agent's injected fake: building the REAL runner here made
+            # TUI tests hang on live connection attempts whenever the parent
+            # agent actually ran (post-M5.3-merge test_app_layout failure).
+            # The checker's isinstance guard treats a wrong-type response as
+            # malformed, so sharing the parent fake is safe.
+            if fallback_name is not None and fallback_name in self._runners:
+                return self._runners[fallback_name]
+            # Any other absent name falls back to the real builder — builders
+            # construct lazily and never touch the network before ainvoke(),
+            # and partial-roster fixtures only omit agents that never dispatch.
             return builder(self.settings)
         if name == "author" and self._runner is not None:
             return self._runner
@@ -96,7 +104,7 @@ class Runtime:
         )
         self.continuity_checker = ContinuityChecker(
             self._runner_for("continuity_checker", build_continuity_checker_runner),
-            self._runner_for("continuity_checker_mining", build_continuity_mining_runner),
+            self._runner_for("continuity_checker_mining", build_continuity_mining_runner, fallback_name="continuity_checker"),
             self.read, self.committer, self.events,
             interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
         )

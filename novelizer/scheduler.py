@@ -25,6 +25,7 @@ class Scheduler:
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
         self._last_error: dict[str, str] = {}
+        self._last_completed: str | None = None
         # Incremented on every completed run (success or failure). Lets
         # callers (e.g. the TUI's error reporter) distinguish "still the same
         # stale error" from "the agent ran again and failed again" without
@@ -49,6 +50,7 @@ class Scheduler:
                 "paused": a.paused,
                 "running": a.name in self._in_flight,
                 "last_error": self._last_error.get(a.name),
+                "last_completed": a.name == self._last_completed,
                 "run_count": self._run_count.get(a.name, 0),
             }
             for a in self._agents
@@ -132,6 +134,11 @@ class Scheduler:
             agent.mark_ran(now)
             self._in_flight.pop(agent.name, None)
             self._run_count[agent.name] = self._run_count.get(agent.name, 0) + 1
+            # Sticky display marker, distinct from the honest in-flight
+            # "running" flag: fast agents complete between status polls, so
+            # the TUI needs "who acted most recently" to have anything to
+            # show when the pool is momentarily empty.
+            self._last_completed = agent.name
 
     async def run(self) -> None:
         self._running = True

@@ -12,6 +12,12 @@ def roster_summary(status: list) -> str:
     running = [s["name"] for s in status if s.get("running")]
     if running:
         parts.append(f"● {', '.join(running)}")
+    else:
+        # Fast agents finish between status polls; fall back to the sticky
+        # last-completed marker so the bar always names the active agent.
+        last = [s["name"] for s in status if s.get("last_completed")]
+        if last:
+            parts.append(f"◦ {last[0]}")
     paused = [s["name"] for s in status if s.get("paused")]
     if paused:
         parts.append(f"⏸ {', '.join(paused)}")

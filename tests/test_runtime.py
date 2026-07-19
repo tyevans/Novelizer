@@ -370,3 +370,21 @@ async def test_runtime_missing_personality_falls_back_to_empty_string():
     finally:
         os.unlink(path)
         os.unlink(custom_pack_path)
+
+
+async def test_mining_runner_falls_back_to_parent_checker_fake(settings):
+    """Post-M5.3-merge fix: an injected runners dict WITHOUT a dedicated
+    "continuity_checker_mining" key must reuse the parent "continuity_checker"
+    fake for the mining role -- never silently build the real network-bound
+    runner (TUI tests hung on live connection attempts whenever the checker
+    actually ran)."""
+    checker_fake = ScriptedRunner(ContinuityOutput())
+    runners = _all_fake_runners()
+    runners["continuity_checker"] = checker_fake
+    runners.pop("continuity_checker_mining", None)
+    rt = Runtime(settings, runners=runners)
+    await rt.start()
+    try:
+        assert rt.continuity_checker._mining_runner is checker_fake
+    finally:
+        await rt.close()
