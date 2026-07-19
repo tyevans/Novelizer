@@ -852,3 +852,53 @@ async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
+
+
+async def test_continuity_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    assert await agent.readiness() > 0.0
+    await agent.run_once()      # mines ch1, stamps chapter.mined
+    await proj.catch_up()
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch2", Chapter(id="ch2", title="Two", prose="more"))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+async def test_continuity_pass_skips_llm_retcons_but_still_mines(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    out = ContinuityOutput(no_action=True,
+                           retcon_requests=[RetconDraft(description="phantom", proposed_resolution="x")])
+    agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    # LLM retcon ignored on a pass...
+    assert await read.list_retcon_requests(status=RetconStatus.open) == []
+    # ...but the deterministic mining pass still ran and stamped the chapter.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert [e.payload["chapter_id"] for e in mined] == ["ch1"]
+    # Mining WAS deterministic work, so no backoff this run.
+    assert agent._backoff_until == 0.0
+
+
+async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    quiet = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    await quiet.run_once()      # first run mines ch1
+    passing = ContinuityChecker(FakeRunner(ContinuityOutput(no_action=True, feed_note="All threads hold.")),
+                                FakeRunner(MinedFactsOutput()), read, committer, events)
+    await passing.run_once()    # nothing left to mine, no leaks/paradoxes
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert remarks[-1].payload["note"] == "All threads hold."
+    import time
+    assert passing.seconds_until_ready(time.monotonic()) > passing.interval
