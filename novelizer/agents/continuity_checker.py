@@ -369,14 +369,28 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
     from deepagents import create_deep_agent
     from novelizer.agents.author import RETRIEVAL_NOTE
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
+    # See build_author_runner: tool executions run under invoke-time graph
+    # config, not constructor callbacks on the model, so telemetry callbacks
+    # are bound graph-scope via with_config below.
+    model = build_chat_model(
+        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+        settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
     if backend is not None:
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE
-        return create_deep_agent(
+        graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
             backend=backend, tools=tools,
         )
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph
 
 
 def build_continuity_mining_runner(settings, callbacks=None):

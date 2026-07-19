@@ -171,11 +171,26 @@ class Author(BaseAgent):
 def build_author_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.author_model, settings.llm_base_url, settings.llm_api_key, settings.author_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
+    # Tool executions run in the agent graph's ToolNode under invoke-time
+    # config, not constructor callbacks on the chat model -- so telemetry
+    # callbacks are bound graph-scope via with_config below (dropped from the
+    # model itself to avoid double-emitting LLM events through both paths).
+    model = build_chat_model(
+        settings.author_model, settings.llm_base_url, settings.llm_api_key,
+        settings.author_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
     if backend is not None:
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
-        return create_deep_agent(
+        graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
             backend=backend, tools=tools,
         )
-    return create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph
