@@ -6,8 +6,9 @@ from novelizer.brain.context import open_retcons_note
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, InspirationUptakeRecorded
 from novelizer.store.models import Character, RetconRequest, RetconStatus
+from novelizer.muse.prompts import NAME_UPTAKE_HAND_WINDOW, name_uptake_matches
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class CharacterKeeper(BaseAgent):
             "recent": chapters[-5:],
             "secrets": await self._read.list_secrets(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "hands": (await self._read.list_hands(status="consumed"))[-NAME_UPTAKE_HAND_WINDOW:],
         }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
@@ -91,6 +93,15 @@ class CharacterKeeper(BaseAgent):
                 backstory=new.backstory, arc_status=new.arc_status, voice=new.voice,
             )
             await self._committer.commit(self.name, EventType.CHARACTER_CREATED, char_id, character)
+            match = name_uptake_matches(new.name, ctx.get("hands", []))
+            if match is not None:
+                hand_id, dealt_item = match
+                hand = next(h for h in ctx["hands"] if h.id == hand_id)
+                await self._committer.commit(
+                    self.name, EventType.INSPIRATION_UPTAKE_RECORDED, hand_id,
+                    InspirationUptakeRecorded(hand_id=hand_id, kind="names", item=dealt_item,
+                                              chapter_id=hand.consumed_chapter_id),
+                )
         for upd in out.updated_characters:
             current = await self._read.get_character(upd.id)
             if current is None:
