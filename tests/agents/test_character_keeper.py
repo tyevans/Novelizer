@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, RetconDraft, KnowledgeIntent
+from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent
 from novelizer.canon.events import SecretCreated
 from novelizer.store.models import Character, Chapter, RetconStatus
 
@@ -196,6 +196,92 @@ async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "already filed" not in sent
+
+
+async def test_creates_characters_mined_from_chapters(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Silas Vane met Mrs. Gable."))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[
+        NewCharacter(name="Silas Vane", traits="haunted", arc_status="arriving"),
+        NewCharacter(name="Mrs. Gable", motivations="keep the building's peace"),
+    ])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    silas = await read.get_character("silas-vane")
+    assert silas.name == "Silas Vane" and silas.traits == "haunted" and silas.arc_status == "arriving"
+    gable = await read.get_character("mrs-gable")
+    assert gable.name == "Mrs. Gable" and gable.motivations == "keep the building's peace"
+    log = await events.events_since(0)
+    created = [e for e in log if e.event_type == EventType.CHARACTER_CREATED]
+    assert {e.aggregate_id for e in created} == {"silas-vane", "mrs-gable"}
+
+
+async def test_work_invokes_runner_when_cast_empty_but_chapters_exist(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="The Listening Wall", prose="Silas listened."))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    out = await agent.work(ctx)
+    assert out is not None
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "The Listening Wall" in sent
+    assert "None yet" in sent
+
+
+async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "silas-vane", Character(id="silas-vane", name="Silas Vane", traits="stoic"))
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Silas Vane returned."))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[NewCharacter(name="Silas Vane!", traits="grim")])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    silas = await read.get_character("silas-vane")
+    assert silas.traits == "stoic"  # existing record not clobbered by a re-create
+    log = await events.events_since(0)
+    created = [e for e in log if e.event_type == EventType.CHARACTER_CREATED and e.aggregate_id == "silas-vane"]
+    assert len(created) == 1  # only the seed event
+
+
+async def test_new_character_with_blank_name_is_dropped(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Someone was there."))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[NewCharacter(name="   ")])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    assert await read.list_characters() == []
+
+
+async def test_duplicate_new_characters_in_one_output_create_once(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Maeve. Maeve!"))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[
+        NewCharacter(name="Maeve", traits="first"),
+        NewCharacter(name="MAEVE", traits="second"),
+    ])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    maeve = await read.get_character("maeve")
+    assert maeve.traits == "first"  # first mention wins, duplicate dropped
+    log = await events.events_since(0)
+    assert len([e for e in log if e.event_type == EventType.CHARACTER_CREATED]) == 1
+
+
+async def test_readiness_prioritizes_bootstrap_when_chapters_but_no_cast(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Silas."))
+    await proj.catch_up()
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer)
+    assert await agent.readiness() == 0.8
 
 
 async def test_retcon_matching_open_description_is_not_refiled(stack):

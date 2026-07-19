@@ -27,6 +27,21 @@ class WorldEntriesDraft(BaseModel):
     feed_note: str = ""
 
 
+class NewCharacter(BaseModel):
+    """One new character the Character Keeper observed in recent chapters but
+    found missing from the cast. The system mints the id by slugging `name`
+    (see novelizer.canon.characters.slugify_character_name); a slug colliding
+    with an existing character is dropped at commit time, never re-created.
+    """
+
+    name: str
+    traits: str = ""
+    motivations: str = ""
+    backstory: str = ""
+    arc_status: str = ""
+    voice: str = ""
+
+
 class CharacterUpdate(BaseModel):
     id: str
     arc_status: Optional[str] = None
@@ -114,6 +129,7 @@ class RetconDraft(BaseModel):
 
 
 class KeeperOutput(BaseModel):
+    new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
