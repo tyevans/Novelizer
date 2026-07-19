@@ -15,11 +15,28 @@ def slugify(text: str) -> str:
 
 
 def _claim(directory: str, name: str, record_id: str, taken: set[str]) -> str:
-    path = f"/{directory}/{slugify(name)}.md"
-    if path in taken:
-        path = f"/{directory}/{slugify(name)}-{record_id[:8]}.md"
-    taken.add(path)
-    return path
+    slug = slugify(name)
+
+    # Try base path
+    path = f"/{directory}/{slug}.md"
+    if path not in taken:
+        taken.add(path)
+        return path
+
+    # Try with 8-char ID suffix
+    path = f"/{directory}/{slug}-{record_id[:8]}.md"
+    if path not in taken:
+        taken.add(path)
+        return path
+
+    # Fall back to full ID suffix
+    path = f"/{directory}/{slug}-{record_id}.md"
+    if path not in taken:
+        taken.add(path)
+        return path
+
+    # Same record listed twice — this should not happen
+    raise ValueError(f"Path already claimed: {path}")
 
 
 def build_path_index(

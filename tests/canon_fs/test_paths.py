@@ -49,3 +49,10 @@ def test_all_kinds_present():
     kinds = {kind for kind, _ in index.values()}
     assert kinds == {"chapter", "character", "world", "thread", "secret", "theme"}
     assert len(index) == 6
+
+
+def test_three_way_name_collision_all_survive():
+    trio = [Character(name="Mara") for _ in range(3)]
+    index = _index(characters=trio)
+    assert len(index) == 3
+    assert {record_id for _, record_id in index.values()} == {c.id for c in trio}
