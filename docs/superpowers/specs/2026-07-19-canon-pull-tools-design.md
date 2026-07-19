@@ -69,11 +69,11 @@ Virtual tree:
 
 ```
 /chapters/NNN-slug.md      # frontmatter: id, status, character_ids; body: full prose
-/characters/slug.md        # traits, arc_status, appearances, knows: [secret ids+titles]
+/characters/slug.md        # traits, motivations, backstory, arc, voice, relationships, knows (non-revealed known secrets)
 /world/slug.md             # world entry body, domain
-/threads/slug.md           # state, touch history (chapter ids)
-/secrets/slug.md           # description, revealed?, who knows it
-/themes/slug.md            # theme statement, chapter touches
+/threads/slug.md           # state, touch_count, last note, last chapter id
+/secrets/slug.md           # title, revealed flag, who knows it
+/themes/slug.md            # title, touch_count, last note, last chapter id
 ```
 
 Paths are deterministic: `NNN` = 1-based chapter ordinal, slugs derived from
