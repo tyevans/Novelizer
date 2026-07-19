@@ -179,6 +179,12 @@ class ReadStore:
             ChatMessageRecord(agent_name=r[0], role=r[1], text=r[2], message_id=r[3]) for r in rows
         ]
 
+    async def count_chat_messages(self, agent_name: str) -> int:
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) FROM chat_messages WHERE agent_name=?", (agent_name,)
+        )
+        return (await cur.fetchone())[0]
+
     async def list_chat_conversations(self) -> list[str]:
         cur = await self._conn.execute(
             "SELECT DISTINCT agent_name FROM chat_messages ORDER BY agent_name"

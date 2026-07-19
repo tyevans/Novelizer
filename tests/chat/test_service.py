@@ -3,7 +3,7 @@ import tempfile
 import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
-from novelizer.canon.events import EventType, SecretCreated, ThreadPlanted
+from novelizer.canon.events import EventType, SecretCreated
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.chat.schemas import ChatReply
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent

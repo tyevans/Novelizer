@@ -303,7 +303,7 @@ class NovelizerApp(App):
 
     async def _open_chat(self, agent_name: str, text: str) -> None:
         if isinstance(self.screen, ChatScreen):
-            self.screen.set_current(agent_name)
+            await self.screen.set_current(agent_name)
         else:
             await self.push_screen(ChatScreen(self.runtime, agent_name))
         if text:

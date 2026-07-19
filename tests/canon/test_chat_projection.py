@@ -72,6 +72,27 @@ async def test_chat_projection_is_idempotent_per_message_id(db_path):
         await events.close()
 
 
+@pytest.mark.asyncio
+async def test_count_chat_messages_is_not_capped_by_list_limit(db_path):
+    events, proj, read = await _stores(db_path)
+    try:
+        for i in range(5):
+            await events.append(
+                EventType.CHAT_USER_MESSAGED, "author",
+                ChatUserMessaged(message_id=f"m{i}", agent_name="author", text=f"msg {i}"),
+            )
+        await proj.catch_up()
+        assert await read.count_chat_messages("author") == 5
+        limited = await read.list_chat_messages("author", limit=2)
+        assert len(limited) == 2
+        assert await read.count_chat_messages("author") == 5
+        assert await read.count_chat_messages("editor") == 0
+    finally:
+        await read.close()
+        await proj.close()
+        await events.close()
+
+
 def test_chat_events_are_never_gated():
     assert EventType.CHAT_USER_MESSAGED in _NEVER_GATED
     assert EventType.CHAT_AGENT_REPLIED in _NEVER_GATED

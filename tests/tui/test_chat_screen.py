@@ -1,7 +1,7 @@
 import os
 import tempfile
 import pytest
-from textual.widgets import Input, RichLog, Tabs
+from textual.widgets import Input, RichLog, Tab, Tabs
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
@@ -67,6 +67,54 @@ async def test_screen_renders_transcript_and_tabs(db_path):
             assert "hello Director" in text
             tabs = app.screen.query_one("#chat_tabs", Tabs)
             assert tabs.tab_count >= 1
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_unread_dot_appears_on_unfocused_conversation(db_path):
+    rt = await _runtime(db_path)
+    try:
+        await rt.events.append(
+            EventType.CHAT_USER_MESSAGED, "author",
+            ChatUserMessaged(message_id="a1", agent_name="author", text="hi author"),
+        )
+        await rt.events.append(
+            EventType.CHAT_AGENT_REPLIED, "author",
+            ChatAgentReplied(message_id="a2", agent_name="author", text="reply to author"),
+        )
+        await rt.events.append(
+            EventType.CHAT_USER_MESSAGED, "editor",
+            ChatUserMessaged(message_id="e1", agent_name="editor", text="hi editor"),
+        )
+        await rt.events.append(
+            EventType.CHAT_AGENT_REPLIED, "editor",
+            ChatAgentReplied(message_id="e2", agent_name="editor", text="reply to editor"),
+        )
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            await app.push_screen(ChatScreen(rt, "author"))
+            await pilot.pause(0.8)
+
+            editor_label = str(app.screen.query_one("#chat-editor", Tab).label)
+            author_label = str(app.screen.query_one("#chat-author", Tab).label)
+            assert editor_label.endswith("●")
+            assert not author_label.endswith("●")
+
+            await rt.events.append(
+                EventType.CHAT_AGENT_REPLIED, "editor",
+                ChatAgentReplied(message_id="e3", agent_name="editor", text="another reply"),
+            )
+            await rt.projector.catch_up()
+            await pilot.pause(0.8)
+            editor_label = str(app.screen.query_one("#chat-editor", Tab).label)
+            assert editor_label.endswith("●")
+
+            await app.screen.set_current("editor")
+            await pilot.pause(0.8)
+            editor_label = str(app.screen.query_one("#chat-editor", Tab).label)
+            assert not editor_label.endswith("●")
     finally:
         await rt.close()
 

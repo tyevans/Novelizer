@@ -42,13 +42,13 @@ class ChatScreen(Screen):
 
     # -- public API used by the app --------------------------------------
 
-    def set_current(self, agent_name: str) -> None:
+    async def set_current(self, agent_name: str) -> None:
         """Switch the screen to another agent's conversation (used by @mention
         routing while the screen is already open)."""
         self.agent_name = agent_name
         if agent_name not in self._agents:
             self._agents.append(agent_name)
-        self._sync_tabs()
+        await self._sync_tabs()
         tabs = self.query_one("#chat_tabs", Tabs)
         tabs.active = f"chat-{agent_name}"
         self.query_one("#chat_input", Input).placeholder = f"message @{agent_name}…"
@@ -59,13 +59,13 @@ class ChatScreen(Screen):
 
     # -- internals ---------------------------------------------------------
 
-    def _sync_tabs(self) -> None:
+    async def _sync_tabs(self) -> None:
         tabs = self.query_one("#chat_tabs", Tabs)
         existing = {t.id for t in tabs.query(Tab)}
         for agent in self._agents:
             tab_id = f"chat-{agent}"
             if tab_id not in existing:
-                tabs.add_tab(Tab(f"@{agent}", id=tab_id))
+                await tabs.add_tab(Tab(f"@{agent}", id=tab_id))
 
     def _tab_label(self, agent: str, count: int) -> str:
         unread = agent != self.agent_name and count > self._seen.get(agent, 0)
@@ -84,11 +84,11 @@ class ChatScreen(Screen):
         for agent in conversations:
             if agent not in self._agents:
                 self._agents.append(agent)
-        self._sync_tabs()
+        await self._sync_tabs()
         tabs = self.query_one("#chat_tabs", Tabs)
         counts: dict[str, int] = {}
         for agent in self._agents:
-            counts[agent] = len(await self.runtime.read.list_chat_messages(agent))
+            counts[agent] = await self.runtime.read.count_chat_messages(agent)
             tab = tabs.query_one(f"#chat-{agent}", Tab)
             tab.label = self._tab_label(agent, counts[agent])
         self._seen[self.agent_name] = counts.get(self.agent_name, 0)
@@ -131,14 +131,14 @@ class ChatScreen(Screen):
     def action_back(self) -> None:
         self.app.pop_screen()
 
-    def _cycle(self, step: int) -> None:
+    async def _cycle(self, step: int) -> None:
         if len(self._agents) < 2:
             return
         idx = (self._agents.index(self.agent_name) + step) % len(self._agents)
-        self.set_current(self._agents[idx])
+        await self.set_current(self._agents[idx])
 
-    def action_prev_chat(self) -> None:
-        self._cycle(-1)
+    async def action_prev_chat(self) -> None:
+        await self._cycle(-1)
 
-    def action_next_chat(self) -> None:
-        self._cycle(1)
+    async def action_next_chat(self) -> None:
+        await self._cycle(1)
