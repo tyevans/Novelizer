@@ -134,3 +134,22 @@ async def test_dispatch_routes_autonomy_and_approve_reject(stack):
     await proj.catch_up()
     result3 = await commands.dispatch(rt, f"approve {proposal.id}")
     assert "approved" in result3.lower()
+
+
+async def test_seed_story_dir_appends_seed_event_without_runtime(tmp_path):
+    from novelizer.director.commands import seed_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    await seed_story_dir(sd, "a tired thief takes one last job")
+
+    events = EventStore(str(sd.db_path))
+    await events.init()
+    try:
+        stored = await events.events_since(0)
+    finally:
+        await events.close()
+    assert len(stored) == 1
+    assert stored[0].event_type == EventType.DIRECTOR_SIGNAL_CREATED
+    assert stored[0].payload["kind"] == SignalKind.seed.value
+    assert stored[0].payload["body"] == "a tired thief takes one last job"
