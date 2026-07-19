@@ -646,3 +646,34 @@ def test_guarded_line_returns_labeled_value_when_present():
 
 def test_guarded_line_returns_empty_when_value_falsy():
     assert BaseAgent._guarded_line("In character", "") == ""
+
+
+from novelizer.agents.base import DEFAULT_PASS_REMARK, PASS_BACKOFF_MULTIPLIER
+
+
+def test_note_pass_extends_backoff_beyond_interval():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.mark_ran(1000.0)
+    agent.note_pass(now=1000.0)
+    # Normal interval has elapsed at t=1100, but the pass backoff (3x) has not.
+    assert not agent.ready_for_interval(1100.0)
+    assert agent.seconds_until_ready(1100.0) == 200.0
+    assert agent.ready_for_interval(1300.0)
+
+
+def test_note_pass_defaults_to_monotonic_clock():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.note_pass()
+    import time
+    assert agent._backoff_until > time.monotonic()
+
+
+def test_no_pass_means_plain_interval_gate():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.mark_ran(1000.0)
+    assert agent.ready_for_interval(1100.0)
+
+
+def test_pass_constants():
+    assert PASS_BACKOFF_MULTIPLIER == 3
+    assert DEFAULT_PASS_REMARK == "Nothing needs my attention — carry on with the story."

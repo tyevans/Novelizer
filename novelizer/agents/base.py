@@ -14,6 +14,11 @@ from novelizer.telemetry.events import (
 
 logger = logging.getLogger(__name__)
 
+# An agent that ran on fresh material but explicitly chose not to act steps
+# back for this many intervals instead of one, freeing dispatch slots.
+PASS_BACKOFF_MULTIPLIER = 3
+DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."
+
 
 class ChapterDraft(BaseModel):
     title: str
@@ -51,6 +56,7 @@ class BaseAgent:
         self.personality = personality
         self.paused = False
         self._last_run = 0.0
+        self._backoff_until = 0.0
         self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
 
     @staticmethod
@@ -65,13 +71,21 @@ class BaseAgent:
         self.paused = False
 
     def ready_for_interval(self, now: float) -> bool:
-        return (now - self._last_run) >= self.interval
+        return (now - self._last_run) >= self.interval and now >= self._backoff_until
 
     def mark_ran(self, now: float) -> None:
         self._last_run = now
 
     def seconds_until_ready(self, now: float) -> float:
-        return max(0.0, self.interval - (now - self._last_run))
+        return max(0.0, self.interval - (now - self._last_run), self._backoff_until - now)
+
+    def note_pass(self, now: float | None = None) -> None:
+        """Record an explicit "nothing to do" verdict: back off for
+        PASS_BACKOFF_MULTIPLIER intervals instead of one. Same clock family
+        as the scheduler's default (time.monotonic)."""
+        if now is None:
+            now = time.monotonic()
+        self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
 
     async def readiness(self) -> float:
         return 0.0
