@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 import aiosqlite
+from novelizer.canon import db
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
@@ -15,8 +16,7 @@ class ReadStore:
         self._conn: Optional[aiosqlite.Connection] = None
 
     async def init(self) -> None:
-        self._conn = await aiosqlite.connect(self._path)
-        await self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn = await db.connect(self._path)
 
     async def close(self) -> None:
         if self._conn:
