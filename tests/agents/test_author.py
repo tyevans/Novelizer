@@ -503,8 +503,11 @@ async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
 def test_summarize_uses_configured_prior_chapter_chars():
     from novelizer.agents.author import _summarize
 
+    # The knob governs the chapters BEHIND the newest one; the chapter being
+    # continued from is pushed in full so its ending is visible.
     ctx = {
-        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "world": [], "characters": [],
+        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
@@ -517,7 +520,8 @@ def test_summarize_default_prior_chapter_chars_is_200():
     from novelizer.agents.author import _summarize
 
     ctx = {
-        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "world": [], "characters": [],
+        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
@@ -528,6 +532,7 @@ def test_summarize_default_prior_chapter_chars_is_200():
 async def test_author_constructor_threads_prior_chapter_summary_chars_through(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 500))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Newest", prose="p"))
     await proj.catch_up()
     runner = FakeRunner(ChapterDraft(title="T2", prose="P"))
     author = Author(runner, read, committer, prior_chapter_summary_chars=10)
@@ -579,7 +584,7 @@ async def test_author_prompt_includes_causal_flags_when_edges_flagged(stack):
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Causal flags:" in sent
-    assert "c2" in sent and "c1" in sent and "ordering" in sent
+    assert "ch002 -> ch001" in sent and "ordering" in sent
 
 
 async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(stack):
@@ -620,7 +625,7 @@ async def test_author_pull_mode_true_replaces_prose_with_chapter_map(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Chapter index:" in sent
     assert "Previous chapters:" not in sent
-    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "- ch001 'One' (draft) cast: none [id:c1]" in sent
     assert "secret prose text" not in sent
 
 
@@ -749,30 +754,20 @@ def test_build_author_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):
     assert captured["called"]
 
 
-def test_retrieval_note_pinned_and_base_split():
+def test_retrieval_note_base_split():
+    """Author re-exports the shared notes; the map variant is the base variant
+    plus one index sentence. Wording is pinned in tests/agents/test_prompts.py."""
     from novelizer.agents.author import RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE
+    from novelizer.agents import prompts
 
-    assert RETRIEVAL_NOTE == (
-        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-        "semantic search (search_canon). The chapter list below is an index — read any "
-        "chapter or canon file you need in full before writing. Cite ids exactly as shown "
-        "in frontmatter or search results."
-    )
+    assert RETRIEVAL_NOTE is prompts.RETRIEVAL_NOTE
+    assert RETRIEVAL_NOTE_BASE is prompts.RETRIEVAL_NOTE_BASE
     assert "chapter list below" not in RETRIEVAL_NOTE_BASE
-    prefix = (
-        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-        "semantic search (search_canon). "
-    )
-    assert RETRIEVAL_NOTE_BASE.startswith(prefix)
-    assert RETRIEVAL_NOTE.startswith(prefix)
-    suffix = RETRIEVAL_NOTE_BASE[len(prefix):]
+    assert "chapter list below" in RETRIEVAL_NOTE
+    prefix = prompts._RETRIEVAL_NOTE_PREFIX
+    suffix = prompts._RETRIEVAL_NOTE_SUFFIX
     assert RETRIEVAL_NOTE_BASE == prefix + suffix
-    assert RETRIEVAL_NOTE == (
-        prefix
-        + "The chapter list below is an index — read any chapter or canon file you need "
-        "in full before writing. "
-        + suffix
-    )
+    assert RETRIEVAL_NOTE == prefix + prompts._RETRIEVAL_NOTE_MAP_SENTENCE + suffix
 
 
 async def test_author_commits_promise_intents_with_validation(stack):

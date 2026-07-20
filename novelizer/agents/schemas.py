@@ -66,6 +66,12 @@ class ThreadIntent(BaseModel):
     name: str = ""
     id: str = ""
     note: str = ""
+    evidence: str = ""
+    """Canon the citing action rests on — a chNNN handle or canon file path.
+    Empty is legal (minting actions have nothing prior to cite) but a citing
+    action without it is logged: an uncited claim about existing canon is the
+    shape a hallucinated intent takes."""
+
 
 
 class PromiseIntent(BaseModel):
@@ -124,6 +130,12 @@ class KnowledgeIntent(BaseModel):
     id: str = ""
     character_id: str = ""
     note: str = ""
+    evidence: str = ""
+    """Canon the citing action rests on — a chNNN handle or canon file path.
+    Empty is legal (minting actions have nothing prior to cite) but a citing
+    action without it is logged: an uncited claim about existing canon is the
+    shape a hallucinated intent takes."""
+
 
 
 class CausalIntent(BaseModel):
@@ -140,6 +152,10 @@ class CausalIntent(BaseModel):
     cause_chapter_id: str
     effect_chapter_id: str
     note: str = ""
+    evidence: str = ""
+    """Canon the edge rests on — a chNNN handle or canon file path. A causal
+    claim always cites two existing chapters, so an empty value here is always
+    an ungrounded claim and is logged."""
 
 
 class BlueprintPlan(BaseModel):
@@ -267,7 +283,22 @@ class ContinuityOutput(BaseModel):
 
 
 class RetconAmendments(BaseModel):
+    """The Retconner's verdict on one filed contradiction.
+
+    `resolution` separates outcomes the old shape collapsed into "resolved":
+    a repair, a paradox that no longer reproduces, a report too incoherent to
+    act on, and a request about records the Retconner does not own. Defaults to
+    "amend" so results produced before this field keep their old meaning.
+    """
+
+    resolution: Literal["amend", "already_consistent", "cannot_reproduce", "out_of_lane"] = "amend"
+    reason: str = ""
+    """Why, when the resolution is not an amendment. Goes in the log for the
+    agent that filed the request."""
     amended_entries: list[WorldEntryDraft] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    """Spans actually read to reach the verdict. The inlined entry bodies are a
+    pointer to canon that may have moved on, not the canon itself."""
     feed_note: str = ""
 
 

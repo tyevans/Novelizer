@@ -203,6 +203,7 @@ class Runtime:
             self._runner_for("character_keeper", character_keeper_builder), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("character_keeper", ""),
             prose_chars=s.keeper_prose_chars,
+            pull_mode=s.character_keeper_tools_enabled,
         )
         editor_builder = self._tooled(build_editor_runner, s.editor_tools_enabled)
         self.editor = Editor(
@@ -227,6 +228,7 @@ class Runtime:
         self.structure_analyst = StructureAnalyst(
             self._runner_for("structure_analyst", structure_analyst_builder), self.read, self.committer,
             interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
+            pull_mode=s.structure_analyst_tools_enabled,
         )
         plotter_builder = self._tooled(build_plotter_runner, s.plotter_tools_enabled)
         self.plotter = Plotter(

@@ -69,7 +69,9 @@ def known_secrets_note(
             if knowledge_cell_state(matrix, secret.id, cid) == "known"
         )
         who = f"known only to {', '.join(known)}" if known else "known to no one"
-        lines.append(f"- '{secret.id}' ({secret.title}) — {who}")
+        # Title first, id in parens: same shape as stale_threads_note. Leading
+        # with the id inverts natural-language-first ordering and costs recall.
+        lines.append(f"- {secret.title} (id:{secret.id}) — {who}")
     if not lines:
         return ""
     return "\n\nSecrets and who knows them:\n" + "\n".join(lines)
@@ -89,13 +91,27 @@ def open_retcons_note(requests: list[RetconRequest]) -> str:
     return f"\n\nRetcon requests already filed (do not re-report these):\n{lines}"
 
 
+def chapter_ordinals(chapter_ids: list[str]) -> dict[str, str]:
+    """Map chapter id -> 'chNNN' handle. The ordinal is list position, which is
+    what canon_fs.paths.build_path_index uses for the NNN- filename prefix, so a
+    chNNN an agent reads here resolves to the file it then opens."""
+    return {cid: f"ch{i:03d}" for i, cid in enumerate(chapter_ids, start=1)}
+
+
 def chapter_map_note(chapters: list[Chapter]) -> str:
-    """Pull-mode chapter index: one line per chapter, never prose."""
+    """Pull-mode chapter index: one line per chapter, never prose.
+
+    Leads with the chNNN ordinal because raw chapter ids are UUIDs, and an
+    agent asked to copy a 36-char opaque string back into an intent drops or
+    mangles it. The raw id trails in [id:...] for the schemas that still
+    require it.
+    """
     if not chapters:
         return "None yet."
+    ordinal = chapter_ordinals([c.id for c in chapters])
     return "\n".join(
-        f"- [{c.id}] '{c.title}' ({c.editorial_status.value}) "
-        f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'}"
+        f"- {ordinal[c.id]} '{c.title}' ({c.editorial_status.value}) "
+        f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'} [id:{c.id}]"
         for c in chapters
     )
 
@@ -231,7 +247,10 @@ def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -
     candidates = find_paradoxes(edges, chapter_order)
     if not candidates:
         return ""
+    ordinal = chapter_ordinals(chapter_order)
     lines = "\n".join(
-        f"- chapter {p.cause_chapter_id} -> chapter {p.effect_chapter_id} ({p.reason})" for p in candidates
+        f"- {ordinal.get(p.cause_chapter_id, p.cause_chapter_id)} -> "
+        f"{ordinal.get(p.effect_chapter_id, p.effect_chapter_id)} ({p.reason})"
+        for p in candidates
     )
     return f"\n\nCausal flags:\n{lines}"

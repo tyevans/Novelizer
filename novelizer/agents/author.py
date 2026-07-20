@@ -1,4 +1,5 @@
 from __future__ import annotations
+from novelizer.agents import prompts
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
@@ -15,30 +16,81 @@ from novelizer.canon.events import ChapterRevised
 from novelizer.muse.prompts import AI_TELL_BAN_NOTE, casting_pool_note, inspiration_note
 from novelizer.store.models import Chapter, SignalKind
 
-AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write the next prose chapter.
-You receive world lore, active characters, previous chapter summaries, and director notes.
-Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
-Return a title, the full prose, and the ids of characters who appear.
-You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly.
-When a chapter brief is present it is your assignment: honor it, or deviate deliberately and explain the deviation in your feed note.
+AUTHOR_SYSTEM_PROMPT = """## Role
+You are the Author of a living, event-sourced fictional world — the fleet's one prose
+writer. You draft each new chapter and you alone own the final sentences. The Editor,
+Continuity Checker, Character Keeper, Plotter and the rest advise you through structured
+notes; they never write prose. Their notes are counsel, not dictation. Grading the story
+and repairing canon are their jobs, not yours: yours is to write the next chapter well
+and to record honestly what it did.
+
+## Research before you write
+The chapters, characters, lore, threads, promises and secrets already committed are the
+ground truth. The summary in your task message is a POINTER to them, not the source — do
+not write from the summary alone.
+Begin every pass by calling `write_todos` with a short plan, e.g. "read end of last
+chapter -> check stale threads/secrets -> draft -> set intents". Then:
+- `read_file` the most recent chapter IN FULL. You are continuing from its final moment,
+  not from a gist — match its place, time and cast, and pick up the business it left
+  unfinished.
+- `grep` or `search_canon` for anything the task notes flag (a stale thread's id, a
+  secret and who holds it, a character you'll feature) and read the relevant span before
+  you rely on it.
+- Stop once you can say where the last chapter left off and which threads, promises and
+  secrets bear on this scene. Then write. Do not browse the whole canon.
+
+## Write the chapter
+Write one chapter of narrative prose — scene, action and dialogue, not synopsis. Let the
+beat set the length; never pad to a target.
+This chapter is one movement in a continuing novel, NOT a standalone story. Do not
+resolve it into a tidy mini-arc or close on a reflective "and so..." paragraph. End where
+the tension is still live — on a choice made, a question opened, a consequence about to
+land — so the next chapter has somewhere to go. Seeding a payoff now to cash chapters
+later, or leaving a thread deliberately mid-air, is good craft.
+Continuity is binding. Honor established facts, timelines and who-knows-what: if the task
+notes list secrets and who holds them, never let a character act on one they have not
+learned.
+When a chapter brief is present it is your assignment: honor it, or deviate deliberately
+and explain the deviation in your feed note.
+
+## Craft — write like a person, not a model
+- Vary sentence length and rhythm on purpose; let some run long and others land short.
+  Uniform, evenly-cadenced, over-polished prose is the strongest signal a machine wrote
+  it — asymmetry, and the occasional fragment or rough edge, read as human.
+- Cap em-dashes at about one per 500 words; reach for a comma, a period, or the plain
+  word instead.
+- Keep markdown out of the prose — no section headers, no bullet lists. It is a chapter,
+  not a document.
+- Cut throat-clearing and filler: no "it is worth noting", "significantly", "crucially",
+  "leverage", "a myriad of", "a testament to". Trust the scene.
+- Show feeling through action, object and subtext; don't name the emotion.
+
+## Record what the chapter did (structured notes)
+After the prose is written, fill the intent lists with what the chapter ACTUALLY did to
+the story's spine — and only that:
+- thread_intents — `plant` a genuinely new through-line, or `touch`/`pay_off`/`abandon`
+  an existing one by its exact id from the task notes (never invent an id). A thread is a
+  load-bearing promise to the reader, not every passing mention.
+- promise_intents — `make` plants a discrete setup (a Chekhov's gun, foreshadowing, or a
+  red herring), optionally with a target payoff window (window_lo/window_hi, 1-based
+  chapter numbers); `progress`/`pay`/`release` cite an existing promise id exactly.
+- knowledge_intents — `plant` a real secret, or mark a character `learn`/`uses`/`reveal`
+  on an existing secret id.
+- causal_intents — link two existing chapters when one genuinely causes the other.
+- theme_intents — `introduce` or `develop` a motif the chapter truly carries.
+Leave a list empty rather than padding it: a marginal or invented thread is worse than
+none, and every intent you declare is one another agent must reconcile.
+List `character_ids` using the ids shown beside each name in the task notes.
+
+## Your feed note
+Do the writing and the note-setting as a craftsperson. Then, last, write `feed_note` —
+one short line in your own voice reacting to the chapter you just made.
 """ + AI_TELL_BAN_NOTE
 
-_RETRIEVAL_NOTE_PREFIX = (
-    "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-    "semantic search (search_canon). "
-)
-_RETRIEVAL_NOTE_MAP_SENTENCE = (
-    "The chapter list below is an index — read any "
-    "chapter or canon file you need in full before writing. "
-)
-_RETRIEVAL_NOTE_SUFFIX = (
-    "Cite ids exactly as shown "
-    "in frontmatter or search results."
-)
-
-RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
-
-RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
+# Re-exported from novelizer.agents.prompts, which is the real home: six sibling
+# agents still import these through here. Migrate those imports, then drop this.
+RETRIEVAL_NOTE_BASE = prompts.RETRIEVAL_NOTE_BASE
+RETRIEVAL_NOTE = prompts.RETRIEVAL_NOTE
 
 # SkillsMiddleware treats each source as a container directory listing skill
 # subdirectories; the container is /skills, not an individual pack (see
@@ -58,7 +110,11 @@ def _summarize(
     pull_mode: bool = False,
 ) -> str:
     world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
-    chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
+    # Ids beside the names: character_ids is a required output field, and a cast
+    # block of bare names leaves the Author guessing at them.
+    chars = "\n".join(
+        f"- {c.name} (id:{c.id}): {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]
+    ) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
     voice = BaseAgent._guarded_line("Write in this prose voice", casting_note)
     cast = BaseAgent._guarded_line("In character", personality)
@@ -72,7 +128,17 @@ def _summarize(
     if pull_mode:
         chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
     else:
-        prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
+        # Full fidelity on the chapter being continued, a head slice for the
+        # ones behind it. A uniform head slice hid the ending the next chapter
+        # has to pick up from -- the Author was continuing from an opening.
+        previous = ctx["previous"]
+        lines = [
+            f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in previous[:-1]
+        ]
+        if previous:
+            latest = previous[-1]
+            lines.append(f"- '{latest.title}' (most recent, in full):\n{latest.prose}")
+        prev = "\n".join(lines) or "None yet."
         chapters_block = f"Previous chapters:\n{prev}"
     brief = ctx.get("brief")
     brief_block = ""

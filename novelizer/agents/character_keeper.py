@@ -3,7 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import arc_note, open_retcons_note
+from novelizer.brain.context import arc_note, chapter_map_note, open_retcons_note
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
@@ -14,23 +14,65 @@ from novelizer.muse.prompts import NAME_UPTAKE_HAND_WINDOW, name_uptake_matches
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world.
-You receive the current cast (with traits and arcs) and recent prose chapters. Your tasks:
-1. Report new_characters: named characters who appear in the chapters but are missing from
-   the cast. Give each a name exactly as the prose spells it, plus any traits, motivations,
-   backstory, arc_status, and voice the prose shows. Never re-report a character already
-   in the cast, even under a nickname or variant spelling.
-2. Update each existing character's arc_status to reflect what recent chapters show.
-3. Flag behavioral contradictions between a character's defined traits and their actions.
-4. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
-   in their lines, and revise it as their voice evolves across chapters.
-5. Declare or advance each significant character's planned arc: the lie they believe, what
-   they want vs need, their arc type; plan pivots on blueprint beats; resolve the arc when
-   the story settles it. Cite arc and beat ids exactly.
-Return new_characters, updated_characters (id + revised arc_status, and any corrected
-traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
-proposed_resolution). You may also be shown retcon requests already filed and still open:
-do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
+SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world. You maintain the
+canonical cast: you discover the characters the prose introduces, keep each sheet true to what
+recent chapters show, tend their arcs, and record when a character learns a secret. You work from
+what the prose actually says, never from what you expect it to say.
+
+## Your lane
+- Discover new_characters: named people who appear in the prose but are missing from the cast.
+  Spell each name exactly as the prose spells it, and give the traits, motivations, backstory,
+  arc_status and voice the prose itself shows — leave a field blank rather than invent it.
+- Update existing characters: revise arc_status, and correct traits/motivations/backstory/voice,
+  to match recent chapters. Record voice as concrete dialogue patterns, vocabulary and verbal tics
+  you could quote, and refine it as a voice evolves.
+- Tend arcs: declare or advance each significant character's planned arc — the lie they believe,
+  want vs need, arc type — pivot on blueprint beats, and resolve the arc when the story settles it.
+  Cite arc and beat ids exactly.
+- Record knowledge: when a chapter shows a character learning a secret ON THE PAGE, emit a
+  knowledge intent (action="learn", the secret's id, the character's id). A character merely acting
+  on a secret is not a learning moment and is not yours to record.
+- Flag character contradictions: when a canonical trait and a prose action genuinely conflict, file
+  a retcon_request (what conflicts with what, the conflicting ids, a proposed resolution).
+
+## Not your lane
+- You do not write or rewrite prose, and you do not invent characters, arcs or events the prose
+  does not show. That is the Author's work.
+- You do not chase timeline, factual or world-logic contradictions — dates, locations, quantities,
+  anachronisms. That is the Continuity Checker. Your retcons are strictly about a named character
+  behaving against their established sheet.
+- You do not resolve retcons or amend canon entries: you file, the Retconner repairs.
+- You do not plant, reveal or invent secrets — only record a character learning an existing one.
+
+## De-duplication is the job
+Before reporting a new character, prove they are new. Check the cast list AND each character's
+aliases for the same person under a nickname, a title, a first-name-only reference, or a variant
+spelling ("Doc" for "Dr. Reyes", "the sergeant" for a named soldier). If the prose reveals a new
+name for an existing character, do not create a duplicate — record it as an update. Re-reporting an
+existing person under a new label is the failure mode to avoid.
+
+## Output
+Return new_characters, updated_characters (id + revised arc_status, plus any corrected
+traits/motivations/backstory/voice), retcon_requests, arc intents, and knowledge intents (learn
+only). You may be shown retcon requests already filed and still open: do not re-report those, even
+reworded.""" + PASS_PROMPT_INSTRUCTION
+
+# Appended only in the tooled build: the base retrieval note assumes a pushed
+# summary is enough, which is exactly what starved discovery here.
+KEEPER_PULL_NOTE = (
+    "\n\n## Canon access\n"
+    "You have file tools over the story canon (ls, read_file, grep, glob) and semantic search "
+    "(search_canon). The cast and chapter index below are a MAP, not the source — the chapter "
+    "lines are titles and ids only. Work in two phases.\n"
+    "1. RESEARCH: read every chapter new since your last pass IN FULL with read_file. A character "
+    "can be introduced in a chapter's last line, so never judge a chapter from its title or an "
+    "excerpt. Use grep to check whether a name you are about to report already exists as a "
+    "character's name or alias. Read a character's file when you need their current sheet.\n"
+    "2. EMIT: only once you have read the prose behind a finding, produce the structured output. "
+    "Ground each new character and each contradiction in the chapter you read it in. When your "
+    "findings are grounded, stop searching and emit — do not keep browsing. Cite ids exactly as "
+    "shown in frontmatter or search results."
+)
 
 # See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
 # middleware's container source contract makes per-agent pack selectivity
@@ -47,12 +89,15 @@ class CharacterKeeper(BaseAgent):
         interval: int = 120,
         personality: str = "",
         prose_chars: int = 6000,
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="character_keeper", personality=personality)
-        # Discovery needs the whole chapter: a character introduced in the
-        # final scene is as canonical as one in the opening line. The cap
-        # only bounds tokens for outlier-length chapters.
+        # Push-mode fallback only. Discovery needs the whole chapter -- a
+        # character introduced in the final scene is as canonical as one in the
+        # opening line -- so a tooled Keeper runs in pull_mode and reads
+        # chapters itself rather than trusting any cap.
         self._prose_chars = prose_chars
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         chars = await self._read.list_characters()
@@ -87,8 +132,28 @@ class CharacterKeeper(BaseAgent):
     async def work(self, ctx: dict) -> KeeperOutput | None:
         if not ctx["characters"] and not ctx["recent"]:
             return None
-        chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"]) or "None yet."
-        chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:self._prose_chars]}" for c in ctx["recent"]) or "None."
+        # Aliases inline: the dedup rule ("never re-report someone under a
+        # nickname") is unrunnable if the nicknames aren't in front of it.
+        chars = "\n".join(
+            f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}"
+            + (f", also known as {', '.join(c.aliases)}" if c.aliases else "")
+            for c in ctx["characters"]
+        ) or "None yet."
+        if self.pull_mode:
+            # Index only. Any prose cap has a cliff, and a character can be
+            # introduced in a chapter's last line -- so the Keeper reads.
+            chapters = chapter_map_note(ctx["chapters"])
+        else:
+            chapters = "\n\n".join(
+                f"Chapter '{c.title}': {c.prose[:self._prose_chars]}" for c in ctx["recent"]
+            ) or "None."
+        secrets_block = ""
+        if ctx.get("secrets"):
+            listing = "\n".join(f"- {s.id} ('{s.title}')" for s in ctx["secrets"])
+            secrets_block = (
+                "\n\nActive secrets — when a chapter shows a character learning a secret "
+                "on the page, cite its id in a knowledge intent:\n" + listing
+            )
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         names_by_id = {c.id: c.name for c in ctx["characters"]}
@@ -105,7 +170,11 @@ class CharacterKeeper(BaseAgent):
         note = arc_note(
             ctx.get("all_arcs", []), ctx["characters"], ctx.get("chapters", []), beats, ctx.get("blueprint"),
         )
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}{arcs_block}{note}"
+        heading = "Chapter index" if self.pull_mode else "Recent chapters"
+        msg = (
+            f"Characters:\n{chars}\n\n{heading}:\n{chapters}"
+            f"{secrets_block}{retcons}{cast}{arcs_block}{note}"
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -217,7 +286,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
-        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
+        system_prompt = SYSTEM_PROMPT + KEEPER_PULL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
             backend=backend, tools=tools, skills=KEEPER_SKILLS,

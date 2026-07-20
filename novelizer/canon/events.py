@@ -106,6 +106,9 @@ class ThreadTouched(BaseModel):
     """source distinguishes agent-declared facts ('declared', default) from
     Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class ThreadPaidOff(BaseModel):
     """Payload for thread.paid_off — an existing thread resolves, cited by id.
@@ -120,6 +123,9 @@ class ThreadPaidOff(BaseModel):
     """source distinguishes agent-declared facts ('declared', default) from
     Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class ThreadAbandoned(BaseModel):
     """Payload for thread.abandoned — an existing thread is dropped, cited by id.
@@ -131,6 +137,9 @@ class ThreadAbandoned(BaseModel):
     chapter_id: str = ""
     note: str = ""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class ThemeIntroduced(BaseModel):
     """Payload for theme.introduced — mints a new theme's identity.
@@ -199,6 +208,9 @@ class SecretLearned(BaseModel):
     """source distinguishes agent-declared facts ('declared', default) from
     Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class SecretReferenced(BaseModel):
     """Payload for secret.referenced — a character uses/references an
@@ -215,6 +227,9 @@ class SecretReferenced(BaseModel):
     """source distinguishes agent-declared facts ('declared', default) from
     Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class SecretRevealed(BaseModel):
     """Payload for secret.revealed — an existing secret becomes public,
@@ -228,6 +243,9 @@ class SecretRevealed(BaseModel):
     chapter_id: str = ""
     note: str = ""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class CausalEdgeDeclared(BaseModel):
     """Payload for causal_edge.declared — a claimed cause/effect relationship
@@ -243,6 +261,9 @@ class CausalEdgeDeclared(BaseModel):
     """source distinguishes agent-declared facts ('declared', default) from
     Continuity Checker prose-mined facts ('mined') -- see M5.1."""
 
+    evidence: str = ""
+    """Canon the declaring agent cited as grounding. Defaults empty so events
+    written before this field replay unchanged."""
 
 class AnnotationStructureScored(BaseModel):
     """Payload for annotation.structure_scored — one chapter's tension/pacing

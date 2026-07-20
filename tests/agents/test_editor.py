@@ -383,7 +383,7 @@ async def test_editor_prompt_includes_causal_flags_note_when_present(stack):
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Causal flags" in sent
-    assert "c2" in sent and "c1" in sent and "ordering" in sent
+    assert "ch002 -> ch001" in sent and "ordering" in sent
 
 
 async def test_editor_prompt_omits_causal_flags_note_when_no_edges(stack):

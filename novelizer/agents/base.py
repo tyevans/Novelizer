@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Protocol
 from pydantic import BaseModel, Field
+from novelizer.agents import prompts
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
@@ -25,12 +26,10 @@ GRAPH_RECURSION_LIMIT = 100
 # An agent that ran on fresh material but explicitly chose not to act steps
 # back for this many intervals instead of one, freeing dispatch slots.
 PASS_BACKOFF_MULTIPLIER = 3
-DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."
-PASS_PROMPT_INSTRUCTION = (
-    "\nIf nothing needs your attention, set no_action=true, leave every list empty, "
-    "and give a one-line feed_note in character saying you're standing aside so the "
-    "story can continue."
-)
+# Re-exported from novelizer.agents.prompts, which is the real home: three agents
+# still import these through here. Migrate those imports, then drop this.
+DEFAULT_PASS_REMARK = prompts.DEFAULT_PASS_REMARK
+PASS_PROMPT_INSTRUCTION = prompts.PASS_PROMPT_INSTRUCTION
 
 
 class ChapterDraft(BaseModel):

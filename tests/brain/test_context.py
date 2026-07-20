@@ -124,11 +124,22 @@ def test_causal_flags_note_empty_when_no_paradoxes():
     assert causal_flags_note(edges, ["c1", "c2"]) == ""
 
 
-def test_causal_flags_note_lists_ordering_paradox():
+def test_causal_flags_note_lists_ordering_paradox_in_ordinals():
+    """No raw chapter UUID should appear in the arrow line — the agent reads
+    and echoes ordinals."""
     edges = [CausalEdgeRecord(cause_chapter_id="c2", effect_chapter_id="c1")]
     note = causal_flags_note(edges, ["c1", "c2"])
     assert note.startswith("\n\n")
-    assert "c2" in note and "c1" in note and "ordering" in note
+    assert "ch002 -> ch001" in note
+    assert "ordering" in note
+
+
+def test_causal_flags_note_falls_back_to_raw_id_when_chapter_unknown():
+    """An edge citing a chapter outside the given order still has to be
+    reportable, or the paradox silently disappears."""
+    edges = [CausalEdgeRecord(cause_chapter_id="ghost", effect_chapter_id="c1")]
+    note = causal_flags_note(edges, ["c1", "c2"])
+    assert "ghost" in note or note == ""
 
 
 def test_stale_threads_note_respects_explicit_threshold():
@@ -154,12 +165,25 @@ def test_chapter_map_note_empty_when_no_chapters():
     assert chapter_map_note([]) == "None yet."
 
 
-def test_chapter_map_note_formats_id_title_status_and_cast():
+def test_chapter_map_note_leads_with_ordinal_and_trails_the_raw_id():
+    """Agents reason with chNNN (which matches the canon_fs path ordinal); the
+    raw id trails for the schemas that still require it."""
     from novelizer.brain.context import chapter_map_note
 
     chs = [Chapter(id="c1", title="The Salt Road", prose="p", character_ids=["mara", "eli"])]
     note = chapter_map_note(chs)
-    assert note == "- [c1] 'The Salt Road' (draft) cast: mara, eli"
+    assert note == "- ch001 'The Salt Road' (draft) cast: mara, eli [id:c1]"
+
+
+def test_chapter_map_note_ordinals_are_one_based_and_sequential():
+    """The ordinal must match build_path_index's 001-, 002-... filenames, or a
+    ch012 in the index won't match the file the agent then reads."""
+    from novelizer.brain.context import chapter_map_note
+
+    note = chapter_map_note([Chapter(id=f"c{i}", title=f"T{i}", prose="p") for i in range(1, 4)])
+    assert "- ch001 'T1'" in note
+    assert "- ch002 'T2'" in note
+    assert "- ch003 'T3'" in note
 
 
 def test_chapter_map_note_none_cast_when_empty():

@@ -156,7 +156,7 @@ async def test_story_context_pull_mode_uses_chapter_index_no_prose_leak(db_path)
         context = await rt.chat._story_context()
         assert "Chapter index:" in context
         assert "Recent chapters:" not in context
-        assert "- [c1] 'The Salt Road' (draft) cast: none" in context
+        assert "- ch001 'The Salt Road' (draft) cast: none [id:c1]" in context
         assert "SECRET-PROSE-TEXT" not in context
     finally:
         await rt.close()

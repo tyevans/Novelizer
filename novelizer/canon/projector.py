@@ -211,7 +211,11 @@ class Projector:
                         "is a signal to notice via the feed, not something to silently correct)",
                         p["chapter_id"], _REVISION_LENGTH_SANITY_MULTIPLE,
                     )
-                revised = existing.model_copy(update={"prose": p["prose"], "editorial_status": EditorialStatus.draft})
+                revised = existing.model_copy(update={
+                    "prose": p["prose"],
+                    "editorial_status": EditorialStatus.draft,
+                    "revision_count": existing.revision_count + 1,
+                })
                 await self._conn.execute(
                     "INSERT OR REPLACE INTO chapters (id, data, editorial_status, supersedes_id) VALUES (?,?,?,?)",
                     (revised.id, revised.model_dump_json(), EditorialStatus.draft.value, revised.supersedes_id),
