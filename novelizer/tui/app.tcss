@@ -6,7 +6,6 @@
 #proposals_banner.open { display: block; }
 #brain { height: 16; max-height: 45%; border: round $secondary; }
 #brain TabPane { padding: 0 1; }
-#shape_spark { height: 1; }
 #brain_strip { height: 1; padding: 0 1; }
 #browser { height: 2fr; border: round $primary; }
 #detail_scroll { height: 1fr; border: round $secondary; padding: 0 1; }

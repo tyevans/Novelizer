@@ -67,6 +67,25 @@ forever. Two rules follow:
   isolation; the wedge only reproduces in larger runs, so bisect with directory
   subsets, each under `timeout`.
 
+### Pilot tests are load-sensitive (2026-07-19)
+
+Under heavy machine load — a live `novelizer` session eating a core, another
+worktree's Claude session running pytest, load average ≥ ~5 — the pilot tests fail
+*en masse* with `aiosqlite` `RuntimeError('Event loop is closed')` teardown races
+surfacing as `PytestUnhandledThreadExceptionWarning` ExceptionGroups (fatal under
+`-W error`), plus stray chromadb `DeprecationWarning`s from fixture setup ordering.
+The same files pass when the box is quiet. Before diagnosing a red pilot suite as a
+regression:
+
+1. `uptime` and `ps -eo pid,etime,time,args --sort=-time | head` — look for a live
+   `novelizer` process or another worktree's pytest.
+2. Re-run the *same failing files* at the branch's base commit in a scratch worktree
+   (`git worktree add /tmp/base-check <base>`); identical failures = environment,
+   not code. Remove the scratch worktree after.
+3. The pure suites (`tests/brain`, `tests/canon`, `tests/tui/test_*_model.py`) are
+   load-immune — green there plus base-parity on the pilot failures is enough to
+   clear a rendering-only change; re-run the pilot suite when the box is quiet.
+
 ## Pilot-test conventions worth keeping
 
 - Widget visibility asserts via the `display` property work whether visibility is set

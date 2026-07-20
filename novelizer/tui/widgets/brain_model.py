@@ -23,6 +23,18 @@ from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
 
+WARN_STYLE = "yellow"
+
+SPARK_LEVELS = "▁▂▃▄▅▆▇█"
+SHAPE_GUTTER = "tension  "  # the marker row indents by this much to align under the spark
+
+
+def spark_char(tension: float) -> str:
+    """One block-glyph cell for one chapter's tension, clamped to [0, 1]."""
+    clamped = min(max(tension, 0.0), 1.0)
+    return SPARK_LEVELS[min(int(clamped * len(SPARK_LEVELS)), len(SPARK_LEVELS) - 1)]
+
+
 # One dim line each — the panel's designed quiet states. Secrets and
 # Causeway are verbatim from the design spec; Shape and Threads match the
 # same voice.
@@ -51,7 +63,9 @@ def chapter_label(chapter_id: str, chapters: list[Chapter]) -> str:
 
 @dataclass(frozen=True)
 class ShapeTab:
-    tensions: list[float]   # sparkline data, chapter order
+    tensions: list[float]   # chapter-order tension values (invariants/tests)
+    spark: Text | None      # "tension  ▂▅█" — one cell per chapter; None when empty
+    markers: Text | None    # "⚠" cells aligned under flagged chapters; None when no flags
     meta: Text              # axis + pacing line, or the dim empty state
     callouts: list[Text]    # one ALARM_STYLE line per sag/spike, chapter order
     alarm_count: int
@@ -60,19 +74,36 @@ class ShapeTab:
 def shape_tab(
     scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA
 ) -> ShapeTab:
-    """The Shape tab: tension-by-chapter sparkline data plus sag/spike
-    callouts naming chapter TITLES. Flags come from detect_sag_spike over the
-    raw score list — never re-derived here. `delta` arrives from
-    settings.sag_spike_delta via the app's _brain_loop (M5.3 single-sourcing);
-    the default is the imported constant, never a re-typed literal."""
+    """The Shape tab: a rendered tension-by-chapter spark row (rich.text.Text,
+    not raw sparkline data) plus sag/spike callouts naming chapter TITLES.
+    Flags come from detect_sag_spike over the raw score list — never
+    re-derived here. `delta` arrives from settings.sag_spike_delta via the
+    app's _brain_loop (M5.3 single-sourcing); the default is the imported
+    constant, never a re-typed literal."""
     if not scores:
-        return ShapeTab([], Text(SHAPE_EMPTY, style=DIM), [], 0)
+        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
     chapter_ids = {c.id for c in chapters}
     ordered = [by_chapter[c.id] for c in chapters if c.id in by_chapter]
     ordered += [s for cid, s in by_chapter.items() if cid not in chapter_ids]
     tensions = [s.tension for s in ordered]
     flags = detect_sag_spike(scores, delta)
+    # no_wrap + ellipsis: spark and markers are two aligned rows keyed by
+    # chapter index. Rich's default word-wrap would wrap each row
+    # independently on overflow, desyncing the ⚠ markers from their
+    # chapters — crop instead.
+    spark = Text(no_wrap=True, overflow="ellipsis")
+    spark.append(SHAPE_GUTTER, style=DIM)  # only the gutter is dim; glyphs carry the signal
+    for s in ordered:
+        spark.append(spark_char(s.tension))
+    markers: Text | None = None
+    if any(s.chapter_id in flags for s in ordered):
+        markers = Text(" " * len(SHAPE_GUTTER), no_wrap=True, overflow="ellipsis")
+        for s in ordered:
+            if s.chapter_id in flags:
+                markers.append("⚠", style=ALARM_STYLE)
+            else:
+                markers.append(" ")
     callouts = [
         Text(f"⚠ {flags[s.chapter_id]}: {chapter_label(s.chapter_id, chapters)}", style=ALARM_STYLE)
         for s in ordered
@@ -81,27 +112,53 @@ def shape_tab(
     axis = f"ch 1 ▸ ch {len(tensions)}" if len(tensions) > 1 else "ch 1"
     pacing = ordered[-1].pacing_label
     meta = Text(f"{axis} · pacing: {pacing}" if pacing else axis, style=DIM)
-    return ShapeTab(tensions, meta, callouts, len(callouts))
+    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts))
+
+
+AGE_BAR_CELLS = 5
+NAME_WIDTH = 20
+WARN_FRACTION = 0.6  # bar warms to WARN_STYLE at this fraction of the staleness threshold
+
+
+def age_bar(elapsed: int, threshold: int) -> Text:
+    """Thread-age heat bar: fill and color scale with elapsed/threshold, so
+    staleness is a visible gradient, not a binary flip. Clamped at full."""
+    ratio = 1.0 if elapsed >= threshold else elapsed / threshold
+    filled = round(ratio * AGE_BAR_CELLS)
+    glyphs = "▰" * filled + "▱" * (AGE_BAR_CELLS - filled)
+    if ratio >= 1.0:
+        style = ALARM_STYLE
+    elif ratio >= WARN_FRACTION:
+        style = WARN_STYLE
+    else:
+        style = DIM
+    return Text(glyphs, style=style)
 
 
 def thread_line(
     thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
 ) -> Text:
-    """One Threads-tab row. Staleness comes from is_thread_stale /
-    chapters_elapsed_since — never re-derived; `threshold` arrives from
-    settings.staleness_threshold_chapters via the app's _brain_loop (M5.3
-    single-sourcing). No slugs/ids anywhere."""
+    """One Threads-tab row: state glyph, padded name, age heat bar, detail.
+    Staleness comes from is_thread_stale / chapters_elapsed_since — never
+    re-derived; `threshold` arrives from settings.staleness_threshold_chapters
+    via the app's _brain_loop. No slugs/ids anywhere."""
+    if thread.state.value in TERMINAL_STATES:
+        return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
+    elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
+    n = chapter_number(thread.last_chapter_id, chapters)
+    bar = age_bar(elapsed, threshold)
+    name = _clip_title(thread.name, NAME_WIDTH).ljust(NAME_WIDTH)
     if is_thread_stale(thread, chapters, threshold):
-        elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
-        n = chapter_number(thread.last_chapter_id, chapters)
         if n is None:
             detail = f"stale — untouched for {elapsed} chapters"
         else:
             detail = f"stale — last touched ch {n}, {elapsed} chapters ago"
-        return Text(f"⚠ {thread.name} · {detail}", style=ALARM_STYLE)
-    if thread.state.value in TERMINAL_STATES:
-        return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
-    return Text(f"· {thread.name} · {thread.state.value}")
+        return Text(f"⚠ {name}  {bar.plain}  {detail}", style=ALARM_STYLE)
+    detail = thread.state.value + (f" — ch {n}" if n is not None else "")
+    row = Text(f"· {name}  ")
+    row.append(bar.plain, style=bar.style)
+    row.append(f"  {detail}")
+    return row
 
 
 @dataclass(frozen=True)
@@ -162,10 +219,25 @@ def matrix_header(characters: list[Character]) -> Text:
     return Text(" " * TITLE_WIDTH + cells.rstrip(), style=DIM)
 
 
+def spread_meter(known: int, total: int) -> Text:
+    """Per-secret spread meter: one ● per knower, ○ per still-dark character,
+    'k/N'. Heats as spread approaches everyone — ALARM_STYLE when at most one
+    character is left in the dark (the Keeper's leak-proximity signal, shared
+    with the P3 Pulse card), WARN_STYLE once half the cast knows."""
+    glyphs = "●" * known + "○" * (total - known)
+    if known and total - known <= 1:
+        style = ALARM_STYLE
+    elif known and known / total >= 0.5:
+        style = WARN_STYLE
+    else:
+        style = DIM
+    return Text(f"{glyphs} {known}/{total}", style=style)
+
+
 def secret_row(secret: SecretRecord, characters: list[Character], matrix: dict[str, dict]) -> Text:
     """One matrix row: clipped secret TITLE, one glyph cell per character
-    (state from knowledge_cell_state — never re-derived), dim who-knows
-    summary. No ids anywhere."""
+    (state from knowledge_cell_state — never re-derived), heat-colored spread
+    meter. No ids anywhere."""
     row = Text(_clip_title(secret.title).ljust(TITLE_WIDTH))
     known = 0
     cells = []
@@ -174,13 +246,10 @@ def secret_row(secret: SecretRecord, characters: list[Character], matrix: dict[s
         known += state == "known"
         cells.append(CELL_GLYPHS[state].ljust(_COL))
     row.append(" ".join(cells).rstrip())
-    if known == 0:
-        summary = "no one knows"
-    elif known == 1:
-        summary = "1 knows"
-    else:
-        summary = f"{known} know"
-    row.append(f"   {summary}", style=DIM)
+    if characters:
+        meter = spread_meter(known, len(characters))
+        row.append("   ")
+        row.append(meter.plain, style=meter.style)
     return row
 
 
@@ -216,8 +285,9 @@ class CausewayTab:
 
 def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> CausewayTab:
     """Causal edges with chapter TITLES (raw id only when a chapter id is
-    unknown), sorted by chapter position; paradox edges — per find_paradoxes,
-    never re-derived — in alarm color with '⚠ PARADOX'."""
+    unknown), sorted by chapter position with paradox edges pinned first;
+    paradox edges — per find_paradoxes, never re-derived — in alarm color with
+    '⚠ PARADOX'; normal edges render their '──▶' arrow in dim style."""
     if not edges:
         return CausewayTab([Text(CAUSEWAY_EMPTY, style=DIM)], 0)
     order = [c.id for c in chapters]
@@ -230,19 +300,25 @@ def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> Caus
     ordered = sorted(
         edges,
         key=lambda e: (
+            (e.cause_chapter_id, e.effect_chapter_id) not in paradox_pairs,
             pos.get(e.cause_chapter_id, len(order)),
             pos.get(e.effect_chapter_id, len(order)),
         ),
     )
     for e in ordered:
-        body = f"{chapter_label(e.cause_chapter_id, chapters)} ──▶ {chapter_label(e.effect_chapter_id, chapters)}"
-        if e.note:
-            body += f": {e.note}"
+        cause = chapter_label(e.cause_chapter_id, chapters)
+        effect = chapter_label(e.effect_chapter_id, chapters)
+        note = f": {e.note}" if e.note else ""
         if (e.cause_chapter_id, e.effect_chapter_id) in paradox_pairs:
             alarms += 1
-            lines.append(Text(f"{body}  ⚠ PARADOX", style=ALARM_STYLE))
+            lines.append(
+                Text(f"{cause} ──▶ {effect}{note}  ⚠ PARADOX", style=ALARM_STYLE)
+            )
         else:
-            lines.append(Text(body))
+            line = Text(f"{cause} ")
+            line.append("──▶", style=DIM)
+            line.append(f" {effect}{note}")
+            lines.append(line)
     return CausewayTab(lines, alarms)
 
 
