@@ -4,13 +4,14 @@ from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.beat_drift import beat_drifts
+from novelizer.brain.completion import completion_status
 from novelizer.brain.context import (
     arc_note, beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note,
     stale_threads_note, tension_target_note,
 )
 from novelizer.canon.beat_templates import beat_window
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
-from novelizer.canon.events import ChapterBriefSuperseded, EventType
+from novelizer.canon.events import BookCompleted, ChapterBriefSuperseded, EventType
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.muse.prompts import inspiration_note
@@ -180,6 +181,7 @@ class Plotter(BaseAgent):
 
     async def commit(self, out: PlotterOutput | None, ctx: dict) -> None:
         await self._reap_stale_open_briefs(ctx["open_briefs"], len(ctx["chapters"]))
+        await self._declare_completion_if_satisfied(out, ctx)
 
         if out is None:
             return
@@ -244,6 +246,25 @@ class Plotter(BaseAgent):
                     self.name, EventType.CHAPTER_BRIEF_SUPERSEDED, brief.id,
                     ChapterBriefSuperseded(brief_id=brief.id, superseded_by_brief_id=""),
                 )
+
+    async def _declare_completion_if_satisfied(self, out: PlotterOutput | None, ctx: dict) -> None:
+        """Mechanical, deterministic declaration -- no LLM involvement, like
+        _reap_stale_open_briefs. Must run even when the LLM returned nothing
+        useful (out is None), so it lives beside the reap, above the
+        `out is None` guard in commit()."""
+        blueprint = ctx["blueprint"]
+        if blueprint is None or blueprint.completed:
+            return
+        status = completion_status(blueprint, ctx["beats"], ctx["promises"], ctx["arcs"], ctx["chapters"])
+        if status is None or not status.complete:
+            return
+        chapters = ctx["chapters"]
+        chapter_id = chapters[-1].id if chapters else ""
+        note = out.feed_note[:200] if out is not None else ""
+        await self._committer.commit(
+            self.name, EventType.BOOK_COMPLETED, blueprint.id,
+            BookCompleted(blueprint_id=blueprint.id, chapter_id=chapter_id, note=note),
+        )
 
     async def _run(self) -> None:
         ctx = await self.poll()

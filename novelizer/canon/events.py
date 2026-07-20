@@ -56,6 +56,7 @@ class EventType:
     ARC_PIVOT_PLANNED = "arc.pivot_planned"
     ARC_ADVANCED = "arc.advanced"
     ARC_RESOLVED = "arc.resolved"
+    BOOK_COMPLETED = "book.completed"
 
 
 class StoredEvent(BaseModel):
@@ -582,4 +583,19 @@ class ArcResolved(BaseModel):
     arc_id: str
     chapter_id: str = ""
     outcome: str = ""
+    note: str = ""
+
+
+class BookCompleted(BaseModel):
+    """Payload for book.completed — the room declares the blueprint satisfied:
+    every beat fulfilled, every promise paid or released, every active arc
+    resolved (see novelizer.brain.completion).
+
+    Informational and one-shot per blueprint: the projection ignores a repeat
+    while the same blueprint is active, and adopting a new blueprint clears
+    the flag (Locked decision: completion describes the CURRENT shape). It
+    does not stop the scheduler — the room quiesces on readiness, and the
+    Director decides when to close the story."""
+    blueprint_id: str
+    chapter_id: str = ""     # the last chapter at declaration time
     note: str = ""

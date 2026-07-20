@@ -51,6 +51,7 @@ _NEVER_GATED = {
     EventType.ARC_PIVOT_PLANNED,
     EventType.ARC_ADVANCED,
     EventType.ARC_RESOLVED,
+    EventType.BOOK_COMPLETED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

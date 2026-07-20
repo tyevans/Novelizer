@@ -579,3 +579,98 @@ def test_build_plotter_runner_with_real_composite_backend_is_constructible():
     )
     runner = build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner is not None
+
+
+# --- book.completed emission ---
+
+async def _adopt_satisfied_blueprint(events, proj):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec, BeatFulfilled, PromiseMade, PromisePaid
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=1,
+            beats=[BeatSpec(beat_id="bp1-inciting", slug="inciting", name="Inciting", ideal_pct=0.1, tolerance_pct=0.9)],
+        ),
+    )
+    await events.append(
+        EventType.BEAT_FULFILLED, "bp1-inciting",
+        BeatFulfilled(beat_id="bp1-inciting", chapter_id="c1"),
+    )
+    await events.append(EventType.PROMISE_MADE, "pr1", PromiseMade(id="pr1", name="a gun on the mantle"))
+    await events.append(EventType.PROMISE_PAID, "pr1", PromisePaid(id="pr1", chapter_id="c1"))
+    await proj.catch_up()
+
+
+async def test_run_once_emits_book_completed_when_story_satisfied(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    out = PlotterOutput(feed_note="the shape is closed")
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["blueprint_id"] == "bp1"
+    assert completed[0].payload["chapter_id"] == "c1"
+    assert completed[0].payload["note"] == "the shape is closed"
+
+    active = await read.get_active_blueprint()
+    assert active.completed is True
+
+
+async def test_run_once_twice_emits_book_completed_only_once(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    out = PlotterOutput()
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+
+
+async def test_run_once_emits_book_completed_even_when_llm_returns_none(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    plotter = Plotter(FakeRunner(None), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["note"] == ""
+
+
+async def test_run_once_no_book_completed_when_unsatisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=1,
+            beats=[BeatSpec(beat_id="bp1-inciting", slug="inciting", name="Inciting", ideal_pct=0.1, tolerance_pct=0.9)],
+        ),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput()
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert completed == []
