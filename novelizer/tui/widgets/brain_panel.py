@@ -53,11 +53,14 @@ class BrainPanel(Vertical):
                 yield Static("", id="arcs_body")
         yield Static("", id="brain_strip")
 
-    async def refresh_from(self, read, *, threshold: int, delta: float) -> None:
+    async def refresh_from(self, read, *, threshold: int, delta: float, lag: int = 0) -> None:
         """threshold/delta arrive from the app's _brain_loop, which reads
         settings.staleness_threshold_chapters / settings.sag_spike_delta
         every cycle (M5.3 single-sourcing: settings -> pure-function params;
-        keyword-only with no defaults so the app cannot forget to pass them)."""
+        keyword-only with no defaults so the app cannot forget to pass them).
+        `lag` is CanonIndexer.lag() -- the embedding index's staleness -- and
+        defaults to 0 only so call sites predating this feature keep
+        working; the app's _brain_loop always passes the live value."""
         chapters = await read.list_chapters()  # one snapshot shared by three tabs
         blueprint = await read.get_active_blueprint()
         beats = await read.list_beats()
@@ -91,7 +94,7 @@ class BrainPanel(Vertical):
         self.query_one("#brain_strip", Static).update(
             alarm_strip(
                 shape.alarm_count, threads.alarm_count, secrets.alarm_count, cause.alarm_count,
-                outline.alarm_count, arcs.alarm_count,
+                outline.alarm_count, arcs.alarm_count, lag,
             )
         )
 

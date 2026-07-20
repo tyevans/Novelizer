@@ -671,10 +671,20 @@ def arcs_tab(
     return ArcsTab(lines, len(findings))
 
 
-def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int) -> Text:
+def alarm_strip(
+    shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int, lag: int = 0
+) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
-    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs'."""
+    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs'.
+
+    `lag` is the canon embedding index's staleness (CanonIndexer.lag()) --
+    how many indexable events haven't been embedded yet. It is not one of
+    the six per-tab counts (there is no Index tab), so it renders as a
+    trailing 'Index ⚠N behind' segment only when nonzero, keeping the quiet
+    state ('Shape · Threads · ... · Arcs') unchanged when the index is
+    caught up -- an embed-endpoint outage must never again be silently
+    invisible in the UI."""
     strip = Text()
     for i, (label, count) in enumerate(
         [
@@ -687,4 +697,8 @@ def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int
         strip.append(label, style=DIM)
         if count:
             strip.append(f" ⚠{count}", style=ALARM_STYLE)
+    if lag:
+        strip.append(" · ", style=DIM)
+        strip.append("Index", style=DIM)
+        strip.append(f" ⚠{lag} behind", style=ALARM_STYLE)
     return strip

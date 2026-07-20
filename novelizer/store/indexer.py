@@ -65,6 +65,14 @@ class CanonIndexer:
         tmp_path.write_text(json.dumps({"last_sequence": seq}))
         os.replace(tmp_path, self._cursor_path)
 
+    async def lag(self) -> int:
+        """Read-only: how many indexable events haven't been embedded yet.
+        Reuses _load_cursor and the same events_since query catch_up makes,
+        never mutates the cursor and never calls _index_one."""
+        last = self._load_cursor()
+        stored = await self._events.events_since(last, event_types=list(INDEXED_EVENT_TYPES))
+        return len(stored)
+
     async def catch_up(self) -> int:
         processed = 0
         try:

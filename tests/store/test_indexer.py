@@ -73,6 +73,28 @@ async def test_catch_up_is_incremental_and_idempotent(stack):
     assert await indexer.catch_up() == 1
 
 
+async def test_lag_reports_indexable_events_not_yet_caught_up(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    assert await indexer.lag() == 9  # nothing indexed yet
+    await indexer.catch_up()
+    assert await indexer.lag() == 0  # fully caught up
+
+    await events.append(EventType.CHAPTER_CREATED, "ch2",
+                        Chapter(id="ch2", title="Two", prose="More prose."))
+    await proj.catch_up()
+    assert await indexer.lag() == 1  # one new indexable event, cursor untouched
+    assert await indexer.lag() == 1  # read-only: calling again doesn't change it
+
+
+async def test_lag_does_not_mutate_cursor_or_index(stack, tmp_path):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.lag()  # must not advance the cursor
+    fresh = CanonIndexer(events, read, store, str(tmp_path / "cursor.json"))
+    assert await fresh.catch_up() == 9  # everything still unindexed
+
+
 async def test_cursor_survives_new_indexer_instance(stack, tmp_path):
     events, proj, read, store, indexer = stack
     await seed(events, proj)
