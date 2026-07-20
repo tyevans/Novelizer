@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/author.py
+# hypothesis_version: 6.156.6
+
+[0.0, 1.0, 200, 300, 'In character', 'None yet.', 'None.', 'author', 'brief', 'callbacks', 'causal_edges', 'chapters', 'characters', 'content', 'draft', 'hand', 'knowledge_matrix', 'messages', 'previous', 'promises', 'recursion_limit', 'role', 'secrets', 'signals', 'structured_response', 'themes', 'threads', 'user', 'world']

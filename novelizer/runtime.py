@@ -198,6 +198,7 @@ class Runtime:
             self._runner_for("character_keeper", character_keeper_builder), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("character_keeper", ""),
             prose_chars=s.keeper_prose_chars,
+            pull_mode=s.character_keeper_tools_enabled,
         )
         editor_builder = self._tooled(build_editor_runner, s.editor_tools_enabled)
         self.editor = Editor(

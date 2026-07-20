@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/character_keeper.py
+# hypothesis_version: 6.156.6
+
+[0.2, 0.5, 0.8, 120, 6000, 'Chapter index', 'In character', 'None yet.', 'None.', 'Recent chapters', 'all_arcs', 'arc_status', 'arcs', 'backstory', 'beats', 'blueprint', 'callbacks', 'chapters', 'character_keeper', 'characters', 'consumed', 'content', 'hands', 'learn', 'messages', 'motivations', 'names', 'open_retcons', 'recent', 'recursion_limit', 'role', 'secrets', 'structured_response', 'traits', 'user', 'voice', 'write_todos']

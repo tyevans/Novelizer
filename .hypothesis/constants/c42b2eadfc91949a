@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/editor.py
+# hypothesis_version: 6.156.6
+
+[1.0, 120, '\n\nCharacter voices:\n', 'In character', 'approve', 'author', 'beats', 'blueprint', 'callbacks', 'causal_edges', 'chapters', 'content', 'editor', 'editor_notes', 'editorial_status', 'messages', 'open_retcons', 'promises', 'recursion_limit', 'role', 'scores', 'secrets', 'structured_response', 'target', 'themes', 'threads', 'time', 'times', 'user', 'write_todos']

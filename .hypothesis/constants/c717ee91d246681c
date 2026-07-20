@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/chat_screen.py
+# hypothesis_version: 6.156.6
+
+[0.5, '#chat_input', '#chat_log', '#chat_tabs', 'Mission Control', 'Next chat', 'Prev chat', 'back', 'chat-', 'chat_input', 'chat_log', 'chat_tabs', 'ctrl+pagedown', 'ctrl+pageup', 'escape', 'next_chat', 'prev_chat', 'user', 'you']

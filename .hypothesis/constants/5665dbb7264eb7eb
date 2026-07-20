@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/story_picker.py
+# hypothesis_version: 6.156.6
+
+['#new_name', '#new_premise', '#new_profile', '#new_story_form', '#new_voice_pack', '#picker_error', '#stories', 'Cancel', 'Create', 'New story name…', 'Quit', '__new__', 'cancel_btn', 'cancel_new', 'create_btn', 'escape', 'form_buttons', 'new_name', 'new_premise', 'new_profile', 'new_story_form', 'new_voice_pack', 'picker_error', 'primary', 'prose_profile', 'q', 'quit', 'stories', 'voice_pack', '✗ name required', '➕  New story']

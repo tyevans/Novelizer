@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/widgets/brain_panel.py
+# hypothesis_version: 6.156.6
+
+['#arcs_body', '#brain_strip', '#brain_tabs', '#causeway_body', '#outline_body', '#secrets_body', '#shape_body', '#threads_body', '1 Shape', '2 Threads', '3 Secrets', '4 Cause', '5 Outline', '6 Arcs', 'arcs_body', 'brain_strip', 'brain_tabs', 'causeway_body', 'outline_body', 'secrets_body', 'shape_body', 'tab_arcs', 'tab_causeway', 'tab_outline', 'tab_secrets', 'tab_shape', 'tab_threads', 'threads_body']

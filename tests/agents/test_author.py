@@ -503,8 +503,11 @@ async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
 def test_summarize_uses_configured_prior_chapter_chars():
     from novelizer.agents.author import _summarize
 
+    # The knob governs the chapters BEHIND the newest one; the chapter being
+    # continued from is pushed in full so its ending is visible.
     ctx = {
-        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "world": [], "characters": [],
+        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
@@ -517,7 +520,8 @@ def test_summarize_default_prior_chapter_chars_is_200():
     from novelizer.agents.author import _summarize
 
     ctx = {
-        "world": [], "characters": [], "previous": [Chapter(title="T", prose="x" * 500)],
+        "world": [], "characters": [],
+        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
@@ -528,6 +532,7 @@ def test_summarize_default_prior_chapter_chars_is_200():
 async def test_author_constructor_threads_prior_chapter_summary_chars_through(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 500))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Newest", prose="p"))
     await proj.catch_up()
     runner = FakeRunner(ChapterDraft(title="T2", prose="P"))
     author = Author(runner, read, committer, prior_chapter_summary_chars=10)

@@ -36,6 +36,22 @@ def _normalize_id(raw: str) -> str:
     return raw.strip().lower()
 
 
+def _warn_if_ungrounded(agent_name: str, family: str, action: str, entity_id: str, evidence: str) -> None:
+    """Log a citing action that names no supporting canon.
+
+    Deliberately a warning, not a drop: an under-cited but real narrative beat
+    is worth more than the silence of discarding it, and the warning rate is
+    the measurement that would justify a stricter policy later.
+    """
+    if evidence.strip():
+        return
+    logger.warning(
+        "%s: %s %s intent for %r carries no evidence — the claim cites canon the "
+        "agent may not have read",
+        agent_name, family, action, entity_id,
+    )
+
+
 _KNOWLEDGE_EVENT_BY_ACTION = {
     "learn": (EventType.SECRET_LEARNED, SecretLearned),
     "reveal": (EventType.SECRET_REVEALED, SecretRevealed),
@@ -97,15 +113,18 @@ async def commit_thread_intents(
                 "%s: dropped thread %s intent for unknown id %r", agent_name, intent.action, intent.id
             )
             continue
+        _warn_if_ungrounded(agent_name, "thread", intent.action, thread_id, intent.evidence)
         payload_cls, event_type = {
             "touch": (ThreadTouched, EventType.THREAD_TOUCHED),
             "pay_off": (ThreadPaidOff, EventType.THREAD_PAID_OFF),
             "abandon": (ThreadAbandoned, EventType.THREAD_ABANDONED),
         }[intent.action]
         if payload_cls is ThreadAbandoned:
-            payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note)
+            payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note,
+                                  evidence=intent.evidence)
         else:
-            payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source)
+            payload = payload_cls(id=thread_id, chapter_id=chapter_id, note=intent.note, source=source,
+                                  evidence=intent.evidence)
         await committer.commit(agent_name, event_type, thread_id, payload)
 
 
@@ -275,13 +294,15 @@ async def commit_knowledge_intents(
                 "%s: dropped knowledge %s intent with empty character_id", agent_name, intent.action
             )
             continue
+        _warn_if_ungrounded(agent_name, "knowledge", intent.action, secret_id, intent.evidence)
         event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
         if intent.action == "reveal":
-            payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note)
+            payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note,
+                                  evidence=intent.evidence)
         else:
             payload = payload_cls(
                 id=secret_id, character_id=_normalize_id(intent.character_id), chapter_id=chapter_id,
-                note=intent.note, source=source,
+                note=intent.note, source=source, evidence=intent.evidence,
             )
         await committer.commit(agent_name, event_type, secret_id, payload)
 
@@ -322,6 +343,9 @@ async def commit_causal_intents(
                 agent_name, intent.cause_chapter_id, intent.effect_chapter_id,
             )
             continue
+        _warn_if_ungrounded(
+            agent_name, "causal", "declare", f"{cause_id}->{effect_id}", intent.evidence
+        )
         await committer.commit(
             agent_name, EventType.CAUSAL_EDGE_DECLARED, effect_id,
             CausalEdgeDeclared(
@@ -329,6 +353,7 @@ async def commit_causal_intents(
                 effect_chapter_id=effect_id,
                 note=intent.note,
                 source=source,
+                evidence=intent.evidence,
             ),
         )
 

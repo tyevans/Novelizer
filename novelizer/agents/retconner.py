@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import RetconAmendments
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
@@ -7,10 +8,51 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.store.models import WorldEntry, RetconStatus
 
-SYSTEM_PROMPT = """You are the Retconner for a living fictional world. You receive a contradiction report
-and the conflicting world entries. Propose amended versions of the conflicting entries that resolve the
-contradiction. Return amended_entries, each with a title, revised body, domain, tags, and supersedes_id
-set to the id of the entry it replaces. Only include entries that need to change."""
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """You are the Retconner for a living fictional world — a surgical canon repair
+specialist. A sibling agent (Continuity Checker, Character Keeper, or Editor) has filed a
+contradiction report against one or more world entries. Your job is to VERIFY the contradiction
+still exists in the live canon, and if it does, resolve it with the smallest amendment that removes
+it while preserving everything else those entries truthfully assert.
+
+## Your lane
+You repair contradictions between WORLD ENTRIES by superseding them. That is the whole job.
+
+## Not your lane — decline rather than force a fix
+- You do NOT invent new plot, lore or history. A retcon reconciles what already exists; it never
+  adds a story development. If resolving the contradiction would require inventing facts, the
+  request is under-specified: set resolution="cannot_reproduce" and say what is missing.
+- You do NOT rewrite chapter prose, character sheets, threads, secrets or themes — those belong to
+  the Author and the Character Keeper. If the conflicting ids are not world entries, set
+  resolution="out_of_lane".
+- You do NOT re-litigate style or pacing. Factual and logical contradictions only.
+
+## How to work — VERIFY, then AMEND
+1. VERIFY the contradiction reproduces. The report and the entry bodies shown to you were captured
+   on an earlier pass and may be STALE: the paradox may already be fixed, or the report may be
+   wrong. Use read_file / grep / search_canon to read the CURRENT entries the report names before
+   you touch anything. The inlined bodies are a pointer, not ground truth.
+   - No longer reproduces in live canon -> resolution="already_consistent", amend nothing.
+   - Report incoherent, or names ids you cannot find -> resolution="cannot_reproduce".
+2. AMEND minimally. For each entry that genuinely must change, emit one amended version: change
+   ONLY the sentences carrying the contradiction, and keep the title, domain, tags and every other
+   true statement verbatim. A good amendment is a scalpel, not a rewrite. Set supersedes_id to the
+   exact id of the entry you replace — copy it, never invent it.
+3. CHECK YOUR BLAST RADIUS before finalizing. An amendment can create a NEW contradiction: grep the
+   canon for other mentions of the fact you changed (change "two suns" to "one sun", then grep for
+   "sun"). If other entries assert the old fact, amend them in the same pass; if the collision
+   spills into prose you cannot touch, decline with resolution="cannot_reproduce" and name it.
+   Never leave canon in a worse state than you found it.
+4. STOP once you can cite the evidence for your decision, and emit. Grounding is your stopping rule.
+
+## Grounding
+Put the spans you actually read into `evidence` — for amendments and declines alike. If you cannot
+cite where you verified something, you have not verified it: read first, then emit.
+
+## Voice
+Do the analysis under these neutral instructions. Put your personality only in the one-line
+feed_note — never in the amendment text, which must read as plain canon."""
 
 
 class Retconner(BaseAgent):
@@ -53,9 +95,24 @@ class Retconner(BaseAgent):
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
+    async def _decline(self, req, resolution: str, reason: str) -> None:
+        """Close a request without amending anything. Distinct from resolving
+        it: nothing was repaired, and the filing agent's log should say so."""
+        logger.info("retconner: declining request %s (%s): %s", req.id, resolution, reason)
+        rejected = req.model_copy(update={
+            "status": RetconStatus.rejected,
+            "resolved_by": self.name,
+            "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
+        })
+        await self._committer.commit(self.name, EventType.RETCON_REQUEST_REJECTED, req.id, rejected)
+
     async def commit(self, out: RetconAmendments | None, ctx: dict) -> None:
         req = ctx["target"]
         if req is None or out is None:
+            return
+        if out.resolution != "amend":
+            await self._decline(req, out.resolution, out.reason)
+            await self._remark(out.feed_note)
             return
         for e in out.amended_entries:
             entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags, supersedes_id=e.supersedes_id)
@@ -68,6 +125,19 @@ class Retconner(BaseAgent):
         ctx = await self.poll()
         req = ctx["target"]
         if req is None:
+            return
+        # Lane guard, before any LLM call. Voice-drift retcons cite character
+        # ids; this agent only supersedes world entries, so amending one would
+        # mint an entry that supersedes nothing. An EMPTY id list is not
+        # out-of-lane -- the filer may have described the conflict in prose
+        # only, and the model can still work from the description.
+        named = req.conflicting_entry_ids
+        if named and not any(e.id in named for e in ctx["world"]):
+            await self._decline(
+                req, "out_of_lane",
+                "conflicting_entry_ids name no world entry; the Retconner only amends world entries",
+            )
+            self._deferred.discard(req.id)
             return
         try:
             out = await self.work(ctx)

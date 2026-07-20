@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/setup_wizard.py
+# hypothesis_version: 6.156.6
+
+['#api_key', '#base_url', '#probe_result', '#save', '#stories_dir', 'LLM base URL', 'Quit', 'Save & continue', 'Stories directory', 'Test connection', 'agent_model', 'api_key', 'author_model', 'base_url', 'embed_model', 'not-needed', 'probe', 'probe_result', 'q', 'quit', 'save', 'skip', 'stories', 'stories_dir', 'success', 'wizard', 'wizard_actions']

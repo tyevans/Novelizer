@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/approval_screen.py
+# hypothesis_version: 6.156.6
+
+['#approval_context', '#approval_list', 'APPROVALS', 'Close', 'Reject', 'approval_box', 'approval_context', 'approval_list', 'approve', 'close', 'escape', 'open', 'reject', 'x']

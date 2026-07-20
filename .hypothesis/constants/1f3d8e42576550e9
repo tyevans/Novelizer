@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/voices/scaffold.py
+# hypothesis_version: 6.156.6
+
+['"', '\\', '\\"', '\\\\', '\\n', '^[A-Za-z0-9_-]+$', 'agent_personalities', 'casting_note', 'default.toml', 'name', 'prose_profiles', 'rb', 'utf-8']

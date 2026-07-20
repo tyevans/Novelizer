@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/widgets/engine_room.py
+# hypothesis_version: 6.156.6
+
+[110, '#er_detail', '#er_prompt', '#er_stream', '#er_stream_scroll', '#er_trace', '#er_vitals', '(no call in flight)', 'er_detail', 'er_prompt', 'er_stream', 'er_stream_scroll', 'er_trace', 'er_vitals', 'line', 'machinery', 'row']

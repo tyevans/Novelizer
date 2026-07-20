@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/settings_screen.py
+# hypothesis_version: 6.156.6
+
+[1.0, '#edit_value', '#settings_msg', '#settings_table', '(env — read only)', '(inherited)', '(restart required)', 'Back', 'Notes', 'Scope', 'Setting', 'Source', 'Test connection', 'Value', '_editing_key', 'default', 'dismiss_screen', 'edit_value', 'env', 'escape', 'global', 'row', 'settings_msg', 'settings_table', 'settings_title', 'story', 't', 'test_connection', '••••••']

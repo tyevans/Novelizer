@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/canon/events.py
+# hypothesis_version: 6.156.6
+
+[0.0, 1.0, 'agent.remarked', 'arc.advanced', 'arc.declared', 'arc.pivot_planned', 'arc.resolved', 'author', 'autonomy.changed', 'beat.fulfilled', 'beats', 'binding', 'blueprint.adopted', 'blueprint.retargeted', 'causal_edge.declared', 'chapter.created', 'chapter.mined', 'chapter.revised', 'character.created', 'character.updated', 'chat.agent_replied', 'chat.user_messaged', 'declared', 'foreshadow', 'inspiration', 'inspiration.drawn', 'names', 'professions', 'promise.made', 'promise.paid', 'promise.progressed', 'promise.released', 'proposal.approved', 'proposal.created', 'proposal.rejected', 'secret.created', 'secret.learned', 'secret.referenced', 'secret.revealed', 'settings', 'theme.developed', 'theme.introduced', 'thread.abandoned', 'thread.paid_off', 'thread.planted', 'thread.touched', 'world_entry.created']

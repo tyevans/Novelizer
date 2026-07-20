@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/widgets/engine_room_model.py
+# hypothesis_version: 6.156.6
+
+[0.0, 120, 1000, 8000, '\n\n✗ crashed', '?', 'agent_name', 'author', 'call_index', 'character_keeper', 'checking continuity', 'continuity_checker', 'drafting', 'editor', 'eligible', 'failed', 'finished', 'idle', 'ineligible', 'input_summary', 'model', 'no run yet', 'output_tokens', 'prompt', 'retconner', 'retconning', 'reviewing', 'run_id', 'running', 'scoring structure', 'structure_analyst', 'tending characters', 'working', 'world_architect', 'worldbuilding', '␤', '─ prompt ─']

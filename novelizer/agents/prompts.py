@@ -30,8 +30,10 @@ _RETRIEVAL_NOTE_MAP_SENTENCE = (
 
 _RETRIEVAL_NOTE_SUFFIX = (
     "Ground every id you emit in a file you actually read, and cite ids exactly as shown "
-    "in frontmatter or search results. Once you can point to the line that supports your "
-    "finding, stop searching and emit — don't browse past the evidence."
+    "in frontmatter or search results. When an intent you emit has an `evidence` field, "
+    "put the chNNN handle or canon file path you read there — an intent that cites "
+    "existing canon with no evidence reads as a guess. Once you can point to the line "
+    "that supports your finding, stop searching and emit — don't browse past the evidence."
 )
 
 RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX

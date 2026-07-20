@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/director/cli.py
+# hypothesis_version: 6.156.6
+
+['* ', '--note', '--pack', '--story', 'Agent', 'Agent personalities:', 'Chapters', 'Character voices:', 'Description', 'ID', 'No chapters yet.', 'Open Retcon Requests', 'Pending Proposals', 'Proposed Resolution', 'Prose profiles:', 'Status', 'Target Event', 'Title', 'agent', 'chapter_id', 'default', 'description', 'dim', 'green', 'level', 'open', 'pack_path', 'plan-resolution', 'plan-reveal', 'profile_name', 'proposal_id', 'resolution window', 'reveal window', 'secret_id', 'settings', 'story_path', 'text', 'thread_id', 'voice-scaffold', 'window_hi', 'window_lo', 'world.db', 'yellow']

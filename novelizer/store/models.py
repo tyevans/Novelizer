@@ -315,6 +315,12 @@ class Chapter(BaseModel):
     editorial_status: EditorialStatus = EditorialStatus.draft
     editor_notes: Optional[str] = None
     provenance: Optional[dict] = None
+    revision_count: int = 0
+    """How many chapter.revised events this chapter has absorbed, counted by
+    the projector. A revision returns the chapter to `draft`, which puts it
+    straight back in the Editor's queue, so without a count the
+    Editor -> Author loop has no natural end. Defaults to 0 so chapters
+    projected before this field replay unchanged."""
 
 
 class RetconRequest(BaseModel):
