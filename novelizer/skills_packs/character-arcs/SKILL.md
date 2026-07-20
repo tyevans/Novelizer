@@ -29,7 +29,7 @@ which `outcome` values are valid on `resolve` — see the full table in
 | `arc_type` | Trajectory | Valid `outcome` |
 |---|---|---|
 | `positive` | Lie → Truth, want sacrificed for need | `truth_embraced` |
-| `flat` | Truth → Truth, changes the world not the self | `world_changed` |
+| `flat` | Truth → Truth, changes the world not the self | `world_changed` or `truth_embraced` |
 | `disillusionment` | Lie → bleak Truth, truth wins tragically | `truth_tragic` |
 | `fall` | Lie → worse Lie, rejects available truth | `lie_embraced` |
 | `corruption` | Truth → Lie, abandons a held truth | `lie_embraced` |

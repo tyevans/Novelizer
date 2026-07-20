@@ -21,7 +21,7 @@ directly onto `ArcIntent`'s `ghost`, `lie`, `truth`, `want`, `need`.
 | `arc_type` | Valid `outcome` |
 |---|---|
 | `positive` | `truth_embraced` |
-| `flat` | `world_changed` |
+| `flat` | `world_changed` or `truth_embraced` |
 | `disillusionment` | `truth_tragic` |
 | `fall` | `lie_embraced` |
 | `corruption` | `lie_embraced` |

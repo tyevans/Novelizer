@@ -19,23 +19,23 @@ the `PromiseIntent` vocabulary (`make` / `progress` / `pay` / `release`).
 2. Every `pay` cites a promise that was actually `make`d earlier in story
    order — no payoff appears without a prior seed (no deus ex machina).
    This is symmetric with #1: setups need payoffs, payoffs need setups.
-2. `release` is the only terminal action that isn't a `pay` — reserve it
+3. `release` is the only terminal action that isn't a `pay` — reserve it
    for `red_herring`-kind promises whose subversion is the point. Releasing
    a `plant` or `foreshadow` without payoff is a broken promise, not a
    red herring, unless the story explicitly means to abandon it (rare;
    flag for review).
-3. Heavily-`progress`ed promises (several `progress` actions logged) read
+4. Heavily-`progress`ed promises (several `progress` actions logged) read
    as more important to the reader — they need proportionally weightier
    payoffs. A promise progressed five times and paid off in one throwaway
    line under-delivers.
-4. Use `window_lo`/`window_hi` (1-based chapter ordinals) to declare an
+5. Use `window_lo`/`window_hi` (1-based chapter ordinals) to declare an
    intended payoff window when the payoff chapter isn't chosen yet — this
    lets the Brain flag drift before the payoff is late, not just after.
-5. Reveal sequencing: a payoff should not fire before its promise has had
+6. Reveal sequencing: a payoff should not fire before its promise has had
    at least one `progress` beat for foreshadow/plant kinds with a long
    runway — pure surprise with no groundwork reads as arbitrary. Red
    herrings are the exception: their whole function is an unearned near-miss.
-6. Window discipline: don't let a promise's `window_hi` slide past the
+7. Window discipline: don't let a promise's `window_hi` slide past the
    story's obligatory-scene or arc-resolution beats it's meant to support
    (see `outlining/references/obligatory-scenes.md`,
    `character-arcs/references/arc-invariants.md`) — a promise tied to a
