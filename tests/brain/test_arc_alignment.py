@@ -37,6 +37,18 @@ def test_contradictory_outcome_flagged(arc_type, outcome):
     assert f.detail == f"{arc_type} arc resolved {outcome}"
 
 
+def test_superseded_resolved_contradiction_clears_on_redeclare():
+    # A resolved, contradictory arc that is no longer active (superseded by
+    # a re-declaration for the same character) is the Director/Keeper's
+    # adjudication -- the contradiction alarm must not persist.
+    arc = ArcRecord(
+        id="a1", character_id="mara", arc_type="fall", resolved=True,
+        outcome="truth_embraced", active=False,
+    )
+    findings = arc_findings([arc], [], _chapters(1), [], None)
+    assert findings == []
+
+
 def test_unknown_arc_type_is_quiet():
     arc = ArcRecord(id="a1", character_id="mara", arc_type="mystery_type", resolved=True, outcome="anything")
     assert arc_findings([arc], [], _chapters(1), [], None) == []

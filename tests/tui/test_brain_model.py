@@ -915,6 +915,23 @@ def test_arcs_tab_stagnant_arc_alarm_glyph():
 
 
 def test_arcs_tab_resolved_contradiction_full_and_alarm():
+    # A resolved, contradictory arc that is still the character's active arc
+    # (not yet superseded by a re-declaration) keeps the alarm.
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters("One")
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", outcome="lie_embraced",
+        active=True, resolved=True,
+    )
+    tab = arcs_tab([arc], chars, chs, [], None)
+    assert tab.lines[0].plain == "⚠ Elara · positive"
+    assert tab.lines[0].style == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_arcs_tab_superseded_resolved_contradiction_clears_alarm():
+    # Once superseded (active=False) by a re-declaration, the contradiction
+    # alarm clears -- the re-declaration IS the adjudication.
     chars = [Character(id="ch1", name="Elara")]
     chs = _chapters("One")
     arc = ArcRecord(
@@ -922,9 +939,9 @@ def test_arcs_tab_resolved_contradiction_full_and_alarm():
         active=False, resolved=True,
     )
     tab = arcs_tab([arc], chars, chs, [], None)
-    assert tab.lines[0].plain == "⚠ Elara · positive"
-    assert tab.lines[0].style == ALARM_STYLE
-    assert tab.alarm_count == 1
+    assert tab.lines[0].plain == "✓ Elara · positive"
+    assert tab.lines[0].style == DIM
+    assert tab.alarm_count == 0
 
 
 def test_arcs_tab_resolved_consistent_folds_to_one_dim_line():
@@ -973,6 +990,46 @@ def test_arcs_tab_pivot_lines_missed_fulfilled_pending():
     assert pending.plain.endswith("pending")
     assert pending.style == DIM
     assert tab.alarm_count == 2  # stagnant (7 chapters since last advance) + missed pivot
+
+
+def test_arcs_tab_pivot_matching_is_by_beat_id_not_name_prefix():
+    # Two beats whose names collide as string prefixes ("Reveal" is a
+    # prefix of "Reveal Twist"): matching must be by beat_id, not by
+    # detail-string prefix reconstruction, or the wrong pivot gets flagged.
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters(*[f"Ch{i}" for i in range(1, 12)])
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    beats = [
+        BeatRecord(id="beat_a", blueprint_id="b1", slug="a", name="Reveal",
+                   ideal_pct=0.9, tolerance_pct=0.05),
+        BeatRecord(id="beat_b", blueprint_id="b1", slug="b", name="Reveal Twist",
+                   ideal_pct=0.35, tolerance_pct=0.05),
+    ]
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", active=True, resolved=False,
+        last_chapter_id="c1",
+        pivots=[ArcPivot(beat_id="beat_a"), ArcPivot(beat_id="beat_b")],
+    )
+    tab = arcs_tab([arc], chars, chs, beats, blueprint)
+    reveal_line = [l for l in tab.lines if l.plain.strip().startswith("◈ Reveal @ch") or " Reveal @ch" in l.plain][0]
+    twist_line = [l for l in tab.lines if "Reveal Twist" in l.plain][0]
+    assert reveal_line.plain.endswith("pending")
+    assert twist_line.plain.endswith("missed")
+
+
+def test_arcs_tab_orphaned_pivot_beat_shown_dim_not_dropped():
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters(*[f"Ch{i}" for i in range(1, 3)])
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", active=True, resolved=False,
+        last_chapter_id="c2",
+        pivots=[ArcPivot(beat_id="dead-beat")],
+    )
+    tab = arcs_tab([arc], chars, chs, [], blueprint)
+    orphan = [l for l in tab.lines if "re-pin" in l.plain]
+    assert len(orphan) == 1
+    assert orphan[0].style == DIM
 
 
 def test_arcs_tab_alarm_count_equals_len_of_arc_findings():

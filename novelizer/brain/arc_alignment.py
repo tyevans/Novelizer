@@ -31,6 +31,7 @@ class ArcFinding:
     character_id: str
     kind: str  # "contradiction" | "stagnant" | "pivot_missed"
     detail: str
+    beat_id: str = ""
 
 
 def _chapter_ordinal(chapter_id: str, chapters: list[Chapter]) -> int | None:
@@ -58,8 +59,12 @@ def arc_findings(
             # consistent outcomes for its declared arc_type. An unknown
             # arc_type or a blank outcome carries no signal either way --
             # quiet, not flagged.
+            # A resolved arc that is no longer active has been superseded --
+            # the character's re-declaration of a new arc IS the Director/
+            # Keeper's adjudication of the contradiction, so the alarm
+            # clears rather than persisting forever.
             consistent = ARC_CONSISTENT_OUTCOMES.get(arc.arc_type)
-            if consistent and arc.outcome and arc.outcome not in consistent:
+            if arc.active and consistent and arc.outcome and arc.outcome not in consistent:
                 findings.append(ArcFinding(
                     arc_id=arc.id, character_id=arc.character_id, kind="contradiction",
                     detail=f"{arc.arc_type} arc resolved {arc.outcome}",
@@ -101,6 +106,7 @@ def arc_findings(
                     findings.append(ArcFinding(
                         arc_id=arc.id, character_id=arc.character_id, kind="pivot_missed",
                         detail=f"pivot on beat '{beat.name}' missed (window {lo}-{hi})",
+                        beat_id=beat.id,
                     ))
 
     return findings

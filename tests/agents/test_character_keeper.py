@@ -504,6 +504,23 @@ async def test_declare_arc_intent_projects_active_arc_for_character(stack):
     assert arcs[0].lie == "I am alone"
 
 
+async def test_advance_arc_intent_carries_latest_analyzed_chapter(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="I am alone"),
+    )
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mara grew."))
+    await proj.catch_up()
+    out = KeeperOutput(arc_intents=[ArcIntent(action="advance", id="arc1", note="grew")])
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    arc = await read.get_active_arc_for_character("mara")
+    assert arc.last_chapter_id == "ch1"
+
+
 async def test_new_character_and_declare_arc_intent_in_same_pass(stack):
     events, proj, read, committer = stack
     out = KeeperOutput(
@@ -547,6 +564,27 @@ async def test_work_prompt_includes_active_arcs_block(stack):
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Mara: positive arc (id:arc1) lie='I am alone' advances=0" in sent
+
+
+async def test_work_prompt_annotates_resolved_arc_with_outcome(stack):
+    from novelizer.canon.events import ArcResolved
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="I am alone"),
+    )
+    await events.append(
+        EventType.ARC_RESOLVED, "arc1",
+        ArcResolved(arc_id="arc1", chapter_id="ch1", outcome="truth_embraced"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "[resolved:truth_embraced]" in sent
 
 
 async def test_work_prompt_includes_available_beat_ids_when_beats_exist(stack):

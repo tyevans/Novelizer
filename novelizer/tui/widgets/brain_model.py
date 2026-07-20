@@ -617,10 +617,10 @@ def arcs_tab(
     findings = arc_findings(arcs, characters, chapters, beats, blueprint)
     contradiction_arc_ids = {f.arc_id for f in findings if f.kind == "contradiction"}
     stagnant_arc_ids = {f.arc_id for f in findings if f.kind == "stagnant"}
-    pivot_missed_by_arc: dict[str, list[str]] = {}
+    missed_beat_ids_by_arc: dict[str, set[str]] = {}
     for f in findings:
         if f.kind == "pivot_missed":
-            pivot_missed_by_arc.setdefault(f.arc_id, []).append(f.detail)
+            missed_beat_ids_by_arc.setdefault(f.arc_id, set()).add(f.beat_id)
 
     lines: list[Text] = []
     for arc in arcs:
@@ -645,12 +645,17 @@ def arcs_tab(
         detail = f"lie '{arc.lie}' → truth '{arc.truth}' · advances {arc.advance_count} · last {last}"
         lines.append(Text(detail, style=DIM))
         if blueprint is not None:
-            missed_details = pivot_missed_by_arc.get(arc.id, [])
+            missed_beat_ids = missed_beat_ids_by_arc.get(arc.id, set())
             for pivot in arc.pivots:
                 beat = beats_by_id.get(pivot.beat_id)
                 if beat is None:
+                    # Beat no longer exists in the current blueprint (e.g.
+                    # superseded/re-outlined): the pivot citation is orphaned.
+                    # Surface it rather than silently dropping it -- a real
+                    # re-pin finding is deferred to M10.
+                    lines.append(Text("  ◈ (beat superseded — re-pin)", style=DIM))
                     continue
-                missed = any(d.startswith(f"pivot on beat '{beat.name}' missed") for d in missed_details)
+                missed = pivot.beat_id in missed_beat_ids
                 lines.append(_arc_pivot_line(beat, blueprint, missed))
 
     return ArcsTab(lines, len(findings))

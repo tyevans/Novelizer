@@ -615,20 +615,26 @@ class Projector:
             # active=False into every existing row's data JSON for this
             # character_id (so records stay truthful on read) and clear the
             # active=1 flag column, then insert the new arc as active.
-            cur = await self._conn.execute(
-                "SELECT id, data FROM arcs WHERE character_id=?", (p["character_id"],)
-            )
-            rows = await cur.fetchall()
-            for row_id, row_data in rows:
-                existing = ArcRecord.model_validate_json(row_data)
-                updated = existing.model_copy(update={"active": False})
-                await self._conn.execute(
-                    "UPDATE arcs SET data=?, active=0 WHERE id=?",
-                    (updated.model_dump_json(), row_id),
-                )
             cur = await self._conn.execute("SELECT id FROM arcs WHERE id=?", (p["arc_id"],))
             existing_row = await cur.fetchone()
-            if existing_row is None:
+            if existing_row is not None:
+                # An arc id is minted exactly once -- true first-mint-wins.
+                # A duplicate arc.declared for an existing arc_id is a
+                # complete no-op: it must not deactivate the character's
+                # other arcs, since nothing is actually being (re)minted.
+                pass
+            else:
+                cur = await self._conn.execute(
+                    "SELECT id, data FROM arcs WHERE character_id=?", (p["character_id"],)
+                )
+                rows = await cur.fetchall()
+                for row_id, row_data in rows:
+                    existing = ArcRecord.model_validate_json(row_data)
+                    updated = existing.model_copy(update={"active": False})
+                    await self._conn.execute(
+                        "UPDATE arcs SET data=?, active=0 WHERE id=?",
+                        (updated.model_dump_json(), row_id),
+                    )
                 record = ArcRecord(
                     id=p["arc_id"], character_id=p["character_id"], arc_type=p["arc_type"],
                     ghost=p.get("ghost", ""), lie=p.get("lie", ""), truth=p.get("truth", ""),
@@ -638,9 +644,6 @@ class Projector:
                     "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
                     (record.id, record.model_dump_json(), record.character_id, 1),
                 )
-            # else: an arc id is minted exactly once -- first-mint-wins (the
-            # supersession fold above still applies to other arcs for this
-            # character, but this arc_id's own row is not re-inserted).
         elif t == EventType.ARC_PIVOT_PLANNED:
             cur = await self._conn.execute("SELECT data, character_id FROM arcs WHERE id=?", (p["arc_id"],))
             row = await cur.fetchone()

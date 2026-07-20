@@ -89,6 +89,7 @@ class CharacterKeeper(BaseAgent):
         arcs_lines = "\n".join(
             f"- {names_by_id.get(arc.character_id, arc.character_id)}: {arc.arc_type} arc "
             f"(id:{arc.id}) lie='{arc.lie}' advances={arc.advance_count}"
+            + (f" [resolved:{arc.outcome}]" if arc.resolved else "")
             for arc in ctx.get("arcs", [])
         )
         beats = ctx.get("beats", [])
@@ -178,7 +179,8 @@ class CharacterKeeper(BaseAgent):
         active_arc_ids = {a.id for a in await self._read.list_arcs(active_only=True)}
         active_beat_ids = {b.id for b in ctx.get("beats", [])}
         await self._commit_arc_intents(
-            out.arc_intents, active_arc_ids, character_ids, active_beat_ids, chapter_id=""
+            out.arc_intents, active_arc_ids, character_ids, active_beat_ids,
+            chapter_id=ctx["recent"][-1].id if ctx["recent"] else "",
         )
         await self._remark(out.feed_note)
 

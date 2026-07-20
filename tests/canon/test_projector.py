@@ -875,6 +875,27 @@ async def test_arc_declared_supersedes_per_character_only(wired):
     await read.close()
 
 
+async def test_arc_declared_duplicate_arc_id_is_true_noop(wired):
+    from novelizer.canon.events import ArcDeclared
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    payload = ArcDeclared(arc_id="a1", character_id="c1", arc_type="positive", lie="I am alone")
+    await events.append(EventType.ARC_DECLARED, "a1", payload)
+    await proj.catch_up()
+
+    # Replay the same ARC_DECLARED payload for the same arc_id -- must be a
+    # complete no-op: no deactivation, no re-insert.
+    await events.append(EventType.ARC_DECLARED, "a1", payload)
+    await proj.catch_up()
+
+    active = await read.list_arcs(active_only=True)
+    c1_active = [a for a in active if a.character_id == "c1"]
+    assert len(c1_active) == 1
+    assert c1_active[0].id == "a1"
+    await read.close()
+
+
 async def test_arc_pivot_same_beat_replaces(wired):
     from novelizer.canon.events import ArcDeclared, ArcPivotPlanned
     events, proj, _ = wired
