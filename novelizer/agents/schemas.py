@@ -263,6 +263,19 @@ class StructureAnalystOutput(BaseModel):
     feed_note: str = ""
 
 
+class PlotterOutput(BaseModel):
+    """The Plotter's structured response: at most one blueprint proposal
+    (only meaningful while no blueprint is active) plus any number of
+    brief/beat/resolution/promise intents for the current pass."""
+
+    blueprint_plan: BlueprintPlan | None = None
+    brief_intents: list[BriefIntent] = Field(default_factory=list)
+    beat_intents: list[BeatIntent] = Field(default_factory=list)
+    resolution_plan_intents: list[ResolutionPlanIntent] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
+    feed_note: str = ""
+
+
 class MinedSecretFact(BaseModel):
     """A secret-knowledge fact extracted by prose mining from a chapter's prose.
 
