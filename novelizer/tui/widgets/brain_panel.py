@@ -59,15 +59,16 @@ class BrainPanel(Vertical):
             await read.list_structure_scores(), chapters, delta, blueprint, beats
         )
         secret_records = await read.list_secrets()
+        thread_records = await read.list_threads()  # one snapshot shared by threads_tab + outline_tab
         threads = threads_tab(
-            await read.list_threads(), chapters, await read.list_promises(), secret_records, threshold
+            thread_records, chapters, await read.list_promises(), secret_records, threshold
         )
         secrets = secrets_tab(
             secret_records, await read.list_characters(), await read.knowledge_matrix()
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
         outline = outline_tab(
-            blueprint, beats, await read.list_briefs(), await read.list_threads(), chapters
+            blueprint, beats, await read.list_briefs(), thread_records, chapters
         )
 
         shape_rows = [

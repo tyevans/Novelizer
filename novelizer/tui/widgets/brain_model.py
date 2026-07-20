@@ -104,7 +104,12 @@ def shape_tab(
     Flags come from detect_sag_spike over the raw score list — never
     re-derived here. `delta` arrives from settings.sag_spike_delta via the
     app's _brain_loop (M5.3 single-sourcing); the default is the imported
-    constant, never a re-typed literal."""
+    constant, never a re-typed literal.
+
+    Note: the rendered `plan` row aligns beats by scored-chapter position
+    (index into the spark), matching the spark's own existing approximation
+    -- it is not a true chapter ordinal. Deviations/alarms below it use true
+    ordinals from beat_window, so the two rows are not on the same axis."""
     if not scores:
         return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0, None)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins

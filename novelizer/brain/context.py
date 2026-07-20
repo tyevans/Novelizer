@@ -6,6 +6,7 @@ from novelizer.brain.resolution_pacing import congested_windows, overdue_resolut
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, stale_threads
 from novelizer.brain.tension_target import tension_deviations
+from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
     BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord, RetconRequest,
@@ -166,8 +167,6 @@ def tension_target_note(
     string when there are no deviations, so the prompt stays byte-identical
     when quiet.
     """
-    from novelizer.canon.beat_templates import beat_window
-
     deviations = tension_deviations(blueprint, beats, scores, chapters)
     if not deviations:
         return ""

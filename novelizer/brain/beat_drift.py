@@ -7,6 +7,7 @@ against its fulfillment state to surface pacing drift.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 from novelizer.canon.beat_templates import beat_window
 from novelizer.store.models import BeatRecord, BlueprintRecord, Chapter
@@ -18,7 +19,7 @@ class BeatDrift:
     name: str
     window_lo: int
     window_hi: int
-    kind: str            # "late" | "early" | "off_window"
+    kind: Literal["late", "early", "off_window"]
     detail: str
 
 

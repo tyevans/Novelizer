@@ -161,6 +161,8 @@ class Plotter(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, out: PlotterOutput | None, ctx: dict) -> None:
+        await self._reap_stale_open_briefs(ctx["open_briefs"], len(ctx["chapters"]))
+
         if out is None:
             return
 
@@ -188,8 +190,6 @@ class Plotter(BaseAgent):
         valid_chapter_ids = {c.id for c in ctx["chapters"]}
         unrevealed_secret_ids = {s.id for s in ctx["secrets"] if not s.revealed}
 
-        await self._reap_stale_open_briefs(ctx["open_briefs"], len(ctx["chapters"]))
-
         await self._commit_brief_intents(
             out.brief_intents, ctx["open_briefs"], len(ctx["chapters"]),
             active_thread_ids, active_beat_ids, active_promise_ids,
@@ -209,7 +209,13 @@ class Plotter(BaseAgent):
         been drafted past -- deterministic housekeeping, not dependent on the
         LLM emitting a supersede intent. Runs before any LLM-driven brief
         commits so a stale brief never lingers just because the model had
-        nothing else to say this pass."""
+        nothing else to say this pass.
+
+        Idempotency note: if an LLM brief intent this same pass (or a prior
+        cached one) cites a brief_id just reaped here, re-committing it to
+        CHAPTER_BRIEF_SUPERSEDED is a projection no-op -- not because this
+        helper filters already-superseded ids, but because the projector's
+        open-status guard makes SUPERSEDED an absorbing state."""
         for brief in open_briefs:
             if brief.target_ordinal <= drafted_chapter_count:
                 logger.info(

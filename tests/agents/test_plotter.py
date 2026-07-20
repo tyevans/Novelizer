@@ -208,6 +208,38 @@ async def test_run_once_reaps_stale_open_brief_even_with_no_intents(stack):
     assert superseded[0].payload["superseded_by_brief_id"] == ""
 
 
+async def test_run_once_reaps_stale_open_brief_even_when_llm_returns_none(stack):
+    """The reap is deterministic housekeeping that must not depend on the
+    LLM succeeding at all -- structured_response None (e.g. an LLM/parse
+    failure) must still supersede a stale open brief."""
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "stale1",
+        ChapterBriefDrafted(brief_id="stale1", target_ordinal=2, goal="already past"),
+    )
+    await proj.catch_up()
+
+    plotter = Plotter(FakeRunner(None), read, committer)  # LLM failure -> structured_response None
+    await plotter.run_once()
+    await proj.catch_up()
+
+    open_briefs = await read.list_briefs("open")
+    assert open_briefs == []
+
+    log = await events.events_since(0)
+    superseded = [e for e in log if e.event_type == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(superseded) == 1
+    assert superseded[0].payload["brief_id"] == "stale1"
+
+
 async def test_run_once_drops_blueprint_plan_when_one_already_active(stack):
     from novelizer.canon.events import BlueprintAdopted
 

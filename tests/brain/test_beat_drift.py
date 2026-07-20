@@ -23,6 +23,13 @@ def test_unfulfilled_inside_window_no_drift():
     assert beat_drifts(_blueprint(), [beat], _chapters(5)) == []
 
 
+def test_unfulfilled_at_hi_boundary_no_drift():
+    # window (4,6); now == hi (6) is still inside the window, not past it.
+    beat = BeatRecord(id="b1", blueprint_id="bp1", slug="midpoint", name="Midpoint",
+                       ideal_pct=0.5, tolerance_pct=0.1)
+    assert beat_drifts(_blueprint(), [beat], _chapters(6)) == []
+
+
 def test_unfulfilled_past_window_is_late():
     beat = BeatRecord(id="b1", blueprint_id="bp1", slug="midpoint", name="Midpoint",
                        ideal_pct=0.5, tolerance_pct=0.1)

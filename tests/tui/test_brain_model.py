@@ -787,7 +787,6 @@ def test_outline_tab_grid_rows_are_non_terminal_threads_only():
         ThreadRecord(id="c", name="Done C", state=ThreadState.paid_off, last_chapter_id="c1"),
     ]
     chs = _chapters("One", "Two")
-    tab = outline_tab(None, [], [], threads, chs)
     # No blueprint short-circuits to the empty state, so exercise via a blueprint.
     blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=2)
     tab = outline_tab(blueprint, [], [], threads, chs)
