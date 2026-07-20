@@ -768,3 +768,74 @@ async def test_author_prompt_omits_ledger_note_when_no_promises(stack):
     await author.work(ctx)
     sent = runner.calls[0]["messages"][0]["content"]
     assert "Promise ledger" not in sent
+
+
+async def test_author_prompt_includes_chapter_brief_when_open_for_next_ordinal(stack):
+    from novelizer.canon.events import ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=1, goal="Introduce the locket"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Chapter brief" in sent
+    assert "Introduce the locket" in sent
+
+
+async def test_author_run_once_fulfills_open_brief_on_new_chapter(stack):
+    from novelizer.canon.events import ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=1, goal="Introduce the locket"),
+    )
+    await proj.catch_up()
+    draft = ChapterDraft(title="The Locket", prose="It gleamed.")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    briefs = await read.list_briefs()
+    assert len(briefs) == 1
+    assert briefs[0].status.value == "fulfilled"
+    chapters = await read.list_chapters()
+    assert briefs[0].fulfilled_by_chapter_id == chapters[0].id
+
+
+async def test_author_prompt_omits_chapter_brief_when_none_open(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Chapter brief" not in sent
+
+
+async def test_author_revise_signal_with_open_brief_does_not_consume_it(stack):
+    from novelizer.canon.events import ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="original"))
+    await proj.catch_up()
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=2, goal="Reveal the letter"),
+    )
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1",
+                        DirectorSignal(id="s1", kind=SignalKind.revise, body="fix pacing",
+                                        target_agent="author", target_entity="c1"))
+    await proj.catch_up()
+    draft = ChapterDraft(title="One", prose="fixed prose")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    briefs = await read.list_briefs()
+    assert len(briefs) == 1
+    assert briefs[0].status.value == "open"

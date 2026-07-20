@@ -7,7 +7,7 @@ from novelizer.brain.context import (
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
-from novelizer.canon.events import EventType, InspirationHandConsumed
+from novelizer.canon.events import EventType, InspirationHandConsumed, ChapterBriefFulfilled
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.events import ChapterRevised
@@ -19,6 +19,7 @@ You receive world lore, active characters, previous chapter summaries, and direc
 Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
 You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly.
+When a chapter brief is present it is your assignment: honor it, or deviate deliberately and explain the deviation in your feed note.
 """ + AI_TELL_BAN_NOTE
 
 _RETRIEVAL_NOTE_PREFIX = (
@@ -64,10 +65,25 @@ def _summarize(
     else:
         prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
         chapters_block = f"Previous chapters:\n{prev}"
+    brief = ctx.get("brief")
+    brief_block = ""
+    if brief is not None:
+        brief_block = (
+            "\n\nChapter brief (your assignment from the Plotter — honor it, or deviate "
+            "deliberately and say why in your feed note):\n"
+            f"Goal: {brief.goal}\n"
+            f"POV: {brief.pov_character_id or 'your choice'}\n"
+            f"Touch threads: {', '.join(brief.threads_to_touch) or 'your choice'}\n"
+            f"Hit beats: {', '.join(brief.beats_to_hit) or 'none targeted'}\n"
+            f"Progress promises: {', '.join(brief.promises_to_progress) or 'none targeted'}\n"
+            f"Value shift: {brief.value_shift or 'unspecified'} · "
+            f"Planned outcome: {brief.planned_outcome or 'unspecified'}\n"
+            f"Synopsis: {brief.synopsis}"
+        )
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
         f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}"
-        f"{ledger}{pacing_plan}\n\nWrite the next chapter."
+        f"{ledger}{pacing_plan}{brief_block}\n\nWrite the next chapter."
     )
 
 
@@ -125,6 +141,7 @@ class Author(BaseAgent):
             "causal_edges": await self._read.list_causal_edges(),
             "hand": await self._read.get_active_hand(),
             "promises": await self._read.list_promises(),
+            "brief": await self._read.get_open_brief_for_ordinal(len(chapters) + 1),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -163,6 +180,12 @@ class Author(BaseAgent):
             await self._committer.commit(self.name, EventType.CHAPTER_CREATED, chapter.id, chapter)
             chapter_id = chapter.id
             valid_chapter_ids = {c.id for c in ctx["chapters"]} | {chapter.id}
+            brief = ctx.get("brief")
+            if brief is not None:
+                await self._committer.commit(
+                    self.name, EventType.CHAPTER_BRIEF_FULFILLED, brief.id,
+                    ChapterBriefFulfilled(brief_id=brief.id, chapter_id=chapter.id),
+                )
             hand = ctx.get("hand")
             if hand is not None:
                 await self._committer.commit(
