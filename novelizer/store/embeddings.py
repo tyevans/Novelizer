@@ -97,7 +97,7 @@ class EmbeddingStore:
             )
 
     async def upsert_promise(self, promise: PromiseRecord) -> None:
-        text = f"{promise.name}\n{promise.description}\n{promise.last_note}".strip()
+        text = f"{promise.name}\n{promise.description}\n{promise.last_note}\nstate: {promise.state}".strip()
         async with self._write_lock:
             await asyncio.to_thread(
                 self._promises.upsert, ids=[promise.id], documents=[text],
@@ -105,7 +105,7 @@ class EmbeddingStore:
             )
 
     async def upsert_brief(self, brief: ChapterBriefRecord) -> None:
-        text = f"{brief.goal}\n{brief.synopsis}".strip()
+        text = f"{brief.goal}\n{brief.synopsis}\nstatus: {brief.status}".strip()
         async with self._write_lock:
             await asyncio.to_thread(
                 self._briefs.upsert, ids=[brief.id], documents=[text],
@@ -114,6 +114,8 @@ class EmbeddingStore:
 
     async def upsert_arc(self, arc: ArcRecord) -> None:
         text = f"{arc.character_id}\n{arc.lie}\n{arc.truth}\n{arc.want}\n{arc.need}".strip()
+        if arc.resolved:
+            text = f"{text}\nresolved: {arc.outcome}".strip()
         async with self._write_lock:
             await asyncio.to_thread(
                 self._arcs.upsert, ids=[arc.id], documents=[text],

@@ -5,8 +5,9 @@ import pytest
 
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import (
-    ArcDeclared, ChapterBriefDrafted, EventType, PromiseMade, SecretCreated,
-    ThemeIntroduced, ThreadPlanted,
+    ArcDeclared, ArcResolved, ChapterBriefDrafted, ChapterBriefFulfilled,
+    ChapterBriefSuperseded, EventType, PromiseMade, PromisePaid,
+    SecretCreated, ThemeIntroduced, ThreadPlanted,
 )
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
@@ -144,3 +145,63 @@ async def test_supersede_via_real_retconner_convention_removes_old_embedding(sta
     await indexer.catch_up()
     assert store._world.get(ids=["w1"])["ids"] == []
     assert store._world.get(ids=["w2"])["ids"] == ["w2"]
+
+
+async def test_promise_paid_refreshes_vector_with_terminal_state(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.PROMISE_PAID, "the-sealed-letter",
+                        PromisePaid(id="the-sealed-letter", chapter_id="ch1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._promises.get(ids=["the-sealed-letter"])["documents"][0]
+    assert "state: paid" in doc
+
+
+async def test_brief_superseded_refreshes_vector_with_terminal_status(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.CHAPTER_BRIEF_SUPERSEDED, "b1",
+                        ChapterBriefSuperseded(brief_id="b1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._briefs.get(ids=["b1"])["documents"][0]
+    assert "status: superseded" in doc
+
+
+async def test_brief_fulfilled_refreshes_vector_with_terminal_status(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.CHAPTER_BRIEF_FULFILLED, "b1",
+                        ChapterBriefFulfilled(brief_id="b1", chapter_id="ch1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._briefs.get(ids=["b1"])["documents"][0]
+    assert "status: fulfilled" in doc
+
+
+async def test_arc_resolved_refreshes_vector_with_outcome(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.ARC_RESOLVED, "arc1",
+                        ArcResolved(arc_id="arc1", chapter_id="ch1", outcome="truth_embraced"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._arcs.get(ids=["arc1"])["documents"][0]
+    assert "resolved: truth_embraced" in doc
