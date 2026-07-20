@@ -93,6 +93,31 @@ async def test_readiness_is_zero_with_two_open_future_briefs(stack):
     assert await plotter.readiness() == 0.0
 
 
+async def test_readiness_ignores_far_future_brief_beyond_runway(stack):
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(
+            EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=f"Ch{i}", prose="p")
+        )
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=50, beats=[]),
+    )
+    # ordinal 40 is far beyond the 3-chapter runway window (len(chapters) < ordinal <= len+3)
+    # and must not count toward open_briefs_ahead.
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=40, goal="far off"),
+    )
+    await proj.catch_up()
+    plotter = Plotter(FakeRunner(None), read, committer)
+    # Since the far-future brief doesn't count, readiness should behave as if
+    # there are zero open briefs ahead within the runway -- i.e. fully ready.
+    assert await plotter.readiness() == 1.0
+
+
 # --- run_once: blueprint proposal, gated end-to-end ---
 
 async def test_run_once_blueprint_plan_creates_gated_proposal_and_approval_yields_six_beats(stack):
@@ -147,6 +172,40 @@ async def test_run_once_brief_draft_projects_open_brief(stack):
     open_briefs = await read.list_briefs("open")
     assert len(open_briefs) == 1
     assert open_briefs[0].target_ordinal == 2
+
+
+async def test_run_once_reaps_stale_open_brief_even_with_no_intents(stack):
+    """A stale open brief (target_ordinal <= drafted chapter count) must be
+    mechanically superseded before commit, deterministically -- not
+    dependent on the LLM emitting a supersede intent."""
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "stale1",
+        ChapterBriefDrafted(brief_id="stale1", target_ordinal=2, goal="already past"),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput()  # no intents at all -- LLM chose to stand aside
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    open_briefs = await read.list_briefs("open")
+    assert open_briefs == []
+
+    log = await events.events_since(0)
+    superseded = [e for e in log if e.event_type == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(superseded) == 1
+    assert superseded[0].payload["brief_id"] == "stale1"
+    assert superseded[0].payload["superseded_by_brief_id"] == ""
 
 
 async def test_run_once_drops_blueprint_plan_when_one_already_active(stack):

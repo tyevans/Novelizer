@@ -8,6 +8,7 @@ from novelizer.brain.context import (
     tension_target_note,
 )
 from novelizer.canon.beat_templates import beat_window
+from novelizer.canon.events import ChapterBriefSuperseded, EventType
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.muse.prompts import inspiration_note
@@ -24,6 +25,7 @@ supersede rather than contradict. Cite every id exactly as shown. Prefer steerin
 toward overdue payoffs and dark threads over introducing new material."""
 
 _READINESS_BRIEF_RUNWAY = 2
+_READINESS_BRIEF_LOOKAHEAD = 3
 
 
 def _summarize(ctx: dict, personality: str = "") -> str:
@@ -114,7 +116,11 @@ class Plotter(BaseAgent):
         if chapters and blueprint is None:
             return 1.0
         open_briefs = await self._read.list_briefs("open")
-        open_briefs_ahead = sum(1 for b in open_briefs if b.target_ordinal > len(chapters))
+        chapter_count = len(chapters)
+        open_briefs_ahead = sum(
+            1 for b in open_briefs
+            if chapter_count < b.target_ordinal <= chapter_count + _READINESS_BRIEF_LOOKAHEAD
+        )
         needed = max(0, _READINESS_BRIEF_RUNWAY - open_briefs_ahead)
         return min(1.0, needed / _READINESS_BRIEF_RUNWAY)
 
@@ -160,7 +166,7 @@ class Plotter(BaseAgent):
 
         if out.blueprint_plan is not None:
             pending_blueprint_proposal = any(
-                p.target_event_type == "blueprint.adopted" for p in ctx["open_proposals"]
+                p.target_event_type == EventType.BLUEPRINT_ADOPTED for p in ctx["open_proposals"]
             )
             if ctx["blueprint"] is not None:
                 logger.warning(
@@ -182,6 +188,8 @@ class Plotter(BaseAgent):
         valid_chapter_ids = {c.id for c in ctx["chapters"]}
         unrevealed_secret_ids = {s.id for s in ctx["secrets"] if not s.revealed}
 
+        await self._reap_stale_open_briefs(ctx["open_briefs"], len(ctx["chapters"]))
+
         await self._commit_brief_intents(
             out.brief_intents, ctx["open_briefs"], len(ctx["chapters"]),
             active_thread_ids, active_beat_ids, active_promise_ids,
@@ -195,6 +203,23 @@ class Plotter(BaseAgent):
         )
         await self._remark(out.feed_note)
         await self._consume_signals(ctx["signals"])
+
+    async def _reap_stale_open_briefs(self, open_briefs: list, drafted_chapter_count: int) -> None:
+        """Mechanically supersede open briefs whose target_ordinal has already
+        been drafted past -- deterministic housekeeping, not dependent on the
+        LLM emitting a supersede intent. Runs before any LLM-driven brief
+        commits so a stale brief never lingers just because the model had
+        nothing else to say this pass."""
+        for brief in open_briefs:
+            if brief.target_ordinal <= drafted_chapter_count:
+                logger.info(
+                    "plotter: reaping stale open brief %r (target_ordinal=%r, drafted_chapter_count=%r)",
+                    brief.id, brief.target_ordinal, drafted_chapter_count,
+                )
+                await self._committer.commit(
+                    self.name, EventType.CHAPTER_BRIEF_SUPERSEDED, brief.id,
+                    ChapterBriefSuperseded(brief_id=brief.id, superseded_by_brief_id=""),
+                )
 
     async def _run(self) -> None:
         ctx = await self.poll()

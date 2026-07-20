@@ -731,11 +731,15 @@ def test_causeway_normal_edge_arrow_is_dim():
 
 
 def test_alarm_strip_matches_spec_format():
-    assert alarm_strip(1, 2, 0, 1).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1"
+    assert alarm_strip(1, 2, 0, 1, 0).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline"
 
 
 def test_alarm_strip_quiet_shows_bare_labels():
-    assert alarm_strip(0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause"
+    assert alarm_strip(0, 0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause · Outline"
+
+
+def test_alarm_strip_outline_segment_shows_count():
+    assert alarm_strip(0, 0, 0, 0, 3).plain == "Shape · Threads · Secrets · Cause · Outline ⚠3"
 
 
 def test_outline_tab_empty_state_no_blueprint():
@@ -865,6 +869,6 @@ def test_outline_tab_ignores_superseded_and_fulfilled_briefs():
 
 
 def test_alarm_strip_alarm_segments_are_alarm_styled():
-    strip = alarm_strip(1, 0, 0, 0)
+    strip = alarm_strip(1, 0, 0, 0, 0)
     spans = [(strip.plain[s.start:s.end], str(s.style)) for s in strip.spans]
     assert (" ⚠1", ALARM_STYLE) in spans

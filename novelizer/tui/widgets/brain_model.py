@@ -566,13 +566,16 @@ def outline_tab(
     return OutlineTab(lines, late_count + stale_count)
 
 
-def alarm_strip(shape: int, threads: int, secrets: int, cause: int) -> Text:
+def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
-    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1'."""
+    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline'."""
     strip = Text()
     for i, (label, count) in enumerate(
-        [("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause)]
+        [
+            ("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause),
+            ("Outline", outline),
+        ]
     ):
         if i:
             strip.append(" · ", style=DIM)

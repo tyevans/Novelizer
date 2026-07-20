@@ -79,7 +79,10 @@ class BrainPanel(Vertical):
         self.query_one("#causeway_body", Static).update(_joined(cause.lines))
         self.query_one("#outline_body", Static).update(_joined(outline.lines))
         self.query_one("#brain_strip", Static).update(
-            alarm_strip(shape.alarm_count, threads.alarm_count, secrets.alarm_count, cause.alarm_count)
+            alarm_strip(
+                shape.alarm_count, threads.alarm_count, secrets.alarm_count, cause.alarm_count,
+                outline.alarm_count,
+            )
         )
 
     def activate_tab(self, pane_id: str) -> None:

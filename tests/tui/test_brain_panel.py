@@ -78,7 +78,7 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert str(app.query_one("#causeway_body", Static).renderable) == CAUSEWAY_EMPTY
             assert str(app.query_one("#outline_body", Static).renderable) == OUTLINE_EMPTY
             assert not app.query("#shape_spark")   # the widget is gone entirely
-            assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause"
+            assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause · Outline"
     finally:
         await rt.close(); os.unlink(path)
 
