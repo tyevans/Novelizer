@@ -10,6 +10,7 @@ from novelizer.agents.character_keeper import CharacterKeeper
 from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent
 from novelizer.canon.events import SecretCreated
 from novelizer.store.models import Character, Chapter, RetconStatus
+from novelizer.agents.base import DEFAULT_PASS_REMARK
 
 
 class FakeRunner:
@@ -322,6 +323,96 @@ async def test_retcon_matching_open_description_is_not_refiled(stack):
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     assert len([r for r in open_reqs if r.description == "stoic vs weeping"]) == 1
+
+
+class BoomRunner:
+    async def ainvoke(self, inputs):
+        raise RuntimeError("boom")
+
+
+async def test_keeper_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mira arrives."))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[NewCharacter(name="Mira")])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    assert await agent.readiness() > 0.0
+    await agent.run_once()
+    await proj.catch_up()
+    # Its own minted character must not re-trigger it; no new external state.
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch2", Chapter(id="ch2", title="Two", prose="More."))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+async def test_keeper_failed_run_leaves_watermark_unset(stack):
+    events, proj, read, committer = stack
+    # Seed BOTH a chapter and a character so readiness takes the gated 0.5
+    # path, not the ungated 0.8 cast-bootstrap branch — otherwise this test
+    # would pass even if a failed run wrongly recorded the watermark.
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
+    await proj.catch_up()
+    agent = CharacterKeeper(BoomRunner(), read, committer)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    assert await agent.readiness() == 0.5
+
+
+async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    out = KeeperOutput(no_action=True, new_characters=[NewCharacter(name="Ghost")],
+                       feed_note="All quiet on the cast front — write on.")
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    assert await read.list_characters() == []          # populated list ignored on a pass
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert [e.payload["note"] for e in remarks] == ["All quiet on the cast front — write on."]
+    import time
+    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+
+
+async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):
+    events, proj, read, committer = stack
+    agent = CharacterKeeper(FakeRunner(KeeperOutput(no_action=True)), read, committer)
+    await agent.commit(KeeperOutput(no_action=True), {"characters": [], "recent": [], "secrets": [], "hands": []})
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert [e.payload["note"] for e in remarks] == [DEFAULT_PASS_REMARK]
+
+
+class ChapterCommittingRunner(FakeRunner):
+    """Simulates the Author committing a chapter while the Keeper's LLM call
+    is in flight."""
+
+    def __init__(self, out, events, proj):
+        super().__init__(out)
+        self._events = events
+        self._proj = proj
+
+    async def ainvoke(self, inputs):
+        await self._events.append(
+            EventType.CHAPTER_CREATED, "ch-midrun",
+            Chapter(id="ch-midrun", title="Mid-run", prose="Arrived during the run."),
+        )
+        await self._proj.catch_up()
+        return await super().ainvoke(inputs)
+
+
+async def test_keeper_midrun_chapter_is_not_absorbed_by_watermark(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
+    await proj.catch_up()
+    agent = CharacterKeeper(ChapterCommittingRunner(KeeperOutput(), events, proj), read, committer)
+    await agent.run_once()
+    # The mid-run chapter was never analyzed: the watermark must stay clear.
+    assert await agent.readiness() > 0.0
 
 
 class _FakeSettings:
