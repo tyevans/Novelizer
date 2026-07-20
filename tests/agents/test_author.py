@@ -839,3 +839,11 @@ async def test_author_revise_signal_with_open_brief_does_not_consume_it(stack):
     briefs = await read.list_briefs()
     assert len(briefs) == 1
     assert briefs[0].status.value == "open"
+
+
+def test_author_module_does_not_import_arc_note():
+    import novelizer.agents.author as author_module
+    import inspect
+
+    source = inspect.getsource(author_module)
+    assert "arc_note" not in source

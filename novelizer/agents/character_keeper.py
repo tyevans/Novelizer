@@ -3,7 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import open_retcons_note
+from novelizer.brain.context import arc_note, open_retcons_note
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -68,11 +68,14 @@ class CharacterKeeper(BaseAgent):
         return {
             "characters": await self._read.list_characters(),
             "recent": chapters[-5:],
+            "chapters": chapters,
             "secrets": await self._read.list_secrets(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
             "hands": (await self._read.list_hands(status="consumed"))[-NAME_UPTAKE_HAND_WINDOW:],
             "arcs": await self._read.list_arcs(active_only=True),
+            "all_arcs": await self._read.list_arcs(active_only=False),
             "beats": await self._read.list_beats(),
+            "blueprint": await self._read.get_active_blueprint(),
         }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
@@ -92,7 +95,10 @@ class CharacterKeeper(BaseAgent):
         if beats:
             arcs_lines += f"\nAvailable beat ids for pivots: {', '.join(b.id for b in beats)}"
         arcs_block = f"\n\nActive arcs:\n{arcs_lines}" if arcs_lines else ""
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}{arcs_block}"
+        note = arc_note(
+            ctx.get("all_arcs", []), ctx["characters"], ctx.get("chapters", []), beats, ctx.get("blueprint"),
+        )
+        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}{arcs_block}{note}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

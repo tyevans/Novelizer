@@ -4,8 +4,8 @@ from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import (
-    beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note, stale_threads_note,
-    tension_target_note,
+    arc_note, beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note,
+    stale_threads_note, tension_target_note,
 )
 from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.events import ChapterBriefSuperseded, EventType
@@ -37,6 +37,8 @@ def _summarize(ctx: dict, personality: str = "") -> str:
     promises = ctx["promises"]
     secrets = ctx["secrets"]
     signals = ctx["signals"]
+    arcs = ctx.get("arcs", [])
+    characters = ctx.get("characters", [])
 
     blocks = [f"Chapter index:\n{chapter_map_note(chapters)}"]
 
@@ -78,6 +80,7 @@ def _summarize(ctx: dict, personality: str = "") -> str:
         stale_threads_note(threads, chapters),
         beat_drift_note(blueprint, beats, chapters),
         tension_target_note(blueprint, beats, ctx.get("scores", []), chapters),
+        arc_note(arcs, characters, chapters, beats, blueprint),
     ):
         if note:
             blocks.append(note.strip())
@@ -138,6 +141,7 @@ class Plotter(BaseAgent):
         hand = await self._read.get_active_hand()
         open_proposals = await self._read.list_proposals(status="open")
         scores = await self._read.list_structure_scores()
+        arcs = await self._read.list_arcs(active_only=False)
         return {
             "chapters": chapters,
             "world": world[:10],
@@ -152,6 +156,7 @@ class Plotter(BaseAgent):
             "hand": hand,
             "open_proposals": open_proposals,
             "scores": scores,
+            "arcs": arcs,
         }
 
     async def work(self, ctx: dict) -> PlotterOutput | None:

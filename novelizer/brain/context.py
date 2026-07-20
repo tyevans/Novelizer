@@ -1,4 +1,5 @@
 from __future__ import annotations
+from novelizer.brain.arc_alignment import STAGNATION_CHAPTERS, arc_findings
 from novelizer.brain.beat_drift import beat_drifts, next_expected_beat
 from novelizer.brain.ledger import due_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
@@ -9,8 +10,8 @@ from novelizer.brain.tension_target import tension_deviations
 from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
-    BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord, RetconRequest,
-    SecretRecord, StructureScore, ThreadRecord,
+    ArcRecord, BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord,
+    RetconRequest, SecretRecord, StructureScore, ThreadRecord,
 )
 
 
@@ -186,6 +187,36 @@ def tension_target_note(
     else:
         sentence += "."
     return f"\n\n{sentence}"
+
+
+def arc_note(
+    arcs: list[ArcRecord],
+    characters: list[Character],
+    chapters: list[Chapter],
+    beats: list[BeatRecord],
+    blueprint: BlueprintRecord | None,
+    stagnation_chapters: int = STAGNATION_CHAPTERS,
+) -> str:
+    """Build the prompt block naming every arc-alignment finding (a resolved
+    arc whose outcome contradicts its type, a stagnant unresolved arc, or a
+    missed pivot window), with per-character guidance: contradictions need
+    adjudication, stagnation/missed pivots need routing into the next brief.
+    Empty string when nothing is flagged, so the prompt stays byte-identical
+    when quiet.
+    """
+    findings = arc_findings(arcs, characters, chapters, beats, blueprint, stagnation_chapters)
+    if not findings:
+        return ""
+    names_by_id = {c.id: c.name for c in characters}
+    lines = []
+    for f in findings:
+        name = names_by_id.get(f.character_id, f.character_id)
+        if f.kind == "contradiction":
+            guidance = f"adjudicate: {f.detail}"
+        else:
+            guidance = f"route {name} into the next brief ({f.detail})"
+        lines.append(f"- {name} (arc:{f.arc_id}) — {guidance}")
+    return "\n\nArc alignment:\n" + "\n".join(lines)
 
 
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:

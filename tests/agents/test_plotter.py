@@ -391,6 +391,40 @@ class _FakeSettings:
     llm_max_tokens = None
 
 
+async def test_prompt_includes_arc_note_when_arc_stagnant(stack):
+    from novelizer.canon.events import ArcDeclared
+    from novelizer.store.models import Character
+
+    events, proj, read, committer = stack
+    for i in range(5):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="I am alone"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Arc alignment:" in sent
+    assert "route Mara into the next brief" in sent
+
+
+async def test_prompt_omits_arc_note_when_quiet(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Arc alignment:" not in sent
+
+
 def test_build_plotter_runner_without_backend_stays_constructible():
     from novelizer.agents.plotter import build_plotter_runner
 
