@@ -528,3 +528,29 @@ def build_continuity_mining_runner(settings, callbacks=None):
     # structured_response). Mining is single-shot with no tools, so
     # constraining generation is safe here.
     return create_deep_agent(model=model, system_prompt=MINING_SYSTEM_PROMPT, response_format=ProviderStrategy(MinedFactsOutput))
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> ContinuityChecker:
+    enabled = ctx.settings.checker_tools_enabled
+    builder = ctx.tooled(build_continuity_checker_runner, enabled)
+    runner = ctx.runner_for("continuity_checker", builder)
+    mining_runner = ctx.runner_for(
+        "continuity_checker_mining", build_continuity_mining_runner,
+        fallback_name="continuity_checker",
+    )
+    return ContinuityChecker(
+        runner, mining_runner, ctx.read, ctx.committer, ctx.events,
+        interval=ctx.settings.continuity_interval,
+        personality=ctx.personalities.get("continuity_checker", ""),
+        pull_mode=enabled,
+    )
+
+
+SPEC = AgentSpec(
+    name="continuity_checker",
+    tool_grant=ToolGrant(enabled_setting="checker_tools_enabled"),
+    construct=_construct,
+)

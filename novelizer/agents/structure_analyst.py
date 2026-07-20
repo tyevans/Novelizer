@@ -175,3 +175,25 @@ def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> StructureAnalyst:
+    enabled = ctx.settings.structure_analyst_tools_enabled
+    builder = ctx.tooled(build_structure_analyst_runner, enabled)
+    runner = ctx.runner_for("structure_analyst", builder)
+    return StructureAnalyst(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.structure_analyst_interval,
+        personality=ctx.personalities.get("structure_analyst", ""),
+        pull_mode=enabled,
+    )
+
+
+SPEC = AgentSpec(
+    name="structure_analyst",
+    tool_grant=ToolGrant(enabled_setting="structure_analyst_tools_enabled"),
+    construct=_construct,
+)

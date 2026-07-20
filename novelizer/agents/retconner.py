@@ -173,3 +173,24 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> Retconner:
+    enabled = ctx.settings.retconner_tools_enabled
+    builder = ctx.tooled(build_retconner_runner, enabled)
+    runner = ctx.runner_for("retconner", builder)
+    return Retconner(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.default_agent_interval,
+        personality=ctx.personalities.get("retconner", ""),
+    )
+
+
+SPEC = AgentSpec(
+    name="retconner",
+    tool_grant=ToolGrant(enabled_setting="retconner_tools_enabled"),
+    construct=_construct,
+)

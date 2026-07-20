@@ -143,3 +143,24 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=WorldEntriesDraft)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> WorldArchitect:
+    enabled = ctx.settings.world_architect_tools_enabled
+    builder = ctx.tooled(build_world_architect_runner, enabled)
+    runner = ctx.runner_for("world_architect", builder)
+    return WorldArchitect(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.default_agent_interval,
+        personality=ctx.personalities.get("world_architect", ""),
+    )
+
+
+SPEC = AgentSpec(
+    name="world_architect",
+    tool_grant=ToolGrant(enabled_setting="world_architect_tools_enabled"),
+    construct=_construct,
+)

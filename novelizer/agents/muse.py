@@ -70,3 +70,19 @@ class Muse(BaseAgent):
         await self._remark(f"a fresh hand on the table: {', '.join(hand.names)}")
         logger.info("muse dealt hand %s (seed=%d, era=%s)", hand.hand_id, seed, hand.era)
         return hand
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec
+
+
+def _construct(ctx: AgentContext) -> Muse:
+    return Muse(
+        ctx.read, ctx.committer,
+        interval=ctx.settings.muse_interval,
+        era=ctx.settings.muse_era,
+        exclusion_hands=ctx.settings.muse_exclusion_hands,
+        personality=ctx.personalities.get("muse", ""),
+    )
+
+
+SPEC = AgentSpec(name="muse", tool_grant=None, construct=_construct)

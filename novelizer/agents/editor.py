@@ -293,3 +293,26 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=EditorVerdict)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> Editor:
+    enabled = ctx.settings.editor_tools_enabled
+    builder = ctx.tooled(build_editor_runner, enabled)
+    runner = ctx.runner_for("editor", builder)
+    return Editor(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.default_agent_interval,
+        casting_note=ctx.casting_note,
+        personality=ctx.personalities.get("editor", ""),
+        sag_spike_delta=ctx.settings.sag_spike_delta,
+    )
+
+
+SPEC = AgentSpec(
+    name="editor",
+    tool_grant=ToolGrant(enabled_setting="editor_tools_enabled"),
+    construct=_construct,
+)

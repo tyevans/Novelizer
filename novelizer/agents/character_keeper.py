@@ -298,3 +298,26 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=KeeperOutput)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> CharacterKeeper:
+    enabled = ctx.settings.character_keeper_tools_enabled
+    builder = ctx.tooled(build_character_keeper_runner, enabled)
+    runner = ctx.runner_for("character_keeper", builder)
+    return CharacterKeeper(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.default_agent_interval,
+        personality=ctx.personalities.get("character_keeper", ""),
+        prose_chars=ctx.settings.keeper_prose_chars,
+        pull_mode=enabled,
+    )
+
+
+SPEC = AgentSpec(
+    name="character_keeper",
+    tool_grant=ToolGrant(enabled_setting="character_keeper_tools_enabled"),
+    construct=_construct,
+)

@@ -317,3 +317,29 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
     if callbacks:
         return graph.with_config({"callbacks": callbacks})
     return graph
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> Author:
+    enabled = ctx.settings.author_tools_enabled
+    builder = ctx.tooled(build_author_runner, enabled)
+    runner = ctx.runner_for("author", builder)
+    return Author(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.author_interval,
+        casting_note=ctx.casting_note,
+        personality=ctx.personalities.get("author", ""),
+        provenance=ctx.provenance,
+        prior_chapter_summary_chars=ctx.settings.prior_chapter_summary_chars,
+        staleness_threshold_chapters=ctx.settings.staleness_threshold_chapters,
+        pull_mode=enabled,
+    )
+
+
+SPEC = AgentSpec(
+    name="author",
+    tool_grant=ToolGrant(enabled_setting="author_tools_enabled"),
+    construct=_construct,
+)

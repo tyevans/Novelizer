@@ -303,3 +303,24 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
         return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=PLOTTER_SYSTEM_PROMPT, response_format=PlotterOutput)
+
+
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+
+
+def _construct(ctx: AgentContext) -> Plotter:
+    enabled = ctx.settings.plotter_tools_enabled
+    builder = ctx.tooled(build_plotter_runner, enabled)
+    runner = ctx.runner_for("plotter", builder)
+    return Plotter(
+        runner, ctx.read, ctx.committer,
+        interval=ctx.settings.plotter_interval,
+        personality=ctx.personalities.get("plotter", ""),
+    )
+
+
+SPEC = AgentSpec(
+    name="plotter",
+    tool_grant=ToolGrant(enabled_setting="plotter_tools_enabled"),
+    construct=_construct,
+)
