@@ -681,8 +681,9 @@ async def test_phase_b_flags_off_uses_bare_builder(settings, monkeypatch, agent_
 
 
 async def test_phase_a_toolkit_backend_is_composite_with_outline_route(settings):
-    from deepagents.backends import CompositeBackend
+    from deepagents.backends import CompositeBackend, StateBackend
     from novelizer.canon_fs.outline import OutlineBackend
+    from novelizer.canon_fs.skills_route import ReadOnlyBackend
 
     rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
     try:
@@ -690,5 +691,9 @@ async def test_phase_a_toolkit_backend_is_composite_with_outline_route(settings)
         assert isinstance(rt._canon_backend, CompositeBackend)
         assert "/outline/" in rt._canon_backend.routes
         assert isinstance(rt._canon_backend.routes["/outline/"], OutlineBackend)
+        assert "/skills/" in rt._canon_backend.routes
+        assert isinstance(rt._canon_backend.routes["/skills/"], ReadOnlyBackend)
+        assert "/workspace/" in rt._canon_backend.routes
+        assert isinstance(rt._canon_backend.routes["/workspace/"], StateBackend)
     finally:
         await rt.close()

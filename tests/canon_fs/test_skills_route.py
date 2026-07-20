@@ -1,0 +1,80 @@
+import os
+import tempfile
+
+import pytest
+from deepagents.backends import CompositeBackend
+
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.projector import Projector
+from novelizer.canon.read_store import ReadStore
+from novelizer.canon_fs.backend import READ_ONLY_ERROR, CanonBackend
+from novelizer.canon_fs.skills_route import ReadOnlyBackend, build_skills_backend
+
+
+@pytest.fixture
+async def stack():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    yield events, proj, read
+    await read.close(); await proj.close(); await events.close()
+    os.unlink(path)
+
+
+def build_composite(read):
+    return CompositeBackend(
+        default=CanonBackend(read),
+        routes={"/skills/": build_skills_backend()},
+    )
+
+
+async def test_skills_read_returns_frontmatter(stack):
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.aread("/skills/outlining/SKILL.md")
+    assert result.error is None
+    assert "name: outlining" in result.file_data["content"]
+
+
+async def test_skills_ls_lists_five_packs(stack):
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.als("/skills")
+    paths = {e["path"] for e in result.entries}
+    expected = {
+        "/skills/outlining",
+        "/skills/promise-payoff",
+        "/skills/scene-sequel",
+        "/skills/character-arcs",
+        "/skills/pacing",
+    }
+    # entries may have trailing slash for directories
+    normalized = {p.rstrip("/") for p in paths}
+    assert expected <= normalized
+
+
+async def test_skills_write_refused(stack):
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.awrite("/skills/outlining/SKILL.md", "hacked")
+    assert result.error == READ_ONLY_ERROR
+
+
+def test_read_only_backend_sync_write_refused():
+    inner = build_skills_backend()  # already a ReadOnlyBackend
+    assert isinstance(inner, ReadOnlyBackend)
+    result = inner.write("/outlining/SKILL.md", "hacked")
+    assert result.error == READ_ONLY_ERROR
+
+
+def test_read_only_backend_sync_reads_raise_not_implemented():
+    backend = build_skills_backend()
+    with pytest.raises(NotImplementedError):
+        backend.ls("/")
+    with pytest.raises(NotImplementedError):
+        backend.read("/outlining/SKILL.md")
