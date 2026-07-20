@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.brain.arc_alignment import STAGNATION_CHAPTERS, arc_findings
 from novelizer.brain.beat_drift import beat_drifts, next_expected_beat
+from novelizer.brain.completion import completion_status
 from novelizer.brain.ledger import due_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.resolution_pacing import congested_windows, overdue_resolutions, overdue_reveals
@@ -11,7 +12,7 @@ from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
     ArcRecord, BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord,
-    RetconRequest, SecretRecord, StructureScore, ThreadRecord,
+    PromiseState, RetconRequest, SecretRecord, StructureScore, ThreadRecord,
 )
 
 
@@ -220,6 +221,68 @@ def arc_note(
             guidance = f"route {name} into the next brief ({f.detail})"
         lines.append(f"- {name} (arc:{f.arc_id}) — {guidance}")
     return "\n\nArc alignment:\n" + "\n".join(lines)
+
+
+def completion_note(
+    blueprint: BlueprintRecord | None,
+    beats: list[BeatRecord],
+    promises: list[PromiseRecord],
+    arcs: list[ArcRecord],
+    chapters: list[Chapter],
+    characters: list[Character],
+) -> str:
+    """Build the endgame-steering prompt block for the completion faculty.
+
+    Deliberately quiet until the book is CLOSE: empty string when there is
+    no blueprint, or when more than one blocker category remains (this note
+    steers the final stretch, not the whole book -- naming every gap from
+    chapter one would just be noise). Fires only when exactly one blocker
+    category remains, naming it precisely, or when the blueprint is fully
+    satisfied.
+    """
+    status = completion_status(blueprint, beats, promises, arcs, chapters)
+    if status is None:
+        return ""
+
+    if status.complete:
+        return (
+            "The blueprint is satisfied: every beat fulfilled, every promise settled, "
+            "every arc resolved. Write the ending — then the room is done."
+        )
+
+    if len(status.blockers) != 1:
+        return ""
+
+    names_by_id = {c.id: c.name for c in characters}
+
+    if status.beats_fulfilled < status.beats_total or status.beats_total == 0:
+        unfulfilled = [b for b in beats if not b.fulfilled_by_chapter_id]
+        names = ", ".join(b.name for b in unfulfilled)
+        count = len(unfulfilled)
+        noun = "beat" if count == 1 else "beats"
+        return (
+            f"Everything is settled except {count} {noun}: {names}. "
+            "Steer the remaining chapters at them."
+        )
+
+    if status.promises_open:
+        open_promises = [p for p in promises if p.state == PromiseState.open]
+        names = ", ".join(p.name for p in open_promises)
+        count = len(open_promises)
+        noun = "promise" if count == 1 else "promises"
+        return (
+            f"Everything is settled except {count} {noun}: {names}. "
+            "Steer the remaining chapters at them."
+        )
+
+    unresolved_arcs = [a for a in arcs if a.active and not a.resolved]
+    names = ", ".join(names_by_id.get(a.character_id, a.character_id) for a in unresolved_arcs)
+    count = len(unresolved_arcs)
+    noun = "arc" if count == 1 else "arcs"
+    return (
+        f"Everything is settled except {count} {noun}: {names}. "
+        "Steer the remaining chapters at them."
+    )
 
 
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:

@@ -1,7 +1,10 @@
 from novelizer.brain.context import (
-    beat_drift_note, pacing_flags_note, stale_threads_note, tension_target_note,
+    beat_drift_note, completion_note, pacing_flags_note, stale_threads_note, tension_target_note,
 )
-from novelizer.store.models import BeatRecord, BlueprintRecord, Chapter, ThreadRecord, ThreadState, StructureScore
+from novelizer.store.models import (
+    ArcRecord, BeatRecord, BlueprintRecord, Chapter, Character, PromiseRecord, PromiseState,
+    ThreadRecord, ThreadState, StructureScore,
+)
 
 
 def _chapters(n: int) -> list[Chapter]:
@@ -255,3 +258,58 @@ def test_tension_target_note_reports_worst_deviation_and_next_beat_guidance():
     note = tension_target_note(blueprint, beats, scores, chapters)
     assert note.startswith("\n\nTension vs blueprint: ch 20 actual 0.99 vs target 0.5")
     assert "midpoint flip is planned for ch 8-12" in note
+
+
+# --- completion_note ---
+
+def _bp(target_chapter_count=10):
+    return BlueprintRecord(id="bp1", framework="three_act", target_chapter_count=target_chapter_count)
+
+
+def _beat(slug, name, fulfilled=False):
+    return BeatRecord(
+        id=slug, blueprint_id="bp1", slug=slug, name=name, ideal_pct=0.5, tolerance_pct=0.1,
+        fulfilled_by_chapter_id="c0" if fulfilled else "",
+    )
+
+
+def test_completion_note_empty_when_no_blueprint():
+    assert completion_note(None, [], [], [], _chapters(0), []) == ""
+
+
+def test_completion_note_quiet_when_far_from_done():
+    beats = [_beat("open", "Opening", fulfilled=False)]
+    promises = [PromiseRecord(id="p1", name="Ring", state=PromiseState.open)]
+    arcs = [ArcRecord(id="a1", character_id="mara", arc_type="positive", active=True, resolved=False)]
+    note = completion_note(_bp(), beats, promises, arcs, _chapters(10), [])
+    assert note == ""
+
+
+def test_completion_note_fires_when_exactly_one_blocker_category():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    promises = [
+        PromiseRecord(id="p1", name="Ring", state=PromiseState.open),
+        PromiseRecord(id="p2", name="Letter", state=PromiseState.open),
+    ]
+    note = completion_note(_bp(), beats, promises, [], _chapters(10), [])
+    assert "Everything is settled except 2 promises" in note
+    assert "Ring" in note and "Letter" in note
+    assert "Steer the remaining chapters at them." in note
+
+
+def test_completion_note_names_arc_blocker_via_character():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    arcs = [ArcRecord(id="a1", character_id="mara", arc_type="positive", active=True, resolved=False)]
+    characters = [Character(id="mara", name="Mara")]
+    note = completion_note(_bp(), beats, [], arcs, _chapters(10), characters)
+    assert "Mara" in note
+    assert "arc" in note
+
+
+def test_completion_note_complete_message():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    note = completion_note(_bp(), beats, [], [], _chapters(10), [])
+    assert note == (
+        "The blueprint is satisfied: every beat fulfilled, every promise settled, "
+        "every arc resolved. Write the ending — then the room is done."
+    )
