@@ -41,6 +41,7 @@ class EnvOverrides(BaseSettings):
     default_agent_interval: int | None = None
     continuity_interval: int | None = None
     structure_analyst_interval: int | None = None
+    plotter_interval: int | None = None
     muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
@@ -58,6 +59,7 @@ class EnvOverrides(BaseSettings):
     editor_tools_enabled: bool | None = None
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
+    plotter_tools_enabled: bool | None = None
 
 
 def build_effective(

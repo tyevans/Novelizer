@@ -18,6 +18,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "author_tools_enabled", "checker_tools_enabled", "chat_tools_enabled",
     "world_architect_tools_enabled", "character_keeper_tools_enabled", "editor_tools_enabled",
     "retconner_tools_enabled", "structure_analyst_tools_enabled",
+    "plotter_interval", "plotter_tools_enabled",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -68,6 +69,7 @@ class EffectiveSettings(BaseModel):
     default_agent_interval: int = 120
     continuity_interval: int = 900
     structure_analyst_interval: int = 180
+    plotter_interval: int = 240
     muse_interval: int = 60
     projector_interval: float = 0.5
 
@@ -91,3 +93,4 @@ class EffectiveSettings(BaseModel):
     editor_tools_enabled: bool = True
     retconner_tools_enabled: bool = True
     structure_analyst_tools_enabled: bool = True
+    plotter_tools_enabled: bool = True

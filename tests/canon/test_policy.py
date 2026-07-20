@@ -138,3 +138,20 @@ async def test_inspiration_events_are_never_gated(level, event_type):
 async def test_promise_and_planning_events_are_never_gated(level, event_type):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("author", event_type) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+async def test_blueprint_adopted_is_gated_at_every_level_including_full_auto(level):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("plotter", EventType.BLUEPRINT_ADOPTED) is True
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.BLUEPRINT_RETARGETED, EventType.BEAT_FULFILLED,
+    EventType.CHAPTER_BRIEF_DRAFTED, EventType.CHAPTER_BRIEF_SUPERSEDED,
+    EventType.CHAPTER_BRIEF_FULFILLED,
+])
+async def test_other_blueprint_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("plotter", event_type) is False

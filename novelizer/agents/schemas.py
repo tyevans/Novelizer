@@ -142,6 +142,65 @@ class CausalIntent(BaseModel):
     note: str = ""
 
 
+class BlueprintPlan(BaseModel):
+    """The Plotter's blueprint proposal. `framework` must name a built-in
+    template (novelizer.canon.beat_templates.BEAT_TEMPLATES); commit mints
+    blueprint_id + beat ids from the template and routes through the
+    (always-gated) commit path -- see novelizer/agents/intents.py's
+    commit_blueprint_plan.
+    """
+
+    framework: str
+    target_chapter_count: int
+    genre: str = ""
+    obligatory_scenes: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class BriefIntent(BaseModel):
+    """One agent-declared chapter-brief action from structured output.
+
+    `draft` mints a new brief_id (uuid); `supersede` must cite an existing
+    open brief's `id`. `BaseAgent._commit_brief_intents` turns validated
+    intents into chapter_brief.* commits (see novelizer/agents/base.py).
+    """
+
+    action: Literal["draft", "supersede"]
+    id: str = ""                     # cited for supersede
+    target_ordinal: int = 0
+    goal: str = ""
+    pov_character_id: str = ""
+    threads_to_touch: list[str] = Field(default_factory=list)
+    beats_to_hit: list[str] = Field(default_factory=list)
+    promises_to_progress: list[str] = Field(default_factory=list)
+    value_shift: str = ""
+    planned_outcome: Literal["", "yes", "yes_but", "no_and", "no"] = ""
+    synopsis: str = ""
+
+
+class BeatIntent(BaseModel):
+    """One agent-declared beat-fulfillment action from structured output.
+    `beat_id` must cite an existing, minted beat; `chapter_id` == "" clears
+    a prior fulfillment."""
+
+    action: Literal["fulfill"]
+    beat_id: str
+    chapter_id: str = ""             # "" clears
+    note: str = ""
+
+
+class ResolutionPlanIntent(BaseModel):
+    """One agent-declared resolution-window plan for an existing thread or
+    secret. `window_lo`/`window_hi` are 1-based chapter ordinals; 0/0
+    clears the plan."""
+
+    kind: Literal["thread", "secret"]
+    id: str
+    window_lo: int = 0
+    window_hi: int = 0
+    note: str = ""
+
+
 class RetconDraft(BaseModel):
     description: str
     conflicting_entry_ids: list[str] = Field(default_factory=list)
@@ -201,6 +260,19 @@ class ChapterScore(BaseModel):
 
 class StructureAnalystOutput(BaseModel):
     scores: list[ChapterScore] = Field(default_factory=list)
+    feed_note: str = ""
+
+
+class PlotterOutput(BaseModel):
+    """The Plotter's structured response: at most one blueprint proposal
+    (only meaningful while no blueprint is active) plus any number of
+    brief/beat/resolution/promise intents for the current pass."""
+
+    blueprint_plan: BlueprintPlan | None = None
+    brief_intents: list[BriefIntent] = Field(default_factory=list)
+    beat_intents: list[BeatIntent] = Field(default_factory=list)
+    resolution_plan_intents: list[ResolutionPlanIntent] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
     feed_note: str = ""
 
 

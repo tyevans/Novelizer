@@ -1,10 +1,16 @@
 import pytest
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
-    commit_promise_intents,
+    commit_promise_intents, commit_blueprint_plan, commit_brief_intents, commit_beat_intents,
+    commit_resolution_plan_intents,
 )
-from novelizer.agents.schemas import ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent
+from novelizer.agents.schemas import (
+    ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+)
 from novelizer.canon.events import EventType
+from novelizer.canon.beat_templates import BEAT_TEMPLATES
+from novelizer.store.models import ChapterBriefRecord, BriefStatus
 
 
 class FakeCommitter:
@@ -201,3 +207,269 @@ async def test_blank_name_make_is_dropped():
         active_promise_ids=set(), active_thread_ids=set(),
     )
     assert len(c.commits) == 0
+
+
+# --- blueprint plan ---
+
+@pytest.mark.asyncio
+async def test_blueprint_plan_none_is_noop():
+    c = FakeCommitter()
+    await commit_blueprint_plan(c, "plotter", None)
+    assert len(c.commits) == 0
+
+
+@pytest.mark.asyncio
+async def test_blueprint_plan_unknown_framework_dropped(caplog):
+    c = FakeCommitter()
+    await commit_blueprint_plan(c, "plotter", BlueprintPlan(framework="nonexistent", target_chapter_count=20))
+    assert len(c.commits) == 0
+    assert any("framework" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_blueprint_plan_tiny_count_dropped(caplog):
+    c = FakeCommitter()
+    await commit_blueprint_plan(c, "plotter", BlueprintPlan(framework="six-position", target_chapter_count=2))
+    assert len(c.commits) == 0
+    assert any("target_chapter_count" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_blueprint_plan_happy_path_mints_beats():
+    c = FakeCommitter()
+    await commit_blueprint_plan(
+        c, "plotter", BlueprintPlan(framework="six-position", target_chapter_count=24, genre="mystery")
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type) == ("plotter", EventType.BLUEPRINT_ADOPTED)
+    assert payload.framework == "six-position"
+    assert payload.genre == "mystery"
+    assert len(payload.beats) == len(BEAT_TEMPLATES["six-position"])
+    for beat, template in zip(payload.beats, BEAT_TEMPLATES["six-position"]):
+        assert beat.beat_id == f"{payload.blueprint_id}-{template.slug}"
+        assert beat.slug == template.slug
+        assert beat.name == template.name
+
+
+# --- brief draft / supersede ---
+
+@pytest.mark.asyncio
+async def test_brief_draft_happy_path():
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="draft", target_ordinal=5, goal="raise stakes",
+                     threads_to_touch=["t1"], beats_to_hit=["b1"], promises_to_progress=["p1"])],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids={"t1"}, active_beat_ids={"b1"}, active_promise_ids={"p1"},
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type) == ("plotter", EventType.CHAPTER_BRIEF_DRAFTED)
+    assert payload.target_ordinal == 5
+    assert payload.goal == "raise stakes"
+    assert payload.threads_to_touch == ["t1"]
+    assert payload.beats_to_hit == ["b1"]
+    assert payload.promises_to_progress == ["p1"]
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_past_ordinal_dropped(caplog):
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="draft", target_ordinal=3, goal="x")],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ordinal" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_blank_goal_dropped(caplog):
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="draft", target_ordinal=5, goal="  ")],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("goal" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_filters_unknown_cited_ids_but_keeps_brief(caplog):
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="draft", target_ordinal=5, goal="x",
+                     threads_to_touch=["T1 ", "ghost"], beats_to_hit=["ghost-beat"],
+                     promises_to_progress=["ghost-promise"])],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids={"t1"}, active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 1
+    payload = c.commits[0][3]
+    assert payload.threads_to_touch == ["t1"]
+    assert payload.beats_to_hit == []
+    assert payload.promises_to_progress == []
+    assert any("unknown" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_supersedes_existing_open_brief_for_same_ordinal():
+    c = FakeCommitter()
+    existing = ChapterBriefRecord(id="old-brief", target_ordinal=5, goal="old goal", status=BriefStatus.open)
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="draft", target_ordinal=5, goal="new goal")],
+        open_brief_ids=[existing], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 2
+    name0, event_type0, agg0, payload0 = c.commits[0]
+    assert event_type0 == EventType.CHAPTER_BRIEF_SUPERSEDED
+    assert payload0.brief_id == "old-brief"
+    name1, event_type1, agg1, payload1 = c.commits[1]
+    assert event_type1 == EventType.CHAPTER_BRIEF_DRAFTED
+    assert payload0.superseded_by_brief_id == payload1.brief_id
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_duplicate_ordinal_in_same_batch_supersedes_first():
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [
+            BriefIntent(action="draft", target_ordinal=5, goal="first"),
+            BriefIntent(action="draft", target_ordinal=5, goal="second"),
+        ],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    drafted = [entry for entry in c.commits if entry[1] == EventType.CHAPTER_BRIEF_DRAFTED]
+    superseded = [entry for entry in c.commits if entry[1] == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(drafted) == 2
+    assert len(superseded) == 1
+    first_brief_id = drafted[0][3].brief_id
+    second_brief_id = drafted[1][3].brief_id
+    assert drafted[0][3].goal == "first"
+    assert drafted[1][3].goal == "second"
+    assert superseded[0][3].brief_id == first_brief_id
+    assert superseded[0][3].superseded_by_brief_id == second_brief_id
+
+
+@pytest.mark.asyncio
+async def test_brief_supersede_happy_path():
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="supersede", id="brief-1")],
+        open_brief_ids=[ChapterBriefRecord(id="brief-1", target_ordinal=5, goal="g", status=BriefStatus.open)],
+        drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert event_type == EventType.CHAPTER_BRIEF_SUPERSEDED
+    assert payload.brief_id == "brief-1"
+    assert payload.superseded_by_brief_id == ""
+
+
+@pytest.mark.asyncio
+async def test_brief_supersede_unknown_id_dropped(caplog):
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [BriefIntent(action="supersede", id="ghost")],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ghost" in r.message for r in caplog.records)
+
+
+# --- beat fulfill ---
+
+@pytest.mark.asyncio
+async def test_beat_fulfill_happy_path():
+    c = FakeCommitter()
+    await commit_beat_intents(
+        c, "plotter",
+        [BeatIntent(action="fulfill", beat_id="bp1-midpoint", chapter_id="ch5")],
+        active_beat_ids={"bp1-midpoint"}, valid_chapter_ids={"ch5"},
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type) == ("plotter", EventType.BEAT_FULFILLED)
+    assert payload.beat_id == "bp1-midpoint"
+    assert payload.chapter_id == "ch5"
+
+
+@pytest.mark.asyncio
+async def test_beat_fulfill_unknown_beat_dropped(caplog):
+    c = FakeCommitter()
+    await commit_beat_intents(
+        c, "plotter",
+        [BeatIntent(action="fulfill", beat_id="ghost")],
+        active_beat_ids=set(), valid_chapter_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ghost" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_beat_fulfill_unknown_chapter_dropped(caplog):
+    c = FakeCommitter()
+    await commit_beat_intents(
+        c, "plotter",
+        [BeatIntent(action="fulfill", beat_id="bp1-midpoint", chapter_id="ghost-chapter")],
+        active_beat_ids={"bp1-midpoint"}, valid_chapter_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ghost-chapter" in r.message for r in caplog.records)
+
+
+# --- resolution plan ---
+
+@pytest.mark.asyncio
+async def test_resolution_plan_happy_path_thread_and_secret():
+    c = FakeCommitter()
+    await commit_resolution_plan_intents(
+        c, "plotter",
+        [ResolutionPlanIntent(kind="thread", id="t1", window_lo=3, window_hi=5),
+         ResolutionPlanIntent(kind="secret", id="s1", window_lo=6, window_hi=8)],
+        active_thread_ids={"t1"}, unrevealed_secret_ids={"s1"},
+    )
+    assert len(c.commits) == 2
+    assert c.commits[0][1] == EventType.THREAD_RESOLUTION_PLANNED
+    assert c.commits[0][3].id == "t1"
+    assert c.commits[1][1] == EventType.SECRET_REVEAL_PLANNED
+    assert c.commits[1][3].id == "s1"
+
+
+@pytest.mark.asyncio
+async def test_resolution_plan_invalid_window_dropped(caplog):
+    c = FakeCommitter()
+    await commit_resolution_plan_intents(
+        c, "plotter",
+        [ResolutionPlanIntent(kind="thread", id="t1", window_lo=5, window_hi=2)],
+        active_thread_ids={"t1"}, unrevealed_secret_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("window" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_resolution_plan_unknown_id_dropped(caplog):
+    c = FakeCommitter()
+    await commit_resolution_plan_intents(
+        c, "plotter",
+        [ResolutionPlanIntent(kind="secret", id="ghost", window_lo=1, window_hi=2)],
+        active_thread_ids=set(), unrevealed_secret_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ghost" in r.message for r in caplog.records)

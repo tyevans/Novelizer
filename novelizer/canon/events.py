@@ -46,6 +46,12 @@ class EventType:
     PROMISE_RELEASED = "promise.released"
     THREAD_RESOLUTION_PLANNED = "thread.resolution_planned"
     SECRET_REVEAL_PLANNED = "secret.reveal_planned"
+    BLUEPRINT_ADOPTED = "blueprint.adopted"
+    BLUEPRINT_RETARGETED = "blueprint.retargeted"
+    BEAT_FULFILLED = "beat.fulfilled"
+    CHAPTER_BRIEF_DRAFTED = "chapter_brief.drafted"
+    CHAPTER_BRIEF_SUPERSEDED = "chapter_brief.superseded"
+    CHAPTER_BRIEF_FULFILLED = "chapter_brief.fulfilled"
 
 
 class StoredEvent(BaseModel):
@@ -437,3 +443,92 @@ class SecretRevealPlanned(BaseModel):
     id: str
     window_lo: int = 0
     window_hi: int = 0
+
+
+class BeatSpec(BaseModel):
+    """One beat minted with a blueprint. beat_id = f"{blueprint_id}-{slug}"
+    — minted once at adoption; beat.fulfilled cites it exactly."""
+
+    beat_id: str
+    slug: str
+    name: str
+    ideal_pct: float
+    tolerance_pct: float
+    expected_polarity: str = ""
+
+
+class BlueprintAdopted(BaseModel):
+    """Payload for blueprint.adopted — mints the story's structural frame.
+
+    ALWAYS routed through the proposal queue regardless of autonomy level
+    (Locked decision #1: adopting a shape re-frames the whole book; the
+    Director signs off). One blueprint is active at a time: adoption
+    supersedes any prior blueprint in projection (Locked decision #2).
+    `blueprint_id` is minted by the proposing side (uuid); beats are minted
+    with it from a template (canon/beat_templates.py)."""
+
+    blueprint_id: str
+    framework: str
+    target_chapter_count: int
+    genre: str = ""
+    beats: list[BeatSpec] = Field(default_factory=list)
+    obligatory_scenes: list[str] = Field(default_factory=list)
+    note: str = ""
+
+
+class BlueprintRetargeted(BaseModel):
+    """Payload for blueprint.retargeted — the book is running long/short;
+    beat windows recompute from the new count in read-side logic. Cites the
+    active blueprint id; unknown/superseded ids are projection no-ops."""
+
+    blueprint_id: str
+    target_chapter_count: int
+
+
+class BeatFulfilled(BaseModel):
+    """Payload for beat.fulfilled — the Plotter judges a drafted chapter
+    carried the beat, cited by beat_id. Re-emission supersedes (the room may
+    re-judge which chapter truly carried the midpoint). chapter_id="" clears
+    a fulfillment."""
+
+    beat_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class ChapterBriefDrafted(BaseModel):
+    """Payload for chapter_brief.drafted — the plan for a near-future
+    chapter; the Plotter's main output, the Author's assignment.
+
+    `brief_id` minted once (uuid) at draft. `target_ordinal` is a 1-based
+    future chapter ordinal; briefs for already-drafted ordinals are dropped
+    at commit (plan the future, not the past). Cited thread/beat/promise ids
+    are validated at commit; unknown ids are dropped from the lists with a
+    warning, never fail the brief."""
+
+    brief_id: str
+    target_ordinal: int
+    goal: str
+    pov_character_id: str = ""
+    threads_to_touch: list[str] = Field(default_factory=list)
+    beats_to_hit: list[str] = Field(default_factory=list)
+    promises_to_progress: list[str] = Field(default_factory=list)
+    value_shift: str = ""        # e.g. "trust: + -> -"
+    planned_outcome: str = ""    # yes | yes_but | no_and | no
+    synopsis: str = ""
+
+
+class ChapterBriefSuperseded(BaseModel):
+    """Payload for chapter_brief.superseded — terminal; the replacing brief
+    (if any) is its own drafted event."""
+
+    brief_id: str
+    superseded_by_brief_id: str = ""
+
+
+class ChapterBriefFulfilled(BaseModel):
+    """Payload for chapter_brief.fulfilled — the Author drafted against this
+    brief; terminal and absorbing."""
+
+    brief_id: str
+    chapter_id: str

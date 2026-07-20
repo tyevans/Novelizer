@@ -21,6 +21,7 @@ from novelizer.agents.continuity_checker import (
 )
 from novelizer.agents.retconner import Retconner, build_retconner_runner
 from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
+from novelizer.agents.plotter import Plotter, build_plotter_runner
 from novelizer.agents.muse import Muse
 from novelizer.voices.loader import load_voice_pack
 from novelizer.chat.service import ChatService
@@ -55,6 +56,7 @@ class Runtime:
         self.continuity_checker = None
         self.retconner = None
         self.structure_analyst = None
+        self.plotter = None
         self.muse = None
         self.scheduler: Optional[Scheduler] = None
         self.voice_pack = None
@@ -160,6 +162,7 @@ class Runtime:
             "editor": s.editor_tools_enabled,
             "retconner": s.retconner_tools_enabled,
             "structure_analyst": s.structure_analyst_tools_enabled,
+            "plotter": s.plotter_tools_enabled,
         }
         provenance = {
             "model": s.author_model,
@@ -211,13 +214,20 @@ class Runtime:
             self._runner_for("structure_analyst", structure_analyst_builder), self.read, self.committer,
             interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
         )
+        plotter_builder = self._tooled(build_plotter_runner, s.plotter_tools_enabled)
+        self.plotter = Plotter(
+            self._runner_for("plotter", plotter_builder), self.read, self.committer,
+            interval=s.plotter_interval, personality=personalities.get("plotter", ""),
+        )
         self.muse = Muse(
             self.read, self.committer,
             interval=s.muse_interval, era=s.muse_era,
             exclusion_hands=s.muse_exclusion_hands, personality=personalities.get("muse", ""),
         )
         self.agents = [
-            self.world_architect, self.character_keeper, self.muse, self.author,
+            self.world_architect, self.character_keeper, self.muse,
+            # the planner ticks before the writer in a fresh room
+            self.plotter, self.author,
             self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
         ]
         for agent in self.agents:
@@ -248,6 +258,7 @@ class Runtime:
             "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
             "continuity_interval": [self.continuity_checker],
             "structure_analyst_interval": [self.structure_analyst],
+            "plotter_interval": [self.plotter],
             "muse_interval": [self.muse],
         }
         for key in changed:
@@ -319,6 +330,8 @@ class Runtime:
             structure_analyst_builder = self._tooled(
                 build_structure_analyst_runner, self._tooling_pinned["structure_analyst"])
             self.structure_analyst._runner = structure_analyst_builder(stored, callbacks=self._llm_callbacks)
+            plotter_builder = self._tooled(build_plotter_runner, self._tooling_pinned["plotter"])
+            self.plotter._runner = plotter_builder(stored, callbacks=self._llm_callbacks)
         if ("agent_temperature" in changed or "author_temperature" in changed) and rebuild:
             self._chat_runner_cache.clear()
 

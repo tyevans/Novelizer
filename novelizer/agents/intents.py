@@ -1,17 +1,24 @@
 from __future__ import annotations
 import logging
+import uuid
 from novelizer.canon.events import (
     EventType, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
     ThemeIntroduced, ThemeDeveloped,
     PromiseMade, PromiseProgressed, PromisePaid, PromiseReleased,
+    BeatSpec, BlueprintAdopted, BeatFulfilled, ChapterBriefDrafted, ChapterBriefSuperseded,
+    ThreadResolutionPlanned, SecretRevealPlanned,
 )
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
 from novelizer.canon.themes import slugify_theme_name
 from novelizer.canon.promises import slugify_promise_name
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent
-from novelizer.store.models import RetconRequest, RetconStatus
+from novelizer.canon.beat_templates import BEAT_TEMPLATES
+from novelizer.agents.schemas import (
+    ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+)
+from novelizer.store.models import RetconRequest, RetconStatus, ChapterBriefRecord
 
 logger = logging.getLogger(__name__)
 
@@ -419,3 +426,229 @@ async def commit_promise_intents(
         else:
             payload = payload_cls(id=promise_id, chapter_id=chapter_id, note=intent.note, source=source)
         await committer.commit(agent_name, event_type, promise_id, payload)
+
+
+async def commit_blueprint_plan(committer, agent_name: str, plan: BlueprintPlan | None) -> None:
+    """Turn an agent-declared BlueprintPlan into a blueprint.adopted commit.
+
+    None is a no-op. `framework` must name a built-in template
+    (canon/beat_templates.BEAT_TEMPLATES); an unknown framework is dropped
+    with a logged warning. `target_chapter_count` below 3 is dropped with a
+    logged warning -- too few chapters to place a beat sequence
+    meaningfully. On the happy path, mints `blueprint_id` (uuid) and a
+    BeatSpec for every TemplateBeat in the framework's template, with
+    `beat_id = f"{blueprint_id}-{template_beat.slug}"`. blueprint.adopted is
+    always routed through the gated commit path by policy.py, regardless
+    of this helper's caller.
+    """
+    if plan is None:
+        return
+    if plan.framework not in BEAT_TEMPLATES:
+        logger.warning(
+            "%s: dropped blueprint plan citing unknown framework %r", agent_name, plan.framework
+        )
+        return
+    if plan.target_chapter_count < 3:
+        logger.warning(
+            "%s: dropped blueprint plan with target_chapter_count %r (< 3)",
+            agent_name, plan.target_chapter_count,
+        )
+        return
+    blueprint_id = str(uuid.uuid4())
+    beats = [
+        BeatSpec(
+            beat_id=f"{blueprint_id}-{template_beat.slug}",
+            slug=template_beat.slug,
+            name=template_beat.name,
+            ideal_pct=template_beat.ideal_pct,
+            tolerance_pct=template_beat.tolerance_pct,
+            expected_polarity=template_beat.expected_polarity,
+        )
+        for template_beat in BEAT_TEMPLATES[plan.framework]
+    ]
+    await committer.commit(
+        agent_name, EventType.BLUEPRINT_ADOPTED, blueprint_id,
+        BlueprintAdopted(
+            blueprint_id=blueprint_id, framework=plan.framework,
+            target_chapter_count=plan.target_chapter_count, genre=plan.genre,
+            beats=beats, obligatory_scenes=list(plan.obligatory_scenes), note=plan.note,
+        ),
+    )
+
+
+async def commit_brief_intents(
+    committer,
+    agent_name: str,
+    intents: list[BriefIntent],
+    open_brief_ids: list[ChapterBriefRecord],
+    drafted_chapter_count: int,
+    active_thread_ids: set[str],
+    active_beat_ids: set[str],
+    active_promise_ids: set[str],
+) -> None:
+    """Turn agent-declared BriefIntent entries into chapter_brief.* commits.
+
+    `draft`: `target_ordinal` must exceed `drafted_chapter_count` and be
+    positive -- plan the future, not the past or present; a violating
+    ordinal is dropped with a logged warning. A blank `goal` is dropped
+    with a logged warning. Cited thread/beat/promise ids are filtered
+    per-list against the active sets (unknown ids dropped from that list
+    with one logged warning; the brief itself is kept). If `open_brief_ids`
+    (the caller's current open briefs) already has one targeting the same
+    ordinal, that brief is superseded first (chapter_brief.superseded,
+    superseded_by_brief_id = the new brief's id) before the new brief's
+    chapter_brief.drafted commits -- one open brief per ordinal is a
+    helper-enforced invariant. `brief_id` mints via `str(uuid.uuid4())`.
+
+    `supersede`: `id` must be present among `open_brief_ids`' ids, else
+    dropped with a logged warning; commits chapter_brief.superseded with
+    `superseded_by_brief_id=""` (nothing replaces it).
+
+    No-op on an empty list.
+    """
+    open_by_id = {b.id: b for b in open_brief_ids}
+    open_by_ordinal = {b.target_ordinal: b for b in open_brief_ids}
+    for intent in intents:
+        if intent.action == "draft":
+            if intent.target_ordinal <= 0 or intent.target_ordinal <= drafted_chapter_count:
+                logger.warning(
+                    "%s: dropped brief draft for target_ordinal %r (drafted_chapter_count=%r)",
+                    agent_name, intent.target_ordinal, drafted_chapter_count,
+                )
+                continue
+            if not intent.goal.strip():
+                logger.warning("%s: dropped brief draft with blank goal", agent_name)
+                continue
+            threads_to_touch = [
+                _normalize_id(t) for t in intent.threads_to_touch if _normalize_id(t) in active_thread_ids
+            ]
+            beats_to_hit = [
+                _normalize_id(b) for b in intent.beats_to_hit if _normalize_id(b) in active_beat_ids
+            ]
+            promises_to_progress = [
+                _normalize_id(p) for p in intent.promises_to_progress if _normalize_id(p) in active_promise_ids
+            ]
+            if (
+                len(threads_to_touch) != len(intent.threads_to_touch)
+                or len(beats_to_hit) != len(intent.beats_to_hit)
+                or len(promises_to_progress) != len(intent.promises_to_progress)
+            ):
+                logger.warning(
+                    "%s: brief draft for ordinal %r cited unknown thread/beat/promise id(s), dropped from lists",
+                    agent_name, intent.target_ordinal,
+                )
+            brief_id = str(uuid.uuid4())
+            existing = open_by_ordinal.get(intent.target_ordinal)
+            if existing is not None:
+                await committer.commit(
+                    agent_name, EventType.CHAPTER_BRIEF_SUPERSEDED, existing.id,
+                    ChapterBriefSuperseded(brief_id=existing.id, superseded_by_brief_id=brief_id),
+                )
+            await committer.commit(
+                agent_name, EventType.CHAPTER_BRIEF_DRAFTED, brief_id,
+                ChapterBriefDrafted(
+                    brief_id=brief_id, target_ordinal=intent.target_ordinal, goal=intent.goal,
+                    pov_character_id=intent.pov_character_id,
+                    threads_to_touch=threads_to_touch, beats_to_hit=beats_to_hit,
+                    promises_to_progress=promises_to_progress,
+                    value_shift=intent.value_shift, planned_outcome=intent.planned_outcome,
+                    synopsis=intent.synopsis,
+                ),
+            )
+            open_by_ordinal[intent.target_ordinal] = ChapterBriefRecord(
+                id=brief_id, target_ordinal=intent.target_ordinal, goal=intent.goal,
+            )
+            continue
+        # supersede
+        brief_id = _normalize_id(intent.id)
+        if brief_id not in open_by_id:
+            logger.warning(
+                "%s: dropped brief supersede citing unknown/non-open id %r", agent_name, intent.id
+            )
+            continue
+        await committer.commit(
+            agent_name, EventType.CHAPTER_BRIEF_SUPERSEDED, brief_id,
+            ChapterBriefSuperseded(brief_id=brief_id, superseded_by_brief_id=""),
+        )
+
+
+async def commit_beat_intents(
+    committer,
+    agent_name: str,
+    intents: list[BeatIntent],
+    active_beat_ids: set[str],
+    valid_chapter_ids: set[str],
+) -> None:
+    """Turn agent-declared BeatIntent entries into beat.fulfilled commits.
+
+    `beat_id` not present in `active_beat_ids` is dropped with a logged
+    warning. A non-blank `chapter_id` not present in `valid_chapter_ids`
+    is dropped with a logged warning (a blank `chapter_id` clears a prior
+    fulfillment and is always valid). No-op on an empty list.
+    """
+    for intent in intents:
+        beat_id = _normalize_id(intent.beat_id)
+        if beat_id not in active_beat_ids:
+            logger.warning(
+                "%s: dropped beat fulfill citing unknown beat id %r", agent_name, intent.beat_id
+            )
+            continue
+        chapter_id = _normalize_id(intent.chapter_id)
+        if chapter_id and chapter_id not in valid_chapter_ids:
+            logger.warning(
+                "%s: dropped beat fulfill citing unknown chapter id %r", agent_name, intent.chapter_id
+            )
+            continue
+        await committer.commit(
+            agent_name, EventType.BEAT_FULFILLED, beat_id,
+            BeatFulfilled(beat_id=beat_id, chapter_id=chapter_id, note=intent.note),
+        )
+
+
+async def commit_resolution_plan_intents(
+    committer,
+    agent_name: str,
+    intents: list[ResolutionPlanIntent],
+    active_thread_ids: set[str],
+    unrevealed_secret_ids: set[str],
+) -> None:
+    """Turn agent-declared ResolutionPlanIntent entries into
+    thread.resolution_planned / secret.reveal_planned commits.
+
+    An invalid window (not `lo==hi==0` and not `1 <= lo <= hi`) is dropped
+    with a logged warning -- an invalid window must never enter canon. An
+    id not present in the relevant active set (`active_thread_ids` for
+    kind="thread", `unrevealed_secret_ids` for kind="secret") is dropped
+    with a logged warning. No-op on an empty list.
+    """
+    for intent in intents:
+        if not (intent.window_lo == intent.window_hi == 0 or 1 <= intent.window_lo <= intent.window_hi):
+            logger.warning(
+                "%s: dropped resolution plan for %r citing invalid window %r-%r",
+                agent_name, intent.id, intent.window_lo, intent.window_hi,
+            )
+            continue
+        target_id = _normalize_id(intent.id)
+        if intent.kind == "thread":
+            if target_id not in active_thread_ids:
+                logger.warning(
+                    "%s: dropped thread resolution plan citing unknown id %r", agent_name, intent.id
+                )
+                continue
+            await committer.commit(
+                agent_name, EventType.THREAD_RESOLUTION_PLANNED, target_id,
+                ThreadResolutionPlanned(
+                    id=target_id, window_lo=intent.window_lo, window_hi=intent.window_hi,
+                    planned_payoff_note=intent.note,
+                ),
+            )
+        else:
+            if target_id not in unrevealed_secret_ids:
+                logger.warning(
+                    "%s: dropped secret reveal plan citing unknown id %r", agent_name, intent.id
+                )
+                continue
+            await committer.commit(
+                agent_name, EventType.SECRET_REVEAL_PLANNED, target_id,
+                SecretRevealPlanned(id=target_id, window_lo=intent.window_lo, window_hi=intent.window_hi),
+            )

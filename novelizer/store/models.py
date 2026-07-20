@@ -132,6 +132,70 @@ class PromiseRecord(BaseModel):
     last_chapter_id: str = ""
 
 
+class BriefStatus(StrEnum):
+    open = "open"
+    superseded = "superseded"
+    fulfilled = "fulfilled"
+
+
+class BeatRecord(BaseModel):
+    """Read-side row for a plot beat in a blueprint, built and rebuilt by the
+    Projector from the beat.* event log. Beats represent structural anchors
+    within a story framework (e.g., turning points, set pieces), indexed to
+    an ideal position and matched against chapter structure.
+    """
+
+    id: str
+    blueprint_id: str
+    slug: str
+    name: str
+    ideal_pct: float
+    tolerance_pct: float
+    expected_polarity: str = ""
+    fulfilled_by_chapter_id: str = ""
+    note: str = ""
+
+
+class BlueprintRecord(BaseModel):
+    """Read-side row for a story blueprint, built and rebuilt by the Projector
+    from the blueprint.* event log. Blueprints define structural frameworks
+    (e.g., three-act, hero's journey) and provide scaffolding for chapter
+    planning. `active` is set-once per adoption; a new blueprint adoption
+    supersedes the prior active blueprint.
+    """
+
+    id: str
+    framework: str
+    target_chapter_count: int
+    genre: str = ""
+    obligatory_scenes: list[str] = Field(default_factory=list)
+    active: bool = True
+    note: str = ""
+
+
+class ChapterBriefRecord(BaseModel):
+    """Read-side row for one planned chapter brief, built and rebuilt by the
+    Projector from the chapter_brief.* event log. Briefs capture high-level
+    structural and narrative intentions for a chapter before prose is drafted,
+    including goals, viewpoint, threads and promises to weave, and plot beats
+    to hit. `superseded` and `fulfilled` are absorbing states.
+    """
+
+    id: str
+    target_ordinal: int
+    goal: str
+    pov_character_id: str = ""
+    threads_to_touch: list[str] = Field(default_factory=list)
+    beats_to_hit: list[str] = Field(default_factory=list)
+    promises_to_progress: list[str] = Field(default_factory=list)
+    value_shift: str = ""
+    planned_outcome: str = ""
+    synopsis: str = ""
+    status: BriefStatus = BriefStatus.open
+    superseded_by_brief_id: str = ""
+    fulfilled_by_chapter_id: str = ""
+
+
 class ThemeRecord(BaseModel):
     """Read-side row for a theme/motif, built and rebuilt by the Projector
     from the theme.* event log (see novelizer/canon/projector.py). Unlike

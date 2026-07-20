@@ -12,7 +12,13 @@ _CANON_EVENTS = _RETCON_EVENTS | {
     EventType.CHAPTER_REVISED,
     EventType.SECRET_REVEALED,
 }
+_ALWAYS_GATED = {EventType.BLUEPRINT_ADOPTED}
 _NEVER_GATED = {
+    EventType.BLUEPRINT_RETARGETED,
+    EventType.BEAT_FULFILLED,
+    EventType.CHAPTER_BRIEF_DRAFTED,
+    EventType.CHAPTER_BRIEF_SUPERSEDED,
+    EventType.CHAPTER_BRIEF_FULFILLED,
     EventType.DIRECTOR_SIGNAL_CREATED,
     EventType.DIRECTOR_SIGNAL_CONSUMED,
     EventType.AGENT_REMARKED,
@@ -58,6 +64,10 @@ class AutonomyPolicy:
         self._read = read_store
 
     async def is_gated(self, agent_name: str, event_type: str) -> bool:
+        if event_type in _ALWAYS_GATED:
+            # adopting a shape re-frames the whole book — the Director signs off
+            # at every autonomy level.
+            return True
         if event_type in _NEVER_GATED:
             return False
         state = await self._read.get_autonomy_state()

@@ -10,6 +10,8 @@ from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.store.models import Chapter
 from novelizer.run_context import current_run_id
+from novelizer.canon.events import BlueprintAdopted
+from novelizer.canon.proposal_service import ProposalService
 
 
 @pytest.fixture
@@ -120,6 +122,34 @@ async def test_commit_without_ambient_run_id_stores_none():
     finally:
         await events.close()
         os.unlink(path)
+
+
+async def test_committer_routes_blueprint_adoption_to_proposal_even_at_full_auto(gating_stack):
+    events, proj, read = gating_stack
+    await events.append(EventType.AUTONOMY_CHANGED, "singleton",
+                         AutonomyState(global_level=AutonomyLevel.full_auto))
+    await proj.catch_up()
+    committer = GatingCommitter(events, AutonomyPolicy(read))
+    bp = BlueprintAdopted(blueprint_id="bp1", framework="three_act", target_chapter_count=30)
+    await committer.commit("plotter", EventType.BLUEPRINT_ADOPTED, "bp1", bp)
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    assert all(e.event_type != EventType.BLUEPRINT_ADOPTED for e in log)
+    assert any(e.event_type == EventType.PROPOSAL_CREATED for e in log)
+    assert await read.get_active_blueprint() is None
+
+    props = await read.list_proposals(status="open")
+    assert len(props) == 1
+    assert props[0].target_event_type == EventType.BLUEPRINT_ADOPTED
+    assert props[0].target_aggregate_id == "bp1"
+
+    await ProposalService(events).approve(props[0])
+    await proj.catch_up()
+
+    blueprint = await read.get_active_blueprint()
+    assert blueprint is not None
+    assert blueprint.id == "bp1"
 
 
 async def test_gated_proposal_is_also_stamped_with_run_id():

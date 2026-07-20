@@ -125,3 +125,54 @@ def test_promise_event_payloads_construct_with_defaults():
     assert EventType.PROMISE_MADE == "promise.made"
     assert EventType.THREAD_RESOLUTION_PLANNED == "thread.resolution_planned"
     assert EventType.SECRET_REVEAL_PLANNED == "secret.reveal_planned"
+
+
+def test_blueprint_beat_brief_event_payloads_construct_with_defaults():
+    from novelizer.canon.events import (
+        EventType, BeatSpec, BlueprintAdopted, BlueprintRetargeted,
+        BeatFulfilled, ChapterBriefDrafted, ChapterBriefSuperseded,
+        ChapterBriefFulfilled,
+    )
+    # Test BeatSpec defaults
+    bs = BeatSpec(beat_id="b-intro", slug="intro", name="Intro", ideal_pct=0.05, tolerance_pct=0.02)
+    assert bs.expected_polarity == ""
+
+    # Test BlueprintAdopted defaults
+    adopted = BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=24)
+    assert adopted.genre == ""
+    assert adopted.beats == []
+    assert adopted.obligatory_scenes == []
+    assert adopted.note == ""
+
+    # Test BlueprintRetargeted
+    retargeted = BlueprintRetargeted(blueprint_id="bp1", target_chapter_count=26)
+
+    # Test BeatFulfilled defaults
+    bf = BeatFulfilled(beat_id="b-intro")
+    assert bf.chapter_id == ""
+    assert bf.note == ""
+
+    # Test ChapterBriefDrafted defaults
+    cbd = ChapterBriefDrafted(brief_id="br1", target_ordinal=3, goal="save the city")
+    assert cbd.pov_character_id == ""
+    assert cbd.threads_to_touch == []
+    assert cbd.beats_to_hit == []
+    assert cbd.promises_to_progress == []
+    assert cbd.value_shift == ""
+    assert cbd.planned_outcome == ""
+    assert cbd.synopsis == ""
+
+    # Test ChapterBriefSuperseded defaults
+    cbs = ChapterBriefSuperseded(brief_id="br1")
+    assert cbs.superseded_by_brief_id == ""
+
+    # Test ChapterBriefFulfilled
+    cbf = ChapterBriefFulfilled(brief_id="br1", chapter_id="ch3")
+
+    # Test constants
+    assert EventType.BLUEPRINT_ADOPTED == "blueprint.adopted"
+    assert EventType.BLUEPRINT_RETARGETED == "blueprint.retargeted"
+    assert EventType.BEAT_FULFILLED == "beat.fulfilled"
+    assert EventType.CHAPTER_BRIEF_DRAFTED == "chapter_brief.drafted"
+    assert EventType.CHAPTER_BRIEF_SUPERSEDED == "chapter_brief.superseded"
+    assert EventType.CHAPTER_BRIEF_FULFILLED == "chapter_brief.fulfilled"
