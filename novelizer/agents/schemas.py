@@ -68,6 +68,22 @@ class ThreadIntent(BaseModel):
     note: str = ""
 
 
+class PromiseIntent(BaseModel):
+    """One agent-declared ledger-promise action from structured output.
+
+    `make` mints (name required); progress/pay/release cite an existing id
+    exactly. `release` is the red-herring exit.
+    """
+
+    action: Literal["make", "progress", "pay", "release"]
+    name: str = ""
+    id: str = ""
+    kind: Literal["foreshadow", "plant", "red_herring"] = "foreshadow"
+    description: str = ""
+    thread_id: str = ""
+    note: str = ""
+
+
 class ThemeIntent(BaseModel):
     """One agent-declared theme action from structured output.
 
