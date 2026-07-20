@@ -17,6 +17,7 @@ from textual.widgets import Static, TabbedContent, TabPane
 from novelizer.tui.widgets.brain_model import (
     alarm_strip,
     causeway_tab,
+    outline_tab,
     secrets_tab,
     shape_tab,
     threads_tab,
@@ -42,6 +43,8 @@ class BrainPanel(Vertical):
                 yield Static("", id="secrets_body")
             with TabPane("4 Cause", id="tab_causeway"):
                 yield Static("", id="causeway_body")
+            with TabPane("5 Outline", id="tab_outline"):
+                yield Static("", id="outline_body")
         yield Static("", id="brain_strip")
 
     async def refresh_from(self, read, *, threshold: int, delta: float) -> None:
@@ -63,6 +66,9 @@ class BrainPanel(Vertical):
             secret_records, await read.list_characters(), await read.knowledge_matrix()
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
+        outline = outline_tab(
+            blueprint, beats, await read.list_briefs(), await read.list_threads(), chapters
+        )
 
         shape_rows = [
             r for r in (shape.spark, shape.target, shape.markers, shape.meta) if r is not None
@@ -71,6 +77,7 @@ class BrainPanel(Vertical):
         self.query_one("#threads_body", Static).update(_joined(threads.lines))
         self.query_one("#secrets_body", Static).update(_joined(secrets.lines))
         self.query_one("#causeway_body", Static).update(_joined(cause.lines))
+        self.query_one("#outline_body", Static).update(_joined(outline.lines))
         self.query_one("#brain_strip", Static).update(
             alarm_strip(shape.alarm_count, threads.alarm_count, secrets.alarm_count, cause.alarm_count)
         )

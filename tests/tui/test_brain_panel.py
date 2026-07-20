@@ -5,7 +5,7 @@ from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.tui.widgets.brain_model import (
-    CAUSEWAY_EMPTY, SECRETS_EMPTY, SHAPE_EMPTY, THREADS_EMPTY,
+    CAUSEWAY_EMPTY, OUTLINE_EMPTY, SECRETS_EMPTY, SHAPE_EMPTY, THREADS_EMPTY,
 )
 
 
@@ -32,7 +32,7 @@ async def test_brain_panel_replaces_the_four_stacked_panes():
             assert str(panel.border_title) == "STORY BRAIN"
             tabs = app.query_one("#brain_tabs", TabbedContent)
             assert tabs.active == "tab_shape"
-            for pane_id in ("tab_shape", "tab_threads", "tab_secrets", "tab_causeway"):
+            for pane_id in ("tab_shape", "tab_threads", "tab_secrets", "tab_causeway", "tab_outline"):
                 assert tabs.get_pane(pane_id) is not None
             for old_id in ("#thread_board", "#story_shape", "#who_knows_what", "#causeway"):
                 assert not app.query(old_id)
@@ -55,6 +55,8 @@ async def test_keys_1_to_4_switch_brain_tabs():
             assert tabs.active == "tab_secrets"
             await pilot.press("4")
             assert tabs.active == "tab_causeway"
+            await pilot.press("5")
+            assert tabs.active == "tab_outline"
             await pilot.press("1")
             assert tabs.active == "tab_shape"
     finally:
@@ -74,6 +76,7 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert str(app.query_one("#threads_body", Static).renderable) == THREADS_EMPTY
             assert str(app.query_one("#secrets_body", Static).renderable) == SECRETS_EMPTY
             assert str(app.query_one("#causeway_body", Static).renderable) == CAUSEWAY_EMPTY
+            assert str(app.query_one("#outline_body", Static).renderable) == OUTLINE_EMPTY
             assert not app.query("#shape_spark")   # the widget is gone entirely
             assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause"
     finally:

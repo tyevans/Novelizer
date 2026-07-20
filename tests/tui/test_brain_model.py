@@ -1,7 +1,17 @@
 from hypothesis import given, strategies as st
 
-from novelizer.store.models import BeatRecord, BlueprintRecord, Chapter, StructureScore, ThreadRecord, ThreadState
+from novelizer.store.models import (
+    BeatRecord,
+    BlueprintRecord,
+    Chapter,
+    ChapterBriefRecord,
+    StructureScore,
+    ThreadRecord,
+    ThreadState,
+)
 from novelizer.tui.widgets.brain_model import (
+    NAME_WIDTH,
+    OUTLINE_EMPTY,
     SHAPE_EMPTY,
     SHAPE_GUTTER,
     SPARK_LEVELS,
@@ -10,6 +20,7 @@ from novelizer.tui.widgets.brain_model import (
     age_bar,
     chapter_label,
     chapter_number,
+    outline_tab,
     shape_tab,
     spark_char,
     thread_line,
@@ -725,6 +736,132 @@ def test_alarm_strip_matches_spec_format():
 
 def test_alarm_strip_quiet_shows_bare_labels():
     assert alarm_strip(0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause"
+
+
+def test_outline_tab_empty_state_no_blueprint():
+    tab = outline_tab(None, [], [], [], [])
+    assert len(tab.lines) == 1
+    assert tab.lines[0].plain == OUTLINE_EMPTY
+    assert str(tab.lines[0].style) == "dim"
+    assert tab.alarm_count == 0
+
+
+def test_outline_tab_header_line():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20, genre="mystery")
+    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(20)]))
+    assert tab.lines[0].plain == "three_act · target 20 ch · mystery"
+    assert str(tab.lines[0].style) == "dim"
+
+
+def test_outline_tab_beat_strip_one_of_each_glyph():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    chs = _chapters(*[f"C{i}" for i in range(20)])
+    beats = [
+        BeatRecord(id="fulfilled-in", blueprint_id="b1", slug="catalyst", name="Catalyst",
+                   ideal_pct=0.10, tolerance_pct=0.05, fulfilled_by_chapter_id="c2"),
+        BeatRecord(id="fulfilled-off", blueprint_id="b1", slug="midpoint", name="Midpoint",
+                   ideal_pct=0.50, tolerance_pct=0.05, fulfilled_by_chapter_id="c15"),
+        BeatRecord(id="late", blueprint_id="b1", slug="climax", name="Climax",
+                   ideal_pct=0.90, tolerance_pct=0.05),
+        BeatRecord(id="pending", blueprint_id="b1", slug="denouement", name="Denouement",
+                   ideal_pct=0.99, tolerance_pct=0.05),
+    ]
+    tab = outline_tab(blueprint, beats, [], [], chs)
+    beat_lines = tab.lines[1:5]
+    assert beat_lines[0].plain.startswith("✓ Catalyst @ch")
+    assert beat_lines[1].plain.startswith("≈ Midpoint @ch")
+    assert beat_lines[2].plain.startswith("! Climax @ch")
+    assert str(beat_lines[2].style) == ALARM_STYLE
+    assert beat_lines[3].plain.startswith("· Denouement @ch")
+    assert tab.alarm_count == 1  # only the late beat
+
+
+def test_outline_tab_grid_rows_are_non_terminal_threads_only():
+    threads = [
+        ThreadRecord(id="a", name="Open A", state=ThreadState.touched, last_chapter_id="c1"),
+        ThreadRecord(id="b", name="Open B", state=ThreadState.planted, last_chapter_id="c2"),
+        ThreadRecord(id="c", name="Done C", state=ThreadState.paid_off, last_chapter_id="c1"),
+    ]
+    chs = _chapters("One", "Two")
+    tab = outline_tab(None, [], [], threads, chs)
+    # No blueprint short-circuits to the empty state, so exercise via a blueprint.
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=2)
+    tab = outline_tab(blueprint, [], [], threads, chs)
+    grid_lines = tab.lines[1:]
+    assert len(grid_lines) == 2
+    assert grid_lines[0].plain.startswith("Open A".ljust(NAME_WIDTH))
+    assert grid_lines[1].plain.startswith("Open B".ljust(NAME_WIDTH))
+
+
+def test_outline_tab_grid_window_span_renders_shade():
+    thread = ThreadRecord(id="t", name="Waiting", state=ThreadState.touched,
+                           last_chapter_id="", window_lo=2, window_hi=4)
+    chs = _chapters("One", "Two", "Three", "Four")
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=4)
+    tab = outline_tab(blueprint, [], [], [thread], chs)
+    row = tab.lines[1].plain
+    cells = row[NAME_WIDTH:].split(" ")
+    cells = [c for c in cells if c]
+    assert cells == ["·", "░", "░", "░"]
+
+
+def test_outline_tab_grid_future_columns_are_dim():
+    thread = ThreadRecord(id="t", name="Waiting", state=ThreadState.touched, last_chapter_id="")
+    chs = _chapters("One", "Two")
+    briefs = [ChapterBriefRecord(id="br1", target_ordinal=5, goal="push forward")]
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=5)
+    tab = outline_tab(blueprint, [], briefs, [thread], chs)
+    row = tab.lines[1]
+    cell_spans = [s for s in row.spans]
+    dim_ranges = [(s.start, s.end) for s in cell_spans if str(s.style) == "dim"]
+    # columns 3, 4, 5 (index past len(chapters)=2) render dim.
+    assert row.plain[dim_ranges[0][0]:dim_ranges[0][1]] == "·"
+    assert len(dim_ranges) == 3
+
+
+def test_outline_tab_briefs_strip_and_stale_alarm():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=5)
+    chs = _chapters("One", "Two", "Three")
+    briefs = [
+        ChapterBriefRecord(id="stale", target_ordinal=2, goal="already past"),
+        ChapterBriefRecord(id="future", target_ordinal=5, goal="not yet"),
+    ]
+    tab = outline_tab(blueprint, [], briefs, [], chs)
+    stale_line, future_line = tab.lines[-2], tab.lines[-1]
+    assert stale_line.plain == "! ch 2: already past"
+    assert str(stale_line.style) == ALARM_STYLE
+    assert future_line.plain == "ch 5: not yet"
+    assert str(future_line.style) == "dim"
+    assert tab.alarm_count == 1
+
+
+def test_outline_tab_alarm_count_sums_late_beats_and_stale_briefs():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    chs = _chapters(*[f"C{i}" for i in range(20)])
+    beats = [
+        BeatRecord(id="late", blueprint_id="b1", slug="climax", name="Climax",
+                   ideal_pct=0.90, tolerance_pct=0.05),
+    ]
+    briefs = [
+        ChapterBriefRecord(id="stale1", target_ordinal=1, goal="a"),
+        ChapterBriefRecord(id="stale2", target_ordinal=2, goal="b"),
+    ]
+    tab = outline_tab(blueprint, beats, briefs, [], chs)
+    assert tab.alarm_count == 3
+
+
+def test_outline_tab_ignores_superseded_and_fulfilled_briefs():
+    from novelizer.store.models import BriefStatus
+
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=5)
+    chs = _chapters("One", "Two", "Three")
+    briefs = [
+        ChapterBriefRecord(id="s", target_ordinal=1, goal="a", status=BriefStatus.superseded),
+        ChapterBriefRecord(id="f", target_ordinal=1, goal="b", status=BriefStatus.fulfilled),
+    ]
+    tab = outline_tab(blueprint, [], briefs, [], chs)
+    assert len(tab.lines) == 1  # header only, no briefs strip lines
+    assert tab.alarm_count == 0
 
 
 def test_alarm_strip_alarm_segments_are_alarm_styled():
