@@ -1,10 +1,10 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
-from novelizer.brain.context import open_retcons_note
+from novelizer.brain.context import chapter_map_note, open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
@@ -21,7 +21,7 @@ entries, characters, and chapter excerpts for contradictions, anachronisms, or l
 Return retcon_requests, each with a description (what contradicts what), conflicting_entry_ids (the ids
 of the conflicting records), and a proposed_resolution. You may also be shown retcon requests already
 filed and still open: do not re-report those issues, even reworded. Return an empty list if you find
-nothing new."""
+nothing new.""" + PASS_PROMPT_INSTRUCTION
 
 MINING_SYSTEM_PROMPT = """You are the prose-mining pass of the Continuity Checker for a living fictional
 world. Read one chapter's prose plus the current knowledge matrix, active secret/thread ids, and causal
@@ -53,14 +53,25 @@ class ContinuityChecker(BaseAgent):
         event_store: EventStore,
         interval: int = 900,
         personality: str = "",
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="continuity_checker", personality=personality)
         self._mining_runner = mining_runner
         self._events = event_store
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
-        return max(0.1, 1.0 - open_retcons / 5)
+        return await self._gate_on_watermark(max(0.1, 1.0 - open_retcons / 5))
+
+    async def _fingerprint(self) -> tuple:
+        chapters = await self._read.list_chapters()
+        mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+        already_mined = already_mined_chapter_ids(mined_events)
+        unmined = sum(1 for c in chapters if c.id not in already_mined)
+        refs = await self._read.list_secret_references()
+        edges = await self._read.list_causal_edges()
+        return (len(chapters), chapters[-1].id if chapters else "", unmined, len(refs), len(edges))
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
@@ -93,10 +104,14 @@ class ContinuityChecker(BaseAgent):
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
         world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
         chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
-        chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
+        if self.pull_mode:
+            chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+        else:
+            chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
+            chapters_block = f"Recent chapters:\n{chapters}"
+        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\n{chapters_block}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         out = result.get("structured_response")
 
@@ -315,8 +330,9 @@ class ContinuityChecker(BaseAgent):
     ) -> None:
         open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
         seen_descriptions = {r.description for r in open_reqs}
+        deterministic_filed = 0
 
-        if out is not None:
+        if out is not None and not out.no_action:
             for r in out.retcon_requests:
                 if r.description in seen_descriptions:
                     continue
@@ -337,6 +353,7 @@ class ContinuityChecker(BaseAgent):
                 proposed_resolution="Review whether the reference should be removed or a learn/reveal event added.",
             )
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+            deterministic_filed += 1
 
         for paradox in find_paradoxes(ctx.get("causal_edges", []), ctx.get("chapter_order", [])):
             description = paradox_description(paradox)
@@ -349,21 +366,59 @@ class ContinuityChecker(BaseAgent):
                 proposed_resolution="Review the causal edge for an ordering or cycle correction.",
             )
             await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+            deterministic_filed += 1
 
         for chapter_id, mined_out in (mined_facts or {}).items():
             await self._commit_mined_facts(chapter_id, mined_out, ctx, seen_descriptions)
 
+        if out is not None and out.no_action:
+            await self._remark(out.feed_note or DEFAULT_PASS_REMARK)
+            if not mined_facts and deterministic_filed == 0:
+                self.note_pass()
+
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         out, mined = await self.work(ctx)
         await self.commit(out, ctx, mined)
+        fp_now = await self._fingerprint()
+        # unmined > 0 at record time means a mining pass failed (its "will
+        # retry next poll" contract requires the gate stay open) or new prose
+        # arrived mid-run; moved chapter components likewise mean this run
+        # never saw the newest chapter. Either way, leave the watermark clear.
+        # Own stamps/refs/edges are absorbed via fp_now otherwise.
+        if fp_now[2] == 0 and fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
-def build_continuity_checker_runner(settings, callbacks=None):
+def build_continuity_checker_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
+    from novelizer.agents.author import RETRIEVAL_NOTE
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+    # See build_author_runner: tool executions run under invoke-time graph
+    # config, not constructor callbacks on the model, so telemetry callbacks
+    # are bound graph-scope via with_config below.
+    model = build_chat_model(
+        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+        settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
+    if backend is not None:
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph
 
 
 def build_continuity_mining_runner(settings, callbacks=None):

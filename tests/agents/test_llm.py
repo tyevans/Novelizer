@@ -35,7 +35,7 @@ def test_runner_builders_pass_llm_max_tokens(monkeypatch, module, builder):
     import novelizer.agents.llm as llm_mod
     captured = {}
 
-    def fake_build(model, base_url, api_key, temperature=0.8, max_tokens=None, callbacks=None):
+    def fake_build(model, base_url, api_key, temperature=0.8, max_tokens=None, callbacks=None, streaming=None):
         captured["max_tokens"] = max_tokens
         return object()
 

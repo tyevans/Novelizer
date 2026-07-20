@@ -852,3 +852,183 @@ async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
+
+
+async def test_continuity_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    assert await agent.readiness() > 0.0
+    await agent.run_once()      # mines ch1, stamps chapter.mined
+    await proj.catch_up()
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch2", Chapter(id="ch2", title="Two", prose="more"))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+async def test_continuity_pass_skips_llm_retcons_but_still_mines(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    out = ContinuityOutput(no_action=True,
+                           retcon_requests=[RetconDraft(description="phantom", proposed_resolution="x")])
+    agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    # LLM retcon ignored on a pass...
+    assert await read.list_retcon_requests(status=RetconStatus.open) == []
+    # ...but the deterministic mining pass still ran and stamped the chapter.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert [e.payload["chapter_id"] for e in mined] == ["ch1"]
+    # Mining WAS deterministic work, so no backoff this run.
+    assert agent._backoff_until == 0.0
+
+
+async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    quiet = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    await quiet.run_once()      # first run mines ch1
+    passing = ContinuityChecker(FakeRunner(ContinuityOutput(no_action=True, feed_note="All threads hold.")),
+                                FakeRunner(MinedFactsOutput()), read, committer, events)
+    await passing.run_once()    # nothing left to mine, no leaks/paradoxes
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert remarks[-1].payload["note"] == "All threads hold."
+    import time
+    assert passing.seconds_until_ready(time.monotonic()) > passing.interval
+
+
+class NoneMiningRunner:
+    async def ainvoke(self, inputs):
+        return {"structured_response": None}
+
+
+async def test_continuity_failed_mining_keeps_gate_open(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), NoneMiningRunner(), read, committer, events)
+    await agent.run_once()
+    # ch1 was not stamped chapter.mined; the "retry next poll" contract
+    # requires readiness to stay open, not gate to 0.0.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert mined == []
+    assert await agent.readiness() > 0.0
+
+
+async def test_checker_pull_mode_false_keeps_chapter_excerpt_block(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text" * 20))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Recent chapters:" in sent
+    assert "Chapter index:" not in sent
+    assert "secret prose text" in sent
+
+
+async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text"))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Chapter index:" in sent
+    assert "Recent chapters:" not in sent
+    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "secret prose text" not in sent
+
+
+def test_build_continuity_checker_runner_without_backend_stays_constructible():
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    runner = build_continuity_checker_runner(FakeSettings())
+    assert runner is not None
+
+
+def test_build_continuity_checker_runner_with_canon_backend_builds():
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+
+
+def test_build_continuity_checker_runner_with_backend_bounds_recursion():
+    """Fix 3: pull-mode runners must cap the tool loop."""
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50
+
+
+def test_build_continuity_checker_runner_binds_callbacks_at_graph_scope_not_model():
+    """Fix 1: telemetry callbacks must be bound on the graph so ToolNode
+    executions under invoke-time config see them."""
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+    from langchain_core.callbacks.base import BaseCallbackHandler
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    handler = BaseCallbackHandler()
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(
+        FakeSettings(), callbacks=[handler], backend=backend, tools=[],
+    )
+    assert handler in (runner.config.get("callbacks") or [])
+
+
+def test_build_continuity_mining_runner_construction_unchanged():
+    from novelizer.agents.continuity_checker import build_continuity_mining_runner
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    runner = build_continuity_mining_runner(FakeSettings())
+    assert runner is not None

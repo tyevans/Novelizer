@@ -81,3 +81,77 @@ async def test_commit_emits_remark_when_feed_note_present(stack):
     assert len(remarks) == 1
     assert remarks[0].payload["agent_name"] == "world_architect"
     assert remarks[0].payload["note"] == "Another corner of the map, filled in."
+
+
+async def test_architect_no_action_pass_commits_nothing_and_backs_off(stack):
+    events, proj, read, committer = stack
+    draft = WorldEntriesDraft(no_action=True, feed_note="The world is rich enough — let the story breathe.")
+    agent = WorldArchitect(FakeRunner(draft), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    assert await read.list_world_entries() == []
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert [e.payload["note"] for e in remarks] == ["The world is rich enough — let the story breathe."]
+    import time
+    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+
+
+async def test_architect_pass_ignored_when_director_seed_pending(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import DirectorSignal, SignalKind
+    sig = DirectorSignal(kind=SignalKind.seed, body="a drowned city", target_agent="world_architect")
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
+    await proj.catch_up()
+    draft = WorldEntriesDraft(no_action=True)
+    agent = WorldArchitect(FakeRunner(draft), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    # The seed must not be silently dropped by a pass: normal path runs,
+    # the signal is consumed, and no backoff is taken.
+    assert await read.list_unconsumed_signals(target_agent="world_architect") == []
+    assert agent._backoff_until == 0.0
+
+
+async def test_architect_readiness_floor_unchanged(stack):
+    events, proj, read, committer = stack
+    agent = WorldArchitect(FakeRunner(WorldEntriesDraft()), read, committer)
+    await agent.run_once()
+    assert await agent.readiness() >= 0.2
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_world_architect_runner_without_backend_stays_constructible():
+    from novelizer.agents.world_architect import build_world_architect_runner
+
+    runner = build_world_architect_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_world_architect_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.world_architect import build_world_architect_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_world_architect_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert RETRIEVAL_NOTE_BASE.strip() != ""
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_world_architect_runner_with_backend_bounds_recursion():
+    from novelizer.agents.world_architect import build_world_architect_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_world_architect_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50

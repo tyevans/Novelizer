@@ -10,6 +10,7 @@ from novelizer.agents.character_keeper import CharacterKeeper
 from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent
 from novelizer.canon.events import SecretCreated
 from novelizer.store.models import Character, Chapter, RetconStatus
+from novelizer.agents.base import DEFAULT_PASS_REMARK
 
 
 class FakeRunner:
@@ -232,6 +233,33 @@ async def test_work_invokes_runner_when_cast_empty_but_chapters_exist(stack):
     assert "None yet" in sent
 
 
+async def test_work_prompt_includes_characters_introduced_late_in_a_chapter(stack):
+    events, proj, read, committer = stack
+    filler = "The rain kept falling on the empty street outside the chapel. " * 20
+    prose = filler + "Silas Vane stepped out of the shadows and spoke."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" in sent
+
+
+async def test_work_prompt_caps_prose_at_configured_prose_chars(stack):
+    events, proj, read, committer = stack
+    prose = ("x" * 150) + " Silas Vane arrived."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer, prose_chars=100)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" not in sent
+
+
 async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "silas-vane", Character(id="silas-vane", name="Silas Vane", traits="stoic"))
@@ -295,3 +323,129 @@ async def test_retcon_matching_open_description_is_not_refiled(stack):
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     assert len([r for r in open_reqs if r.description == "stoic vs weeping"]) == 1
+
+
+class BoomRunner:
+    async def ainvoke(self, inputs):
+        raise RuntimeError("boom")
+
+
+async def test_keeper_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mira arrives."))
+    await proj.catch_up()
+    out = KeeperOutput(new_characters=[NewCharacter(name="Mira")])
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    assert await agent.readiness() > 0.0
+    await agent.run_once()
+    await proj.catch_up()
+    # Its own minted character must not re-trigger it; no new external state.
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch2", Chapter(id="ch2", title="Two", prose="More."))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+async def test_keeper_failed_run_leaves_watermark_unset(stack):
+    events, proj, read, committer = stack
+    # Seed BOTH a chapter and a character so readiness takes the gated 0.5
+    # path, not the ungated 0.8 cast-bootstrap branch — otherwise this test
+    # would pass even if a failed run wrongly recorded the watermark.
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
+    await proj.catch_up()
+    agent = CharacterKeeper(BoomRunner(), read, committer)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    assert await agent.readiness() == 0.5
+
+
+async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    out = KeeperOutput(no_action=True, new_characters=[NewCharacter(name="Ghost")],
+                       feed_note="All quiet on the cast front — write on.")
+    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    assert await read.list_characters() == []          # populated list ignored on a pass
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert [e.payload["note"] for e in remarks] == ["All quiet on the cast front — write on."]
+    import time
+    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+
+
+async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):
+    events, proj, read, committer = stack
+    agent = CharacterKeeper(FakeRunner(KeeperOutput(no_action=True)), read, committer)
+    await agent.commit(KeeperOutput(no_action=True), {"characters": [], "recent": [], "secrets": [], "hands": []})
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert [e.payload["note"] for e in remarks] == [DEFAULT_PASS_REMARK]
+
+
+class ChapterCommittingRunner(FakeRunner):
+    """Simulates the Author committing a chapter while the Keeper's LLM call
+    is in flight."""
+
+    def __init__(self, out, events, proj):
+        super().__init__(out)
+        self._events = events
+        self._proj = proj
+
+    async def ainvoke(self, inputs):
+        await self._events.append(
+            EventType.CHAPTER_CREATED, "ch-midrun",
+            Chapter(id="ch-midrun", title="Mid-run", prose="Arrived during the run."),
+        )
+        await self._proj.catch_up()
+        return await super().ainvoke(inputs)
+
+
+async def test_keeper_midrun_chapter_is_not_absorbed_by_watermark(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
+    await proj.catch_up()
+    agent = CharacterKeeper(ChapterCommittingRunner(KeeperOutput(), events, proj), read, committer)
+    await agent.run_once()
+    # The mid-run chapter was never analyzed: the watermark must stay clear.
+    assert await agent.readiness() > 0.0
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_character_keeper_runner_without_backend_stays_constructible():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+
+    runner = build_character_keeper_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_character_keeper_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.character_keeper import build_character_keeper_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_character_keeper_runner_with_backend_bounds_recursion():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50

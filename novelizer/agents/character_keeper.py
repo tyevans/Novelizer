@@ -1,7 +1,8 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from novelizer.agents.schemas import KeeperOutput
+from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import open_retcons_note
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
@@ -25,7 +26,7 @@ You receive the current cast (with traits and arcs) and recent prose chapters. Y
 Return new_characters, updated_characters (id + revised arc_status, and any corrected
 traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
 proposed_resolution). You may also be shown retcon requests already filed and still open:
-do not re-report those issues, even reworded."""
+do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
 
 
 class CharacterKeeper(BaseAgent):
@@ -36,8 +37,13 @@ class CharacterKeeper(BaseAgent):
         committer: Committer,
         interval: int = 120,
         personality: str = "",
+        prose_chars: int = 6000,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="character_keeper", personality=personality)
+        # Discovery needs the whole chapter: a character introduced in the
+        # final scene is as canonical as one in the opening line. The cap
+        # only bounds tokens for outlier-length chapters.
+        self._prose_chars = prose_chars
 
     async def readiness(self) -> float:
         chars = await self._read.list_characters()
@@ -46,7 +52,13 @@ class CharacterKeeper(BaseAgent):
             # Prose exists but the cast is empty: bootstrapping the cast is
             # the Keeper's most urgent work — nothing else mints characters.
             return 0.8
-        return 0.5 if (chars and chapters) else 0.2
+        score = 0.5 if (chars and chapters) else 0.2
+        return await self._gate_on_watermark(score)
+
+    async def _fingerprint(self) -> tuple:
+        chapters = await self._read.list_chapters()
+        open_retcons = await self._read.list_retcon_requests(status=RetconStatus.open)
+        return (len(chapters), chapters[-1].id if chapters else "", len(open_retcons))
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
@@ -62,7 +74,7 @@ class CharacterKeeper(BaseAgent):
         if not ctx["characters"] and not ctx["recent"]:
             return None
         chars = "\n".join(f"- {c.name} (id:{c.id}): traits={c.traits}, arc={c.arc_status}" for c in ctx["characters"]) or "None yet."
-        chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:300]}" for c in ctx["recent"]) or "None."
+        chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:self._prose_chars]}" for c in ctx["recent"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
@@ -71,6 +83,10 @@ class CharacterKeeper(BaseAgent):
 
     async def commit(self, out: KeeperOutput | None, ctx: dict) -> None:
         if out is None:
+            return
+        if out.no_action:
+            await self._remark(out.feed_note or DEFAULT_PASS_REMARK)
+            self.note_pass()
             return
         # Re-read the cast at commit time (not from ctx): the LLM call in
         # work() is slow enough that a concurrent cycle may have minted
@@ -132,13 +148,39 @@ class CharacterKeeper(BaseAgent):
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         out = await self.work(ctx)
         await self.commit(out, ctx)
+        fp_now = await self._fingerprint()
+        # The chapter components (count, latest id) are purely external — the
+        # Keeper never writes chapters. If they moved mid-run, this run's
+        # analysis did not cover the new prose: leave the watermark clear so
+        # the next tick re-dispatches. Own retcon filings land in fp_now and
+        # are absorbed.
+        if fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
-def build_character_keeper_runner(settings, callbacks=None):
+def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
+    if backend is not None:
+        model = build_chat_model(
+            settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+            settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+            callbacks=None, streaming=callbacks is not None,
+        )
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=KeeperOutput,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=KeeperOutput)

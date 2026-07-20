@@ -566,3 +566,126 @@ async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(st
         "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
     )
     assert sent == expected
+
+
+async def test_author_pull_mode_false_keeps_previous_chapters_prose_block(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, pull_mode=False)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Previous chapters:" in sent
+    assert "Chapter index:" not in sent
+
+
+async def test_author_pull_mode_true_replaces_prose_with_chapter_map(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, pull_mode=True)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Chapter index:" in sent
+    assert "Previous chapters:" not in sent
+    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "secret prose text" not in sent
+
+
+def test_build_author_runner_without_backend_stays_constructible():
+    from novelizer.agents.author import build_author_runner
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    runner = build_author_runner(FakeSettings())
+    assert runner is not None
+
+
+def test_build_author_runner_with_canon_backend_builds():
+    from novelizer.agents.author import build_author_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_author_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+
+
+def test_build_author_runner_with_backend_bounds_recursion(monkeypatch):
+    """Fix 3: pull-mode runners must cap the tool loop -- an unbounded graph
+    can spin forever chasing tool calls."""
+    from novelizer.agents.author import build_author_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_author_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50
+
+
+def test_build_author_runner_binds_callbacks_at_graph_scope_not_model():
+    """Fix 1: telemetry callbacks must be bound on the graph (via with_config)
+    so ToolNode executions under invoke-time config actually see them --
+    constructor callbacks on the chat model never reach on_tool_start/end."""
+    from novelizer.agents.author import build_author_runner
+    from novelizer.canon_fs.backend import CanonBackend
+    from langchain_core.callbacks.base import BaseCallbackHandler
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    handler = BaseCallbackHandler()
+    backend = CanonBackend(read_store=None)
+    runner = build_author_runner(FakeSettings(), callbacks=[handler], backend=backend, tools=[])
+    assert handler in (runner.config.get("callbacks") or [])
+
+
+def test_retrieval_note_pinned_and_base_split():
+    from novelizer.agents.author import RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE
+
+    assert RETRIEVAL_NOTE == (
+        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
+        "semantic search (search_canon). The chapter list below is an index — read any "
+        "chapter or canon file you need in full before writing. Cite ids exactly as shown "
+        "in frontmatter or search results."
+    )
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    prefix = (
+        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
+        "semantic search (search_canon). "
+    )
+    assert RETRIEVAL_NOTE_BASE.startswith(prefix)
+    assert RETRIEVAL_NOTE.startswith(prefix)
+    suffix = RETRIEVAL_NOTE_BASE[len(prefix):]
+    assert RETRIEVAL_NOTE_BASE == prefix + suffix
+    assert RETRIEVAL_NOTE == (
+        prefix
+        + "The chapter list below is an index — read any chapter or canon file you need "
+        "in full before writing. "
+        + suffix
+    )

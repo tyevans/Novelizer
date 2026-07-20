@@ -173,3 +173,22 @@ dump. Ask:
 
 There's no automated oracle for this judgment — it's the one step in this walkthrough that
 requires you to actually read the book.
+
+## 8. Canon tools (pull agents)
+
+Every LLM agent in the room — the Author, Continuity Checker, chat personas, and the five
+phase-b agents (World Architect, Character Keeper, Editor, Retconner, Structure Analyst) —
+runs with *canon pull tools* by default: a read-only virtual filesystem over the story
+record (`ls`, `read_file`, `grep`, `glob` over `/chapters`, `/characters`, `/world`,
+`/threads`, `/secrets`, `/themes`) plus semantic `search_canon`. Watch the Engine Room for
+`⚒` lines to see an agent researching canon before it writes.
+
+Each agent has a settings flag (global, story, or `NOVELIZER_*` env, like any setting):
+`author_tools_enabled`, `checker_tools_enabled`, `chat_tools_enabled`,
+`world_architect_tools_enabled`, `character_keeper_tools_enabled`, `editor_tools_enabled`,
+`retconner_tools_enabled`, `structure_analyst_tools_enabled` — all default `true`.
+
+Turning one off reverts that agent to its legacy push-only prompt (no canon tools; the
+Author/Checker/chat also revert from the chapter-index map to inline prose excerpts). Use
+this if a small local model handles tool-calling poorly. Flag changes take effect on
+restart — mid-session edits are deliberately inert until then.

@@ -213,6 +213,56 @@ async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequen
         assert not any("telemetry error" in m for m in app.messages)
 
 
+# Prose/prompt text is untrusted: real agent prompts contain sequences like
+# "[system]" and "key=value" inside brackets that Textual's markup parser
+# rejects (MarkupError: "Expected markup value"), which crashed the telemetry
+# loops every refresh. The Engine Room must render such text verbatim.
+_HOSTILE = ("[system]\n[{'type': 'text', 'text': 'set known_id=False if you cannot "
+            "confidently match the fact to an existing\nsecret/thread id.'}]")
+
+
+async def test_prompt_pane_renders_markup_hostile_prompt_verbatim(rt):
+    from novelizer.telemetry.events import LlmCallStarted
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                                LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                               model="qwen", prompt=_HOSTILE))
+        await pilot.pause(0.8)
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
+        assert "known_id=False" in str(app.query_one("#er_prompt").renderable)
+
+
+async def test_stream_pane_renders_markup_hostile_tokens_verbatim(rt):
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text=_HOSTILE))
+        await pilot.pause(0.8)
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
+        from novelizer.tui.widgets.engine_room import EngineRoom
+        assert "known_id=False" in app.query_one("#engine_room", EngineRoom).stream_text()
+
+
+async def test_trace_rows_tolerate_markup_hostile_tool_summaries(rt):
+    from textual.widgets import DataTable
+    from novelizer.telemetry.events import ToolCallStarted
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_STARTED, "r1",
+                                ToolCallStarted(run_id="r1", agent_name="author",
+                                                tool_name="read",
+                                                input_summary="path=[/stories/ch1.md]"))
+        await pilot.pause(0.8)
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
+        table = app.query_one("#er_trace", DataTable)
+        rows = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+        assert any("read" in r for r in rows)
+
+
 async def test_seeded_trace_survives_restart(rt):
     from textual.widgets import DataTable
     await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",

@@ -106,3 +106,25 @@ def test_pacing_flags_note_respects_explicit_delta():
     assert pacing_flags_note(scores, delta=0.3) == ""
     note = pacing_flags_note(scores, delta=0.05)
     assert "c1" in note and "c2" in note
+
+
+def test_chapter_map_note_empty_when_no_chapters():
+    from novelizer.brain.context import chapter_map_note
+
+    assert chapter_map_note([]) == "None yet."
+
+
+def test_chapter_map_note_formats_id_title_status_and_cast():
+    from novelizer.brain.context import chapter_map_note
+
+    chs = [Chapter(id="c1", title="The Salt Road", prose="p", character_ids=["mara", "eli"])]
+    note = chapter_map_note(chs)
+    assert note == "- [c1] 'The Salt Road' (draft) cast: mara, eli"
+
+
+def test_chapter_map_note_none_cast_when_empty():
+    from novelizer.brain.context import chapter_map_note
+
+    chs = [Chapter(id="c1", title="One", prose="p")]
+    note = chapter_map_note(chs)
+    assert "cast: none" in note
