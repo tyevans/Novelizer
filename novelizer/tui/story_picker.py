@@ -194,6 +194,25 @@ class StoryPickerApp(App[Path | None]):
         if root.exists():
             error.update(f"✗ {root} already exists")
             return
+
+        # Validate/parse the frame inputs *before* create_story runs, so a
+        # typo (e.g. "24 ch") errors out without leaving a half-created
+        # story dir behind -- otherwise a retry hits the root.exists() guard
+        # above and the user can never frame that story.
+        framework = self.query_one("#new_framework", Select).value
+        target = 24
+        genre = ""
+        has_framing = framework is not Select.BLANK and framework
+        if has_framing:
+            target_raw = self.query_one("#new_target_chapters", Input).value.strip()
+            if target_raw:
+                try:
+                    target = int(target_raw)
+                except ValueError:
+                    error.update("✗ target chapters must be a number")
+                    return
+            genre = self.query_one("#new_genre", Input).value.strip()
+
         overrides: dict[str, object] = {}
         pack = str(self.query_one("#new_voice_pack", Select).value)
         profile = str(self.query_one("#new_profile", Select).value)
@@ -211,18 +230,7 @@ class StoryPickerApp(App[Path | None]):
             except OSError as e:
                 error.update(f"✗ story created, but seed failed: {e}")
                 return
-        framework = self.query_one("#new_framework", Select).value
-        if framework is not Select.BLANK and framework:
-            target_raw = self.query_one("#new_target_chapters", Input).value.strip()
-            if target_raw:
-                try:
-                    target = int(target_raw)
-                except ValueError:
-                    error.update("✗ target chapters must be a number")
-                    return
-            else:
-                target = 24
-            genre = self.query_one("#new_genre", Input).value.strip()
+        if has_framing:
             try:
                 await adopt_blueprint_story_dir(sd, str(framework), target, genre)
             except Exception as e:

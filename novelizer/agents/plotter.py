@@ -6,8 +6,8 @@ from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.beat_drift import beat_drifts
 from novelizer.brain.completion import completion_status
 from novelizer.brain.context import (
-    arc_note, beat_drift_note, chapter_map_note, finale_convergence_note, ledger_note,
-    resolution_pacing_note, stale_threads_note, tension_target_note,
+    arc_note, beat_drift_note, chapter_map_note, completion_note, finale_convergence_note,
+    ledger_note, resolution_pacing_note, stale_threads_note, tension_target_note,
 )
 from novelizer.canon.beat_templates import beat_window
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
@@ -87,6 +87,7 @@ def _summarize(ctx: dict, personality: str = "") -> str:
     for note in (
         ledger_note(promises, chapters),
         resolution_pacing_note(threads, secrets, chapters),
+        completion_note(blueprint, beats, promises, arcs, chapters, characters),
         finale_convergence_note(blueprint, beats, promises, arcs, chapters, characters),
         stale_threads_note(threads, chapters),
         beat_drift_note(blueprint, beats, chapters),

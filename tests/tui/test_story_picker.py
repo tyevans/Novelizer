@@ -232,6 +232,30 @@ async def test_create_with_unparseable_target_shows_error_and_stays_open(tmp_pat
     assert app.return_value is None
 
 
+async def test_unparseable_target_leaves_no_story_dir_so_retry_succeeds(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Retry Tale"
+        app.query_one("#new_framework", Select).value = "six-position"
+        app.query_one("#new_target_chapters", Input).value = "24 ch"
+        await app._create()
+        assert "target chapters must be a number" in str(
+            app.query_one("#picker_error", Static).renderable
+        )
+        # The story must not have been created on the failed attempt, so a
+        # retry with a corrected target doesn't hit the root.exists() guard.
+        assert not (tmp_path / "retry-tale").exists()
+        app.query_one("#new_target_chapters", Input).value = "24"
+        await app._create()
+    root = app.return_value
+    assert root is not None
+    blueprint = await _read_blueprint(root)
+    assert blueprint is not None
+    assert blueprint.target_chapter_count == 24
+
+
 async def test_cancel_button_and_escape_collapse_the_form(tmp_path):
     app = StoryPickerApp([], stories_dir=tmp_path)
     async with app.run_test(size=(80, 50)) as pilot:

@@ -495,7 +495,7 @@ async def test_prompt_includes_finale_convergence_note_inside_window(stack):
 
 
 async def test_prompt_omits_finale_convergence_note_before_window(stack):
-    from novelizer.canon.events import BlueprintAdopted
+    from novelizer.canon.events import BlueprintAdopted, PromiseMade
 
     events, proj, read, committer = stack
     for i in range(3):
@@ -505,12 +505,21 @@ async def test_prompt_omits_finale_convergence_note_before_window(stack):
         BlueprintAdopted(
             blueprint_id="bp1", framework="three_act", target_chapter_count=10,
             beats=[
+                # A late ideal_pct keeps the finale window (and therefore
+                # finale_convergence_note) far ahead of chapter 3.
                 {
-                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
-                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                    "beat_id": "bp1-climax", "slug": "climax", "name": "Climax",
+                    "ideal_pct": 0.9, "tolerance_pct": 0.05,
                 },
             ],
         ),
+    )
+    # A second open blocker category (an unwindowed promise) keeps
+    # completion_note quiet too (it only fires for exactly one blocker
+    # category) -- this test is specifically about finale_convergence_note's
+    # window gating, not completion_note's near-complete steering.
+    await events.append(
+        EventType.PROMISE_MADE, "p1", PromiseMade(id="p1", name="The Locket"),
     )
     await proj.catch_up()
     runner = FakeRunner(PlotterOutput())
@@ -518,6 +527,7 @@ async def test_prompt_omits_finale_convergence_note_before_window(stack):
     ctx = await plotter.poll()
     await plotter.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Finale convergence:" not in sent
     assert "Steer the remaining" not in sent
 
 
@@ -568,6 +578,62 @@ def test_build_plotter_runner_without_backend_stays_constructible():
 
     runner = build_plotter_runner(_FakeSettings())
     assert runner is not None
+
+
+async def test_prompt_includes_completion_message_when_blueprint_satisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted, BeatFulfilled
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await events.append(
+        EventType.BEAT_FULFILLED, "bp1-open",
+        BeatFulfilled(beat_id="bp1-open", chapter_id="c0"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Write the ending" in sent
+
+
+async def test_prompt_omits_completion_message_when_blueprint_unsatisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Write the ending" not in sent
 
 
 def test_build_plotter_runner_with_backend_uses_retrieval_note_base():

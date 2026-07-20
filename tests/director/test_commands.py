@@ -247,6 +247,28 @@ async def test_retarget_blueprint_rejects_too_small_count(stack):
     result = await commands.retarget_blueprint(events, read, 2)
     await proj.catch_up()
     assert "invalid" in result.lower() or "3" in result
+
+
+async def test_retarget_blueprint_no_op_when_target_unchanged(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import BlueprintAdopted
+
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "b1",
+        BlueprintAdopted(blueprint_id="b1", framework="six-position", target_chapter_count=20, beats=[]),
+    )
+    await proj.catch_up()
+
+    result = await commands.retarget_blueprint(events, read, 20)
+    await proj.catch_up()
+
+    assert "already" in result.lower() or "no change" in result.lower()
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+    # No new blueprint.retargeted event should have been appended.
+    tail = await events.events_tail(50)
+    retargeted = [e for e in tail if e.event_type == EventType.BLUEPRINT_RETARGETED]
+    assert retargeted == []
     blueprint = await read.get_active_blueprint()
     assert blueprint.target_chapter_count == 20
 

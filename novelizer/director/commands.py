@@ -106,6 +106,8 @@ async def retarget_blueprint(events, read, target_chapter_count: int) -> str:
         return "no active blueprint to retarget"
     if target_chapter_count < 3:
         return f"invalid target_chapter_count {target_chapter_count} (need >= 3)"
+    if target_chapter_count == active.target_chapter_count:
+        return f"blueprint is already targeted at {target_chapter_count} chapters -- no change"
     await events.append(
         EventType.BLUEPRINT_RETARGETED,
         active.id,

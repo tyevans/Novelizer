@@ -295,5 +295,6 @@ new count everywhere.
 A story is **complete** when its blueprint is satisfied: every beat fulfilled, every
 promise paid or released, every active arc resolved. The room declares it (`book.completed`)
 and the Outline board — now the view Mission Control opens on — shows `✓ COMPLETE` beside
-your chapter count. Completion is a statement, not a stop: the agents quiet down on their
-own as there's nothing left to plan, and you decide when the story is closed.
+your chapter count. Completion is a statement, not a stop: the Plotter is told the blueprint
+is satisfied and steered to write the ending, but nothing forces the room to halt — the
+Director closes the story when they're satisfied it's done.
