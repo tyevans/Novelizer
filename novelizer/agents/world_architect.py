@@ -4,6 +4,7 @@ from novelizer.agents.schemas import WorldEntriesDraft
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.muse.prompts import architect_settings_note
 from novelizer.store.models import WorldEntry
 
@@ -66,8 +67,23 @@ class WorldArchitect(BaseAgent):
         await self.commit(draft, ctx)
 
 
-def build_world_architect_runner(settings, callbacks=None):
+def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
+    if backend is not None:
+        model = build_chat_model(
+            settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+            settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+            callbacks=None, streaming=callbacks is not None,
+        )
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=WorldEntriesDraft,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
     model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=WorldEntriesDraft)

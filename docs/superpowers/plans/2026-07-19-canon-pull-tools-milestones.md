@@ -21,6 +21,46 @@ milestone touches the write path.
 
 ## Status
 
+- **CPT-M6: delivered** (2026-07-19) — **rollout complete.** All five
+  remaining scheduled agents (World Architect, Character Keeper, Editor,
+  Retconner, Structure Analyst) build tooled runners (canon backend +
+  `search_canon`, graph-scope callbacks, recursion bound 50) gated by
+  per-agent `*_tools_enabled` flags pinned at `start()` (flips inert until
+  restart, same contract as phase a/c). **No prompt diets in phase b, by
+  design:** the Editor reviews one chapter in full; the Keeper deliberately
+  mines recent prose; the Analyst's 400-char whole-book skim is its scoring
+  algorithm; Architect/Retconner push the world-entry bodies they act on.
+  The retrieval note was split (`RETRIEVAL_NOTE_BASE` without the map
+  sentence) so phase-b prompts don't reference a chapter index they don't
+  have; phase-a note byte-identical. **Deviation:** `write_todos` remains
+  available to all agents — deepagents hardcodes `TodoListMiddleware`, and
+  exclusion would require a `HarnessProfile` entry-point plugin,
+  disproportionate to the schema-weight savings. Muse and the checker's
+  mining runner remain untouched.
+
+- **CPT-M5: delivered** (2026-07-19). Phase-c chat personas are wired: the
+  per-agent chat runner (`Runtime._chat_runner_for`) builds via
+  `build_chat_runner(..., backend=self._canon_backend, tools=self._canon_tools)`
+  when `chat_tools_enabled` is on (the default) and the runtime's toolkit is
+  present, else the bare legacy call — with a before-`start()` guard so tests
+  that invoke `_chat_runner_for` without a running toolkit still get the bare
+  builder instead of an `AttributeError`. `ChatService` is constructed with
+  `pull_mode=settings.chat_tools_enabled`. Injected `chat_<name>` fakes keep
+  winning unchanged.
+
+  Mid-session `*_tools_enabled` flips are inert-by-design until restart (all
+  three flags); tooling follows the pull_mode pinned at start().
+
+- **CPT-M4: delivered** (2026-07-19). Phase-a pull agents are live: Author
+  and Continuity Checker run with `CanonBackend` + `search_canon` when
+  `author_tools_enabled`/`checker_tools_enabled` are on (the default),
+  chapter-prose push replaced by an id/title/status/cast map plus a
+  retrieval instruction (byte-identical legacy prompts when flags are off),
+  and tool calls stream through telemetry into the Engine Room
+  (`⚒`-prefixed lines). deepagents auto-filters the `execute` tool for
+  non-sandbox backends, so no middleware surgery was needed; `write_todos`
+  scoping remains CPT-M6.
+
 - **CPT-M3: delivered** (2026-07-19). Incremental projector-side canon
   embedding index, backfill-on-`Runtime.start()`, `Runtime.index_catch_up()`
   (None-safe, never raises), the `search_canon` LangChain tool, and the TUI

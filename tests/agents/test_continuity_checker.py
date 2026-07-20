@@ -920,3 +920,115 @@ async def test_continuity_failed_mining_keeps_gate_open(stack):
     mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
     assert mined == []
     assert await agent.readiness() > 0.0
+
+
+async def test_checker_pull_mode_false_keeps_chapter_excerpt_block(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text" * 20))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Recent chapters:" in sent
+    assert "Chapter index:" not in sent
+    assert "secret prose text" in sent
+
+
+async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text"))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Chapter index:" in sent
+    assert "Recent chapters:" not in sent
+    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "secret prose text" not in sent
+
+
+def test_build_continuity_checker_runner_without_backend_stays_constructible():
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    runner = build_continuity_checker_runner(FakeSettings())
+    assert runner is not None
+
+
+def test_build_continuity_checker_runner_with_canon_backend_builds():
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+
+
+def test_build_continuity_checker_runner_with_backend_bounds_recursion():
+    """Fix 3: pull-mode runners must cap the tool loop."""
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50
+
+
+def test_build_continuity_checker_runner_binds_callbacks_at_graph_scope_not_model():
+    """Fix 1: telemetry callbacks must be bound on the graph so ToolNode
+    executions under invoke-time config see them."""
+    from novelizer.agents.continuity_checker import build_continuity_checker_runner
+    from novelizer.canon_fs.backend import CanonBackend
+    from langchain_core.callbacks.base import BaseCallbackHandler
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    handler = BaseCallbackHandler()
+    backend = CanonBackend(read_store=None)
+    runner = build_continuity_checker_runner(
+        FakeSettings(), callbacks=[handler], backend=backend, tools=[],
+    )
+    assert handler in (runner.config.get("callbacks") or [])
+
+
+def test_build_continuity_mining_runner_construction_unchanged():
+    from novelizer.agents.continuity_checker import build_continuity_mining_runner
+
+    class FakeSettings:
+        agent_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        agent_temperature = 0.7
+        llm_max_tokens = None
+
+    runner = build_continuity_mining_runner(FakeSettings())
+    assert runner is not None

@@ -233,6 +233,33 @@ async def test_work_invokes_runner_when_cast_empty_but_chapters_exist(stack):
     assert "None yet" in sent
 
 
+async def test_work_prompt_includes_characters_introduced_late_in_a_chapter(stack):
+    events, proj, read, committer = stack
+    filler = "The rain kept falling on the empty street outside the chapel. " * 20
+    prose = filler + "Silas Vane stepped out of the shadows and spoke."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" in sent
+
+
+async def test_work_prompt_caps_prose_at_configured_prose_chars(stack):
+    events, proj, read, committer = stack
+    prose = ("x" * 150) + " Silas Vane arrived."
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer, prose_chars=100)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Silas Vane" not in sent
+
+
 async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "silas-vane", Character(id="silas-vane", name="Silas Vane", traits="stoic"))
@@ -386,3 +413,39 @@ async def test_keeper_midrun_chapter_is_not_absorbed_by_watermark(stack):
     await agent.run_once()
     # The mid-run chapter was never analyzed: the watermark must stay clear.
     assert await agent.readiness() > 0.0
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_character_keeper_runner_without_backend_stays_constructible():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+
+    runner = build_character_keeper_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_character_keeper_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.character_keeper import build_character_keeper_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_character_keeper_runner_with_backend_bounds_recursion():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50

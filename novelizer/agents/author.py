@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
-from novelizer.brain.context import causal_flags_note, known_secrets_note, stale_threads_note
+from novelizer.brain.context import causal_flags_note, chapter_map_note, known_secrets_note, stale_threads_note
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -16,6 +16,23 @@ Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
 """ + AI_TELL_BAN_NOTE
 
+_RETRIEVAL_NOTE_PREFIX = (
+    "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
+    "semantic search (search_canon). "
+)
+_RETRIEVAL_NOTE_MAP_SENTENCE = (
+    "The chapter list below is an index — read any "
+    "chapter or canon file you need in full before writing. "
+)
+_RETRIEVAL_NOTE_SUFFIX = (
+    "Cite ids exactly as shown "
+    "in frontmatter or search results."
+)
+
+RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
+
+RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
+
 
 def _summarize(
     ctx: dict,
@@ -23,10 +40,10 @@ def _summarize(
     personality: str = "",
     prior_chapter_chars: int = 200,
     staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
+    pull_mode: bool = False,
 ) -> str:
     world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
     chars = "\n".join(f"- {c.name}: {c.traits} | arc: {c.arc_status}" for c in ctx["characters"][:8]) or "None yet."
-    prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
     notes = "\n".join(f"Director: {s.body}" for s in ctx["signals"]) or "None."
     voice = BaseAgent._guarded_line("Write in this prose voice", casting_note)
     cast = BaseAgent._guarded_line("In character", personality)
@@ -35,9 +52,14 @@ def _summarize(
     causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])
     pool = casting_pool_note(ctx.get("hand"))
     sparks = inspiration_note(ctx.get("hand"))
+    if pull_mode:
+        chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+    else:
+        prev = "\n".join(f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in ctx["previous"]) or "None yet."
+        chapters_block = f"Previous chapters:\n{prev}"
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"Previous chapters:\n{prev}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
+        f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
     )
 
 
@@ -67,12 +89,14 @@ class Author(BaseAgent):
         provenance: dict | None = None,
         prior_chapter_summary_chars: int = 200,
         staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
         self.provenance = provenance
         self._prior_chapter_summary_chars = prior_chapter_summary_chars
         self._staleness_threshold_chapters = staleness_threshold_chapters
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status="draft"))
@@ -106,6 +130,7 @@ class Author(BaseAgent):
                 ctx, self._casting_note, self.personality,
                 prior_chapter_chars=self._prior_chapter_summary_chars,
                 staleness_threshold_chapters=self._staleness_threshold_chapters,
+                pull_mode=self.pull_mode,
             )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
@@ -153,8 +178,29 @@ class Author(BaseAgent):
         await self.commit(draft, ctx)
 
 
-def build_author_runner(settings, callbacks=None):
+def build_author_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.author_model, settings.llm_base_url, settings.llm_api_key, settings.author_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
-    return create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)
+    # Tool executions run in the agent graph's ToolNode under invoke-time
+    # config, not constructor callbacks on the chat model -- so telemetry
+    # callbacks are bound graph-scope via with_config below (dropped from the
+    # model itself to avoid double-emitting LLM events through both paths).
+    model = build_chat_model(
+        settings.author_model, settings.llm_base_url, settings.llm_api_key,
+        settings.author_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
+    if backend is not None:
+        system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=ChapterDraft,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=AUTHOR_SYSTEM_PROMPT, response_format=ChapterDraft)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph

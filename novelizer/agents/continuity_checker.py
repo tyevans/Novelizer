@@ -4,7 +4,7 @@ from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_P
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
-from novelizer.brain.context import open_retcons_note
+from novelizer.brain.context import chapter_map_note, open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
@@ -53,10 +53,12 @@ class ContinuityChecker(BaseAgent):
         event_store: EventStore,
         interval: int = 900,
         personality: str = "",
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="continuity_checker", personality=personality)
         self._mining_runner = mining_runner
         self._events = event_store
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
@@ -102,10 +104,14 @@ class ContinuityChecker(BaseAgent):
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
         world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
         chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
-        chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
+        if self.pull_mode:
+            chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+        else:
+            chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
+            chapters_block = f"Recent chapters:\n{chapters}"
+        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\n{chapters_block}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         out = result.get("structured_response")
 
@@ -387,11 +393,32 @@ class ContinuityChecker(BaseAgent):
             self._clear_watermark()
 
 
-def build_continuity_checker_runner(settings, callbacks=None):
+def build_continuity_checker_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
+    from novelizer.agents.author import RETRIEVAL_NOTE
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+    # See build_author_runner: tool executions run under invoke-time graph
+    # config, not constructor callbacks on the model, so telemetry callbacks
+    # are bound graph-scope via with_config below.
+    model = build_chat_model(
+        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+        settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
+    if backend is not None:
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=ContinuityOutput)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph
 
 
 def build_continuity_mining_runner(settings, callbacks=None):

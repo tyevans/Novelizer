@@ -86,7 +86,7 @@ async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_l
         async def ainvoke(self, inputs):
             raise AssertionError("not used")
 
-    def _spy_build_author_runner(settings, callbacks=None):
+    def _spy_build_author_runner(settings, callbacks=None, backend=None, tools=None):
         seen.append(settings)
         return _FakeRunner()
 
@@ -107,6 +107,89 @@ async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_l
     assert rt.settings.author_temperature == 0.2
     assert rt.author.provenance["model"] == old_settings.author_model
     assert rt.author.provenance["temperature"] == 0.2
+    await rt.close()
+
+
+async def test_rebuild_keeps_author_tooled_when_flags_on(tmp_path, monkeypatch):
+    """Fix 2: apply_settings' rebuild path must reuse the runtime's canon
+    backend/tools for pull-mode agents, same as start() -- a bare rebuild
+    silently drops tool access while pull_mode stays True."""
+    rt = await _started_runtime(tmp_path, author_temperature=0.8, author_tools_enabled=True)
+    rt._runners = None
+    rt._runner = None
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_author_runner(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _R()
+
+    monkeypatch.setattr("novelizer.runtime.build_author_runner", _spy_build_author_runner)
+
+    rt.apply_settings(rt.settings.model_copy(update={"author_temperature": 0.3}))
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is rt._canon_backend
+    assert seen_kwargs[0]["tools"] is rt._canon_tools
+    await rt.close()
+
+
+async def test_rebuild_keeps_checker_tooled_when_flags_on(tmp_path, monkeypatch):
+    """Same as above for the continuity checker's checker_tools_enabled flag."""
+    rt = await _started_runtime(tmp_path, agent_temperature=0.8, checker_tools_enabled=True)
+    rt._runners = None
+    rt._runner = None
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_checker_runner(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _R()
+
+    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", _spy_build_checker_runner)
+    monkeypatch.setattr(
+        "novelizer.runtime.build_continuity_mining_runner",
+        lambda settings, callbacks=None: _R(),
+    )
+
+    rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is rt._canon_backend
+    assert seen_kwargs[0]["tools"] is rt._canon_tools
+    await rt.close()
+
+
+async def test_rebuild_keeps_world_architect_tooled_when_flags_on(tmp_path, monkeypatch):
+    """CPT-M6: apply_settings' agent_temperature rebuild path must keep the
+    phase-b agents' tooling pinned at start(), same as author/checker --
+    a mid-session flag flip must not change what's rebuilt (M5-documented
+    inert-until-restart contract)."""
+    rt = await _started_runtime(tmp_path, agent_temperature=0.8, world_architect_tools_enabled=True)
+    rt._runners = None
+    rt._runner = None
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _R()
+
+    monkeypatch.setattr("novelizer.runtime.build_world_architect_runner", _spy_build_world_architect_runner)
+    monkeypatch.setattr("novelizer.runtime.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+
+    # Simulate a live flag flip without a restart -- pinning must ignore it.
+    rt.settings = rt.settings.model_copy(update={"world_architect_tools_enabled": False})
+    rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is rt._canon_backend
+    assert seen_kwargs[0]["tools"] is rt._canon_tools
     await rt.close()
 
 

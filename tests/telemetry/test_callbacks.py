@@ -110,3 +110,61 @@ def test_llm_error_emits_call_failed():
     etype, payload = rec.emitted[-1]
     assert etype == TelemetryEventType.LLM_CALL_FAILED
     assert payload.error_type == "TimeoutError" and "proxy timeout" in payload.error_message
+
+
+def test_tool_start_emits_call_started_with_tool_name_and_truncated_input():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start({"name": "search_web"}, "x" * 500, run_id=lc_run)
+    _in_run(go)
+    (etype, payload), = rec.emitted
+    assert etype == TelemetryEventType.TOOL_CALL_STARTED
+    assert payload.run_id == "nrun-1" and payload.agent_name == "author"
+    assert payload.tool_name == "search_web"
+    assert len(payload.input_summary) == 300
+
+
+def test_tool_end_emits_call_finished_with_duration_and_output_size():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start({"name": "search_web"}, "query", run_id=lc_run)
+        await h.on_tool_end("some output text", run_id=lc_run)
+    _in_run(go)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.TOOL_CALL_FINISHED
+    assert payload.tool_name == "search_web"
+    assert payload.duration_s >= 0.0
+    assert payload.output_chars == len("some output text")
+
+
+def test_tool_error_emits_call_failed():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start({"name": "search_web"}, "query", run_id=lc_run)
+        await h.on_tool_error(ValueError("bad input"), run_id=lc_run)
+    _in_run(go)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.TOOL_CALL_FAILED
+    assert payload.tool_name == "search_web"
+    assert payload.error_type == "ValueError" and "bad input" in payload.error_message
+
+
+def test_tool_end_and_error_with_unknown_run_id_are_no_ops():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_end("output", run_id=lc_run)
+        await h.on_tool_error(ValueError("x"), run_id=lc_run)
+    _in_run(go)
+    assert rec.emitted == []

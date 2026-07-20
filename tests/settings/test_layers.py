@@ -102,7 +102,37 @@ def test_parse_global_accepts_prior_chapter_summary_chars():
     assert cfg.prior_chapter_summary_chars == 100
 
 
+def test_parse_global_accepts_keeper_prose_chars():
+    cfg = parse_global({"keeper_prose_chars": 2500}, source="g.toml")
+    assert cfg.keeper_prose_chars == 2500
+
+
 def test_parse_story_accepts_staleness_and_sag_spike_settings():
     cfg = parse_story({"staleness_threshold_chapters": 5, "sag_spike_delta": 0.2}, source="s.toml")
     assert cfg.staleness_threshold_chapters == 5
     assert cfg.sag_spike_delta == 0.2
+
+
+def test_parse_story_accepts_author_and_checker_tools_enabled():
+    cfg = parse_story({"author_tools_enabled": False, "checker_tools_enabled": False}, source="s.toml")
+    assert cfg.author_tools_enabled is False
+    assert cfg.checker_tools_enabled is False
+
+
+def test_parse_story_accepts_chat_tools_enabled():
+    cfg = parse_story({"chat_tools_enabled": False}, source="s.toml")
+    assert cfg.chat_tools_enabled is False
+
+
+@pytest.mark.parametrize("flag_name", [
+    "world_architect_tools_enabled",
+    "character_keeper_tools_enabled",
+    "editor_tools_enabled",
+    "retconner_tools_enabled",
+    "structure_analyst_tools_enabled",
+])
+def test_parse_story_accepts_phase_b_agent_tools_enabled(flag_name):
+    """Phase-B per-agent tools_enabled flags can be set in story.toml."""
+    cfg = parse_story({flag_name: False}, source="s.toml")
+    assert getattr(cfg, flag_name) is False
+    assert flag_name in STORY_OVERRIDABLE_KEYS

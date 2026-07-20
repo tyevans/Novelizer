@@ -6,6 +6,7 @@ from langchain_core.callbacks import AsyncCallbackHandler
 from novelizer.run_context import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
     TelemetryEventType, LlmCallStarted, LlmCallFinished, LlmCallFailed, TokenDelta,
+    ToolCallStarted, ToolCallFinished, ToolCallFailed,
 )
 
 
@@ -31,6 +32,16 @@ class _CallState:
         self.chunks = 0
 
 
+class _ToolCallState:
+    __slots__ = ("novelizer_run_id", "agent_name", "tool_name", "started")
+
+    def __init__(self, novelizer_run_id: str, agent_name: str, tool_name: str) -> None:
+        self.novelizer_run_id = novelizer_run_id
+        self.agent_name = agent_name
+        self.tool_name = tool_name
+        self.started = time.monotonic()
+
+
 class TelemetryCallbackHandler(AsyncCallbackHandler):
     """Bridges LangChain model callbacks to telemetry: call_started with the
     full rendered prompt, per-token bus deltas, call_finished/failed with
@@ -40,6 +51,7 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
     def __init__(self, recorder) -> None:
         self._recorder = recorder
         self._calls: dict[UUID, _CallState] = {}
+        self._tool_calls: dict[UUID, _ToolCallState] = {}
 
     async def on_chat_model_start(self, serialized: dict, messages, *, run_id: UUID, **kwargs: Any) -> None:
         await self._start(serialized, render_messages(messages), run_id)
@@ -91,6 +103,42 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
                           call_index=state.call_index, model=state.model,
                           duration_s=time.monotonic() - state.started,
                           error_type=type(error).__name__, error_message=str(error)),
+        )
+
+    async def on_tool_start(self, serialized: dict, input_str: str, *, run_id: UUID, **kwargs: Any) -> None:
+        nrun = current_run_id.get() or ""
+        tool_name = (serialized or {}).get("name", "")
+        agent_name = current_agent_name.get()
+        state = _ToolCallState(nrun, agent_name, tool_name)
+        self._tool_calls[run_id] = state
+        await self._recorder.emit(
+            TelemetryEventType.TOOL_CALL_STARTED, nrun,
+            ToolCallStarted(run_id=nrun, agent_name=agent_name, tool_name=tool_name,
+                            input_summary=str(input_str)[:300]),
+        )
+
+    async def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
+        state = self._tool_calls.pop(run_id, None)
+        if state is None:
+            return
+        await self._recorder.emit(
+            TelemetryEventType.TOOL_CALL_FINISHED, state.novelizer_run_id,
+            ToolCallFinished(run_id=state.novelizer_run_id, agent_name=state.agent_name,
+                             tool_name=state.tool_name,
+                             duration_s=time.monotonic() - state.started,
+                             output_chars=len(str(output))),
+        )
+
+    async def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
+        state = self._tool_calls.pop(run_id, None)
+        if state is None:
+            return
+        await self._recorder.emit(
+            TelemetryEventType.TOOL_CALL_FAILED, state.novelizer_run_id,
+            ToolCallFailed(run_id=state.novelizer_run_id, agent_name=state.agent_name,
+                           tool_name=state.tool_name,
+                           duration_s=time.monotonic() - state.started,
+                           error_type=type(error).__name__, error_message=str(error)),
         )
 
     @staticmethod

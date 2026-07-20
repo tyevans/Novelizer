@@ -14,6 +14,9 @@ class TelemetryEventType:
     LLM_CALL_STARTED = "llm.call_started"
     LLM_CALL_FINISHED = "llm.call_finished"
     LLM_CALL_FAILED = "llm.call_failed"
+    TOOL_CALL_STARTED = "tool.call_started"
+    TOOL_CALL_FINISHED = "tool.call_finished"
+    TOOL_CALL_FAILED = "tool.call_failed"
 
 
 class SchedulerPicked(BaseModel):
@@ -73,6 +76,30 @@ class LlmCallFailed(BaseModel):
     agent_name: str
     call_index: int
     model: str
+    duration_s: float
+    error_type: str
+    error_message: str
+
+
+class ToolCallStarted(BaseModel):
+    run_id: str
+    agent_name: str
+    tool_name: str
+    input_summary: str  # str(tool input), truncated to 300 chars
+
+
+class ToolCallFinished(BaseModel):
+    run_id: str
+    agent_name: str
+    tool_name: str
+    duration_s: float
+    output_chars: int
+
+
+class ToolCallFailed(BaseModel):
+    run_id: str
+    agent_name: str
+    tool_name: str
     duration_s: float
     error_type: str
     error_message: str
