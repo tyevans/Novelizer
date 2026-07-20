@@ -613,3 +613,65 @@ async def test_chat_runner_for_falls_back_to_bare_before_start(settings, monkeyp
     assert len(seen_kwargs) == 1
     assert seen_kwargs[0]["backend"] is None
     assert seen_kwargs[0]["tools"] is None
+
+
+_PHASE_B_AGENTS = [
+    ("world_architect", "world_architect_tools_enabled", "novelizer.runtime.build_world_architect_runner"),
+    ("character_keeper", "character_keeper_tools_enabled", "novelizer.runtime.build_character_keeper_runner"),
+    ("editor", "editor_tools_enabled", "novelizer.runtime.build_editor_runner"),
+    ("retconner", "retconner_tools_enabled", "novelizer.runtime.build_retconner_runner"),
+    ("structure_analyst", "structure_analyst_tools_enabled", "novelizer.runtime.build_structure_analyst_runner"),
+]
+
+
+@pytest.mark.parametrize("agent_name,flag_name,builder_path", _PHASE_B_AGENTS)
+async def test_phase_b_flags_on_wire_backend_and_tools(settings, monkeypatch, agent_name, flag_name, builder_path):
+    """CPT-M6: <agent>_tools_enabled=True must build the real runner via the
+    toolkit-wrapped closure with the runtime's canon backend/tools."""
+    settings = settings.model_copy(update={flag_name: True})
+    runners = _all_fake_runners()
+    runners.pop(agent_name, None)
+    rt = Runtime(settings, runners=runners)
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
+        return _FakeAgentRunner()
+
+    monkeypatch.setattr(builder_path, _spy_builder)
+
+    await rt.start()
+    try:
+        assert len(seen_kwargs) == 1
+        assert seen_kwargs[0]["backend"] is rt._canon_backend
+        assert seen_kwargs[0]["tools"] is rt._canon_tools
+        assert seen_kwargs[0]["callbacks"] is rt._llm_callbacks
+    finally:
+        await rt.close()
+
+
+@pytest.mark.parametrize("agent_name,flag_name,builder_path", _PHASE_B_AGENTS)
+async def test_phase_b_flags_off_uses_bare_builder(settings, monkeypatch, agent_name, flag_name, builder_path):
+    """CPT-M6: <agent>_tools_enabled=False must build via the bare builder --
+    no backend/tools passed."""
+    settings = settings.model_copy(update={flag_name: False})
+    runners = _all_fake_runners()
+    runners.pop(agent_name, None)
+    rt = Runtime(settings, runners=runners)
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
+        return _FakeAgentRunner()
+
+    monkeypatch.setattr(builder_path, _spy_builder)
+
+    await rt.start()
+    try:
+        assert len(seen_kwargs) == 1
+        assert seen_kwargs[0]["backend"] is None
+        assert seen_kwargs[0]["tools"] is None
+    finally:
+        await rt.close()
