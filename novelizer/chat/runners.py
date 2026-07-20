@@ -16,6 +16,7 @@ minting action (plant/introduce) with a name."""
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
+    from novelizer.agents.middleware import ExcludeToolsMiddleware
     model_name = settings.author_model if agent_name == "author" else settings.agent_model
     model = build_chat_model(
         model_name, settings.llm_base_url, settings.llm_api_key,
@@ -29,6 +30,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChatReply,
             backend=backend, tools=tools,
+            middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

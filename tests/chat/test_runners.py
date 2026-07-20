@@ -19,7 +19,7 @@ def test_build_chat_runner_bare_stays_constructible(monkeypatch):
     class FakeGraph:
         pass
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
         captured["kwargs"] = {
             "system_prompt": system_prompt, "backend": backend, "tools": tools,
         }
@@ -55,7 +55,7 @@ def test_build_chat_runner_with_backend_includes_retrieval_note(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
         captured["system_prompt"] = system_prompt
         return FakeGraph()
 
@@ -109,7 +109,7 @@ def test_build_chat_runner_streams_when_callbacks_provided(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
         return FakeGraph()
 
     import deepagents
