@@ -2,7 +2,9 @@ from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import causal_flags_note, ledger_note, pacing_flags_note, resolution_pacing_note
+from novelizer.brain.context import (
+    beat_drift_note, causal_flags_note, ledger_note, pacing_flags_note, resolution_pacing_note,
+)
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -50,6 +52,8 @@ class Editor(BaseAgent):
             "themes": await self._read.list_themes(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
             "promises": await self._read.list_promises(),
+            "blueprint": await self._read.get_active_blueprint(),
+            "beats": await self._read.list_beats(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -78,6 +82,7 @@ class Editor(BaseAgent):
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
         ledger = ledger_note(ctx.get("promises", []), ctx["chapters"])
         pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
+        beat_drift = beat_drift_note(ctx.get("blueprint"), ctx.get("beats", []), ctx["chapters"])
         # Citation aid, not knowledge-state injection (that is Author-only per
         # Locked decision #7): knowledge_intents must cite an existing secret
         # id or be dropped at commit time, so the Editor needs the id list in
@@ -108,7 +113,7 @@ class Editor(BaseAgent):
             drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
         msg = (
             f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
-            f"{secret_ids}{drift}{ledger}{pacing_plan}"
+            f"{secret_ids}{drift}{ledger}{pacing_plan}{beat_drift}"
         )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")

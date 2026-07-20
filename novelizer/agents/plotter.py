@@ -3,7 +3,10 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import chapter_map_note, ledger_note, resolution_pacing_note, stale_threads_note
+from novelizer.brain.context import (
+    beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note, stale_threads_note,
+    tension_target_note,
+)
 from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -71,6 +74,8 @@ def _summarize(ctx: dict, personality: str = "") -> str:
         ledger_note(promises, chapters),
         resolution_pacing_note(threads, secrets, chapters),
         stale_threads_note(threads, chapters),
+        beat_drift_note(blueprint, beats, chapters),
+        tension_target_note(blueprint, beats, ctx.get("scores", []), chapters),
     ):
         if note:
             blocks.append(note.strip())
@@ -126,6 +131,7 @@ class Plotter(BaseAgent):
         signals = await self._read.list_unconsumed_signals(target_agent="plotter")
         hand = await self._read.get_active_hand()
         open_proposals = await self._read.list_proposals(status="open")
+        scores = await self._read.list_structure_scores()
         return {
             "chapters": chapters,
             "world": world[:10],
@@ -139,6 +145,7 @@ class Plotter(BaseAgent):
             "signals": signals,
             "hand": hand,
             "open_proposals": open_proposals,
+            "scores": scores,
         }
 
     async def work(self, ctx: dict) -> PlotterOutput | None:

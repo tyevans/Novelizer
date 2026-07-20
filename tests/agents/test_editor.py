@@ -341,6 +341,35 @@ async def test_editor_commit_with_no_knowledge_or_causal_intents_emits_no_new_ev
 from novelizer.canon.events import CausalEdgeDeclared
 
 
+async def test_editor_prompt_includes_beat_drift_note_when_present(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    for i in range(2, 10):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Beat drift:" in sent
+    assert "Midpoint" in sent
+
+
 async def test_editor_prompt_includes_causal_flags_note_when_present(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))

@@ -234,6 +234,64 @@ async def test_prompt_with_blueprint_includes_beat_window_line(stack):
     assert "-" in sent  # window range present
 
 
+async def test_prompt_includes_beat_drift_note_when_present(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    for i in range(9):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Beat drift:" in sent
+    assert "Midpoint" in sent
+
+
+async def test_prompt_includes_tension_target_note_when_deviated(stack):
+    from novelizer.canon.events import BlueprintAdopted, AnnotationStructureScored
+
+    events, proj, read, committer = stack
+    for i in range(20):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=20,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c19",
+                        AnnotationStructureScored(chapter_id="c19", tension=0.99))
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Tension vs blueprint:" in sent
+    assert "ch 20" in sent
+
+
 class _FakeSettings:
     agent_model = "gpt-4o-mini"
     llm_base_url = None
