@@ -88,10 +88,7 @@ def test_build_chat_runner_with_backend_passes_all_five_skills(monkeypatch):
     backend = CanonBackend(read_store=None)
     runners_mod.build_chat_runner(FakeSettings(), "author", backend=backend, tools=[])
     assert captured["skills"] == runners_mod.CHAT_SKILLS
-    assert captured["skills"] == [
-        "/skills/outlining", "/skills/promise-payoff", "/skills/pacing",
-        "/skills/scene-sequel", "/skills/character-arcs",
-    ]
+    assert captured["skills"] == ["/skills"]
 
 
 def test_build_chat_runner_with_backend_bounds_recursion():

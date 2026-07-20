@@ -14,24 +14,31 @@ before proposing changes — they render the live view.
 
 ## Adopting a framework
 
-Propose a `BlueprintPlan`: `framework` (must name a built-in template in
-`novelizer.canon.beat_templates.BEAT_TEMPLATES`), `target_chapter_count`,
-`genre`, and `obligatory_scenes`. Committing mints the blueprint id and the
-full beat set from the template in one gated action — this is a structural
-decision, not something to redo lightly.
+Propose a `BlueprintPlan`: `framework`, `target_chapter_count`, `genre`, and
+`obligatory_scenes`. `framework` must be one of exactly two values — the
+only keys in `novelizer.canon.beat_templates.BEAT_TEMPLATES`:
 
-Choosing a framework is choosing a resolution, not a different story shape.
-`beat-frameworks.md` shows that Save the Cat, Seven-Point, Three-Act, and
-Story Circle are the same underlying skeleton (baseline → disturbance →
-commitment → pressure → **midpoint flip** → pressure → **low point** →
-revelation → **climax** → settled value) at different granularities. Pick
-the resolution that matches how much structural guidance the story needs:
-Save the Cat's 15 beats for tight genre pacing, Seven-Point for a leaner
-skeleton, Story Circle when the story is more character-journey than
-plot-machine. Kishōtenketsu is the one genuine exception — it drops the
-conflict assumption entirely (ki → shō → ten ~75% → ketsu), so beats and
-briefs under it must not require `expected_polarity` or `value_shift` to be
-non-empty.
+- `"six-position"` — the default conflict-driven shape (catalyst →
+  threshold → **midpoint flip** → low point → final turn → climax).
+- `"kishotenketsu"` — the conflict-optional shape (ki → shō → **ten**
+  ~75% → ketsu); beats and briefs under it must not require
+  `expected_polarity` or `value_shift` to be non-empty.
+
+Any other string — including a lowercase-hyphenated guess at one of the
+named frameworks below — is not a real key: committing a `BlueprintPlan`
+with one silently mints no beats. Committing mints the blueprint id and
+the full beat set from the chosen template in one gated action — this is
+a structural decision, not something to redo lightly.
+
+Save the Cat, Seven-Point, Three-Act, and Story Circle are **not**
+adoptable `framework` values here — they're reference material in
+`beat-frameworks.md` for *interpreting* structure and *choosing beats to
+hit* within the two shipped templates, showing how the same convergent
+skeleton (baseline → disturbance → commitment → pressure → **midpoint
+flip** → pressure → **low point** → revelation → **climax** → settled
+value) reads at different granularities. Use them to decide, e.g., which
+Save the Cat beat a `six-position` chapter brief is functionally hitting —
+not to name a `framework` the system doesn't recognize.
 
 `obligatory_scenes` comes from Story Grid's per-genre lists in
 `obligatory-scenes.md` (e.g. Love needs lovers-meet/break-up/proof-of-love).

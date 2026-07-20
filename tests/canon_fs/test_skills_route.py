@@ -78,3 +78,32 @@ def test_read_only_backend_sync_reads_raise_not_implemented():
         backend.ls("/")
     with pytest.raises(NotImplementedError):
         backend.read("/outlining/SKILL.md")
+
+
+async def test_skills_ls_hides_packaging_artifacts(stack):
+    """__init__.py (makes skills_packs importable) and __pycache__/ (bytecode
+    cache) are packaging artifacts, not skill content -- they must never
+    surface in an agent-visible /skills/ listing. SkillsMiddleware treats
+    every is_dir entry as a candidate skill directory and probes
+    <entry>/SKILL.md, so an unfiltered __pycache__ entry produces a spurious
+    failed download on every load."""
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.als("/skills")
+    names = {e["path"].rstrip("/").rsplit("/", 1)[-1] for e in result.entries}
+    assert "__init__.py" not in names
+    assert "__pycache__" not in names
+
+
+async def test_skills_download_files_delegates_to_inner(stack):
+    """adownload_files is a bulk READ (SkillsMiddleware uses it to fetch
+    every candidate SKILL.md) and must be delegated, not refused like
+    writes -- refusing it is exactly what made skills fail to load."""
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    responses = await composite.adownload_files(["/skills/outlining/SKILL.md"])
+    assert len(responses) == 1
+    assert responses[0].error is None
+    assert b"name: outlining" in responses[0].content

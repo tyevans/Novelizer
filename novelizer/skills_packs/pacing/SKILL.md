@@ -41,14 +41,16 @@ trough is correct, not a deficiency.
 
 ## Escalation shape
 
-The curve is a rising sawtooth, not a monotonic ramp: a local peak at the
-midpoint (0.75, `"up"`), then a climb to the global max near the climax
-(0.85, `"flip"`, typically around Break into Three / Plot Turn 2 at
-~80%). Escalating try-fail stakes across Scene/Sequel chains (see
-`scene-sequel` pack) should track this shape — each `no_and` or
-`yes_but` should generally cost more than the last one as the story
-climbs toward that global max, then release toward the 0.5 implicit end
-anchor.
+The curve is a rising sawtooth, not a monotonic ramp: the shipped
+`six-position` template anchors its **global max at the midpoint** (0.85,
+`"flip"`, ~50%) — the story's reactive-to-proactive turn is the highest
+point on the curve, not a secondary hump. From there the curve eases
+toward a low point (0.35, `"down"`, ~75%) before climbing again to the
+climax (0.75, `"up"`, ~90%), which rides lower than the midpoint, then
+releases toward the 0.5 implicit end anchor. Escalating try-fail stakes
+across Scene/Sequel chains (see `scene-sequel` pack) should track this
+shape — don't assume the climax must always out-tense the midpoint; the
+shipped template deliberately doesn't ask for that.
 
 ## POV cadence and congestion
 

@@ -35,16 +35,18 @@ flat at that one value.
 - **Rising sawtooth, not a monotonic ramp.** Individual chapters oscillate
   around the interpolated line — the check (`tension_deviations`) is
   against the *target*, not a requirement that tension only ever increases.
-- **Global max near the climax.** A `"flip"` beat (0.85) placed near ~80–90%
-  — e.g. Break into Three / Plot Turn 2 — pulls the curve to its highest
-  point there.
-- **Local peak at the midpoint.** An `"up"` beat (0.75) at 50% creates a
-  secondary hump — matches the convergent beat map's midpoint
-  reactive→proactive flip (see `outlining/references/beat-frameworks.md`).
-- **Deliberate troughs after peaks.** A `"down"` beat (0.35) shortly after a
-  high point (e.g. after Midpoint, or entering a Dark Night of the Soul
-  before the climb to Break into Three) is breathing room, not a mistake —
-  don't chase the curve upward everywhere.
+- **Global max at the midpoint.** In the shipped `six-position` template,
+  Midpoint is a `"flip"` beat (0.85) at ~50% — the reactive→proactive turn
+  is the highest point on the curve, matching the convergent beat map's
+  midpoint flip (see `outlining/references/beat-frameworks.md`).
+- **Climax rides lower, at 0.75.** The shipped template's Climax beat is
+  `"up"` (0.75) at ~90% — a real peak, but below the midpoint's 0.85, not
+  above it. Don't assume the climax must out-tense the midpoint; this
+  template deliberately doesn't ask for that.
+- **Deliberate troughs after peaks.** Low Point is a `"down"` beat (0.35)
+  at ~75% — shortly after the midpoint's high, before the climb back up
+  through Final Turn to Climax. That dip is breathing room, not a mistake
+  — don't chase the curve upward everywhere.
 - **Escalating try-fail stakes**, not escalating raw tension every chapter —
   the curve tolerates dips; `tension_deviations(delta=0.25)` only flags
   chapters whose *scored* tension diverges from the target by more than the
@@ -54,11 +56,12 @@ flat at that one value.
 ## Practical use when drafting a brief or reviewing pacing
 
 - Before drafting a brief for a chapter, check where its ordinal sits on
-  the target curve (gentle open near 0.3, climbing toward 0.75 at
-  midpoint, cresting at 0.85 near the climax, settling to 0.5 at the end)
-  and let that inform the chapter's `value_shift`/`planned_outcome`
-  choice — a chapter sitting in a trough shouldn't be forced into a
-  `no_and` disaster just because the last chapter was one.
+  the target curve (gentle open near 0.3, cresting at 0.85 at the
+  midpoint, dipping to 0.35 at the low point, a lower 0.75 peak at the
+  climax, settling to 0.5 at the end) and let that inform the chapter's
+  `value_shift`/`planned_outcome` choice — a chapter sitting in a trough
+  shouldn't be forced into a `no_and` disaster just because the last
+  chapter was one.
 - POV cadence and congestion (braiding multiple threads) interact with
   this curve: don't stack every thread's crisis beat in the same trough or
   peak chapter unless the blueprint's beats genuinely call for

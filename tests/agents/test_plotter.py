@@ -534,7 +534,7 @@ def test_build_plotter_runner_tooled_branch_passes_plotter_skills(monkeypatch):
     backend = CanonBackend(read_store=None)
     plotter_mod.build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
     assert captured["skills"] == plotter_mod.PLOTTER_SKILLS
-    assert captured["skills"] == ["/skills/outlining", "/skills/promise-payoff", "/skills/pacing"]
+    assert captured["skills"] == ["/skills"]
 
 
 def test_build_plotter_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):

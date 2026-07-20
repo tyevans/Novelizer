@@ -720,7 +720,7 @@ def test_build_author_runner_tooled_branch_passes_author_skills(monkeypatch):
     backend = CanonBackend(read_store=None)
     author_mod.build_author_runner(FakeSettings(), backend=backend, tools=[])
     assert captured["skills"] == author_mod.AUTHOR_SKILLS
-    assert captured["skills"] == ["/skills/scene-sequel", "/skills/pacing"]
+    assert captured["skills"] == ["/skills"]
 
 
 def test_build_author_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):

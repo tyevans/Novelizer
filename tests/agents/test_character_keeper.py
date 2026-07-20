@@ -472,7 +472,7 @@ def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkey
     backend = CanonBackend(read_store=None)
     keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
     assert captured["skills"] == keeper_mod.KEEPER_SKILLS
-    assert captured["skills"] == ["/skills/character-arcs"]
+    assert captured["skills"] == ["/skills"]
 
 
 def test_build_character_keeper_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):

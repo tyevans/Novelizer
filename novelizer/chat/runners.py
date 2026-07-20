@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.agents.author import RETRIEVAL_NOTE
 from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
 
@@ -12,10 +13,10 @@ conversation genuinely warrants a real change to the story record; otherwise lea
 intent list empty. Never invent ids — cite ids shown in the story context, or use the
 minting action (plant/introduce) with a name."""
 
-CHAT_SKILLS = [
-    "/skills/outlining", "/skills/promise-payoff", "/skills/pacing",
-    "/skills/scene-sequel", "/skills/character-arcs",
-]
+# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
+# middleware's container source contract makes per-agent pack selectivity
+# unavailable, so every tooled agent shares the same source list.
+CHAT_SKILLS = CRAFT_SKILLS
 
 
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
