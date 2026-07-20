@@ -128,3 +128,54 @@ def test_chapter_map_note_none_cast_when_empty():
     chs = [Chapter(id="c1", title="One", prose="p")]
     note = chapter_map_note(chs)
     assert "cast: none" in note
+
+
+from novelizer.brain.context import ledger_note, resolution_pacing_note
+from novelizer.store.models import PromiseRecord, SecretRecord as _SecretRecord
+
+
+def test_ledger_note_empty_when_no_promises():
+    assert ledger_note([], _chapters(3)) == ""
+
+
+def test_ledger_note_empty_when_no_open_or_due_promises():
+    p = PromiseRecord(id="a", name="A")
+    assert ledger_note([p], _chapters(10)) == ""
+
+
+def test_ledger_note_lists_overdue_promise_first():
+    p = PromiseRecord(id="a", name="A", window_lo=1, window_hi=2)
+    note = ledger_note([p], _chapters(3))
+    assert note.startswith("\n\nPromise ledger (pay or release these, citing ids exactly):\n")
+    assert "OVERDUE — window closed ch 2" in note
+    assert "A" in note and "id:a" in note
+
+
+def test_ledger_note_lists_due_promise():
+    p = PromiseRecord(id="a", name="A", window_lo=2, window_hi=4)
+    note = ledger_note([p], _chapters(3))
+    assert "due ch 2-4" in note
+    assert "OVERDUE" not in note
+
+
+def test_resolution_pacing_note_empty_when_quiet():
+    assert resolution_pacing_note([], [], _chapters(5)) == ""
+
+
+def test_resolution_pacing_note_lists_overdue_thread():
+    t = ThreadRecord(id="t", name="The Locket", window_lo=1, window_hi=2)
+    note = resolution_pacing_note([t], [], _chapters(3))
+    assert note.startswith("\n\nResolution pacing:\n")
+    assert "The Locket" in note and "window" in note and "OVERDUE" in note
+
+
+def test_resolution_pacing_note_lists_overdue_reveal():
+    s = _SecretRecord(id="s", title="The Heir Lives", reveal_window_lo=1, reveal_window_hi=2)
+    note = resolution_pacing_note([], [s], _chapters(3))
+    assert "The Heir Lives" in note and "OVERDUE" in note
+
+
+def test_resolution_pacing_note_lists_congestion():
+    ts = [ThreadRecord(id=f"t{i}", name=str(i), window_lo=19, window_hi=21) for i in range(3)]
+    note = resolution_pacing_note(ts, [], _chapters(1))
+    assert "resolve in the same window" in note

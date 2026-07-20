@@ -2,7 +2,7 @@ from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import causal_flags_note, pacing_flags_note
+from novelizer.brain.context import causal_flags_note, ledger_note, pacing_flags_note, resolution_pacing_note
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -76,6 +76,8 @@ class Editor(BaseAgent):
         pacing = pacing_flags_note(ctx["scores"], delta=self._sag_spike_delta)
         chapter_order = [c.id for c in ctx["chapters"]]
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
+        ledger = ledger_note(ctx.get("promises", []), ctx["chapters"])
+        pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
         # Citation aid, not knowledge-state injection (that is Author-only per
         # Locked decision #7): knowledge_intents must cite an existing secret
         # id or be dropped at commit time, so the Editor needs the id list in
@@ -104,7 +106,10 @@ class Editor(BaseAgent):
         if drift_filed:
             listing = "\n".join(f"- {d}" for d in drift_filed[:20])
             drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}{secret_ids}{drift}"
+        msg = (
+            f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
+            f"{secret_ids}{drift}{ledger}{pacing_plan}"
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

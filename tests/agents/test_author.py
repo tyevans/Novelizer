@@ -712,3 +712,31 @@ async def test_author_commits_promise_intents_with_validation(stack):
 async def test_author_system_prompt_mentions_promises():
     from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
     assert "promise" in AUTHOR_SYSTEM_PROMPT.lower()
+
+
+async def test_author_prompt_includes_ledger_note_when_promise_overdue(stack):
+    from novelizer.canon.events import PromiseMade
+
+    events, proj, read, committer = stack
+    await events.append(EventType.PROMISE_MADE, "the-sealed-letter",
+                        PromiseMade(id="the-sealed-letter", name="The Sealed Letter", window_hi=1))
+    for i in range(2):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Promise ledger" in sent
+    assert "The Sealed Letter" in sent and "the-sealed-letter" in sent
+
+
+async def test_author_prompt_omits_ledger_note_when_no_promises(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Promise ledger" not in sent

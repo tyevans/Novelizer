@@ -1,6 +1,9 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
-from novelizer.brain.context import causal_flags_note, chapter_map_note, known_secrets_note, stale_threads_note
+from novelizer.brain.context import (
+    causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
+    stale_threads_note,
+)
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -52,6 +55,8 @@ def _summarize(
     brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])
+    ledger = ledger_note(ctx.get("promises", []), ctx["chapters"])
+    pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
     pool = casting_pool_note(ctx.get("hand"))
     sparks = inspiration_note(ctx.get("hand"))
     if pull_mode:
@@ -61,7 +66,8 @@ def _summarize(
         chapters_block = f"Previous chapters:\n{prev}"
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
+        f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}"
+        f"{ledger}{pacing_plan}\n\nWrite the next chapter."
     )
 
 
