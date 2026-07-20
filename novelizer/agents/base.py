@@ -5,7 +5,11 @@ import uuid
 from typing import Protocol
 from pydantic import BaseModel, Field
 from novelizer.canon.events import EventType, AgentRemark
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent
+from novelizer.agents.schemas import (
+    ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+)
+from novelizer.store.models import ChapterBriefRecord
 from novelizer.agents import intents as intent_helpers
 from novelizer.run_context import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
@@ -227,4 +231,41 @@ class BaseAgent:
         await intent_helpers.commit_promise_intents(
             self._committer, self.name, intents, active_promise_ids, active_thread_ids,
             chapter_id=chapter_id, source=source,
+        )
+
+    async def _commit_blueprint_plan(self, plan: BlueprintPlan | None) -> None:
+        await intent_helpers.commit_blueprint_plan(self._committer, self.name, plan)
+
+    async def _commit_brief_intents(
+        self,
+        intents: list[BriefIntent],
+        open_brief_ids: list[ChapterBriefRecord],
+        drafted_chapter_count: int,
+        active_thread_ids: set[str],
+        active_beat_ids: set[str],
+        active_promise_ids: set[str],
+    ) -> None:
+        await intent_helpers.commit_brief_intents(
+            self._committer, self.name, intents, open_brief_ids, drafted_chapter_count,
+            active_thread_ids, active_beat_ids, active_promise_ids,
+        )
+
+    async def _commit_beat_intents(
+        self,
+        intents: list[BeatIntent],
+        active_beat_ids: set[str],
+        valid_chapter_ids: set[str],
+    ) -> None:
+        await intent_helpers.commit_beat_intents(
+            self._committer, self.name, intents, active_beat_ids, valid_chapter_ids
+        )
+
+    async def _commit_resolution_plan_intents(
+        self,
+        intents: list[ResolutionPlanIntent],
+        active_thread_ids: set[str],
+        unrevealed_secret_ids: set[str],
+    ) -> None:
+        await intent_helpers.commit_resolution_plan_intents(
+            self._committer, self.name, intents, active_thread_ids, unrevealed_secret_ids
         )
