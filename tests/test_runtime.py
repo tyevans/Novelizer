@@ -618,12 +618,12 @@ async def test_chat_runner_for_falls_back_to_bare_before_start(settings, monkeyp
 
 
 _PHASE_B_AGENTS = [
-    ("world_architect", "world_architect_tools_enabled", "novelizer.runtime.build_world_architect_runner"),
-    ("character_keeper", "character_keeper_tools_enabled", "novelizer.runtime.build_character_keeper_runner"),
-    ("editor", "editor_tools_enabled", "novelizer.runtime.build_editor_runner"),
-    ("retconner", "retconner_tools_enabled", "novelizer.runtime.build_retconner_runner"),
-    ("structure_analyst", "structure_analyst_tools_enabled", "novelizer.runtime.build_structure_analyst_runner"),
-    ("plotter", "plotter_tools_enabled", "novelizer.runtime.build_plotter_runner"),
+    ("world_architect", "world_architect_tools_enabled", "novelizer.agents.world_architect.build_world_architect_runner"),
+    ("character_keeper", "character_keeper_tools_enabled", "novelizer.agents.character_keeper.build_character_keeper_runner"),
+    ("editor", "editor_tools_enabled", "novelizer.agents.editor.build_editor_runner"),
+    ("retconner", "retconner_tools_enabled", "novelizer.agents.retconner.build_retconner_runner"),
+    ("structure_analyst", "structure_analyst_tools_enabled", "novelizer.agents.structure_analyst.build_structure_analyst_runner"),
+    ("plotter", "plotter_tools_enabled", "novelizer.agents.plotter.build_plotter_runner"),
 ]
 
 

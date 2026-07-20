@@ -23,6 +23,8 @@ from novelizer.agents.retconner import Retconner, build_retconner_runner
 from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
 from novelizer.agents.plotter import Plotter, build_plotter_runner
 from novelizer.agents.muse import Muse
+from novelizer.agents.registry import AGENT_REGISTRY
+from novelizer.agents.registry_types import AgentContext
 from novelizer.voices.loader import load_voice_pack
 from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
@@ -170,82 +172,34 @@ class Runtime:
         personalities = self.voice_pack.agent_personalities
         s = self.settings
         self._canon_backend, self._canon_tools = self._phase_a_toolkit()
-        self._tooling_pinned = {
-            "world_architect": s.world_architect_tools_enabled,
-            "character_keeper": s.character_keeper_tools_enabled,
-            "editor": s.editor_tools_enabled,
-            "retconner": s.retconner_tools_enabled,
-            "structure_analyst": s.structure_analyst_tools_enabled,
-            "plotter": s.plotter_tools_enabled,
-        }
         provenance = {
             "model": s.author_model,
             "temperature": s.author_temperature,
             "voice_pack": self.voice_pack.name,
             "prose_profile": s.prose_profile,
         }
-        author_builder = self._tooled(build_author_runner, s.author_tools_enabled)
-        self.author = Author(
-            self._runner_for("author", author_builder), self.read, self.committer,
-            interval=s.author_interval, casting_note=casting_note, personality=personalities.get("author", ""),
-            provenance=provenance,
-            prior_chapter_summary_chars=s.prior_chapter_summary_chars,
-            staleness_threshold_chapters=s.staleness_threshold_chapters,
-            pull_mode=s.author_tools_enabled,
+        ctx = AgentContext(
+            read=self.read, committer=self.committer, events=self.events, settings=s,
+            casting_note=casting_note, personalities=personalities, provenance=provenance,
+            tooled=self._tooled, runner_for=self._runner_for,
         )
-        world_architect_builder = self._tooled(build_world_architect_runner, s.world_architect_tools_enabled)
-        self.world_architect = WorldArchitect(
-            self._runner_for("world_architect", world_architect_builder), self.read, self.committer,
-            interval=s.default_agent_interval, personality=personalities.get("world_architect", ""),
-        )
-        character_keeper_builder = self._tooled(build_character_keeper_runner, s.character_keeper_tools_enabled)
-        self.character_keeper = CharacterKeeper(
-            self._runner_for("character_keeper", character_keeper_builder), self.read, self.committer,
-            interval=s.default_agent_interval, personality=personalities.get("character_keeper", ""),
-            prose_chars=s.keeper_prose_chars,
-            pull_mode=s.character_keeper_tools_enabled,
-        )
-        editor_builder = self._tooled(build_editor_runner, s.editor_tools_enabled)
-        self.editor = Editor(
-            self._runner_for("editor", editor_builder), self.read, self.committer,
-            interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
-            sag_spike_delta=s.sag_spike_delta,
-        )
-        checker_builder = self._tooled(build_continuity_checker_runner, s.checker_tools_enabled)
-        self.continuity_checker = ContinuityChecker(
-            self._runner_for("continuity_checker", checker_builder),
-            self._runner_for("continuity_checker_mining", build_continuity_mining_runner, fallback_name="continuity_checker"),
-            self.read, self.committer, self.events,
-            interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
-            pull_mode=s.checker_tools_enabled,
-        )
-        retconner_builder = self._tooled(build_retconner_runner, s.retconner_tools_enabled)
-        self.retconner = Retconner(
-            self._runner_for("retconner", retconner_builder), self.read, self.committer,
-            interval=s.default_agent_interval, personality=personalities.get("retconner", ""),
-        )
-        structure_analyst_builder = self._tooled(build_structure_analyst_runner, s.structure_analyst_tools_enabled)
-        self.structure_analyst = StructureAnalyst(
-            self._runner_for("structure_analyst", structure_analyst_builder), self.read, self.committer,
-            interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
-            pull_mode=s.structure_analyst_tools_enabled,
-        )
-        plotter_builder = self._tooled(build_plotter_runner, s.plotter_tools_enabled)
-        self.plotter = Plotter(
-            self._runner_for("plotter", plotter_builder), self.read, self.committer,
-            interval=s.plotter_interval, personality=personalities.get("plotter", ""),
-        )
-        self.muse = Muse(
-            self.read, self.committer,
-            interval=s.muse_interval, era=s.muse_era,
-            exclusion_hands=s.muse_exclusion_hands, personality=personalities.get("muse", ""),
-        )
-        self.agents = [
-            self.world_architect, self.character_keeper, self.muse,
-            # the planner ticks before the writer in a fresh room
-            self.plotter, self.author,
-            self.editor, self.continuity_checker, self.retconner, self.structure_analyst,
-        ]
+        self._tooling_pinned = {
+            spec.name: spec.tool_grant.is_enabled(s)
+            for spec in AGENT_REGISTRY if spec.tool_grant is not None
+        }
+        self.agents_by_name = {spec.name: spec.construct(ctx) for spec in AGENT_REGISTRY}
+        self.world_architect = self.agents_by_name["world_architect"]
+        self.character_keeper = self.agents_by_name["character_keeper"]
+        self.muse = self.agents_by_name["muse"]
+        self.plotter = self.agents_by_name["plotter"]
+        self.author = self.agents_by_name["author"]
+        self.editor = self.agents_by_name["editor"]
+        self.continuity_checker = self.agents_by_name["continuity_checker"]
+        self.retconner = self.agents_by_name["retconner"]
+        self.structure_analyst = self.agents_by_name["structure_analyst"]
+        # the planner ticks before the writer in a fresh room -- AGENT_REGISTRY
+        # order encodes scheduling order, same as this list did before.
+        self.agents = [self.agents_by_name[spec.name] for spec in AGENT_REGISTRY]
         for agent in self.agents:
             agent.telemetry = self.telemetry
         self.scheduler = Scheduler(
