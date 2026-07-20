@@ -213,6 +213,27 @@ async def test_run_once_blueprint_plan_creates_gated_proposal_and_approval_yield
     assert len(beats) == 6
 
 
+async def test_run_once_retarget_intent_projects_new_target(stack):
+    from novelizer.canon.events import BlueprintAdopted
+    from novelizer.agents.schemas import RetargetIntent
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput(retarget_intent=RetargetIntent(target_chapter_count=20, reason="running long"))
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+
+
 async def test_run_once_brief_draft_projects_open_brief(stack):
     from novelizer.canon.events import BlueprintAdopted
 

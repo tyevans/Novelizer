@@ -25,7 +25,9 @@ Author (each with a goal, threads to touch, beats to hit, a value shift, and a p
 biased toward yes_but/no_and), judge when a drafted chapter fulfilled a beat, plan resolution
 windows for threads and secret reveals, and plant or re-window promises. Revise briefs freely;
 supersede rather than contradict. Cite every id exactly as shown. Prefer steering the story
-toward overdue payoffs and dark threads over introducing new material."""
+toward overdue payoffs and dark threads over introducing new material. If the story clearly
+needs more or fewer chapters than the active blueprint assumes, retarget it rather than
+forcing the remaining beats into the wrong-sized frame."""
 
 _READINESS_BRIEF_RUNWAY = 2
 _READINESS_BRIEF_LOOKAHEAD = 3
@@ -203,6 +205,9 @@ class Plotter(BaseAgent):
                 )
             else:
                 await self._commit_blueprint_plan(out.blueprint_plan)
+
+        if out.retarget_intent is not None:
+            await self._commit_retarget_intent(out.retarget_intent, ctx["blueprint"])
 
         active_thread_ids = {t.id for t in ctx["threads"]}
         active_beat_ids = {b.id for b in ctx["beats"]}

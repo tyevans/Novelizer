@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 from novelizer.canon.events import (
+    BlueprintRetargeted,
     EventType,
     InspirationHandSuperseded,
     SecretRevealPlanned,
@@ -69,6 +70,20 @@ async def plan_thread_resolution(
         ),
     )
     return f"resolution window ch{window_lo}-{window_hi} planned for '{thread.name}'"
+
+
+async def retarget_blueprint(events, read, target_chapter_count: int) -> str:
+    active = await read.get_active_blueprint()
+    if active is None:
+        return "no active blueprint to retarget"
+    if target_chapter_count < 3:
+        return f"invalid target_chapter_count {target_chapter_count} (need >= 3)"
+    await events.append(
+        EventType.BLUEPRINT_RETARGETED,
+        active.id,
+        BlueprintRetargeted(blueprint_id=active.id, target_chapter_count=target_chapter_count),
+    )
+    return f"blueprint retargeted to {target_chapter_count} chapters"
 
 
 async def plan_secret_reveal(events, read, secret_id: str, window_lo: int, window_hi: int) -> str:
@@ -163,6 +178,12 @@ async def dispatch(runtime, line: str) -> str:
         next_state = AutonomyState(global_level=level, overrides=current.overrides)
         await autonomy(runtime.events, next_state)
         return f"Global autonomy set to {level.value}"
+    if cmd == "retarget" and rest:
+        try:
+            n = int(rest[0])
+        except ValueError:
+            return f"Invalid chapter count: {rest[0]}"
+        return await retarget_blueprint(runtime.events, runtime.read, n)
     if cmd == "approve" and rest:
         return await _dispatch_decision(runtime, rest[0], "approve")
     if cmd == "reject" and rest:

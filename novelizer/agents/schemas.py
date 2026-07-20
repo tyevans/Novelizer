@@ -157,6 +157,18 @@ class BlueprintPlan(BaseModel):
     note: str = ""
 
 
+class RetargetIntent(BaseModel):
+    """One agent-declared retarget of the active blueprint's chapter count --
+    the story clearly needs more or fewer chapters than the blueprint
+    assumed. `commit_retarget_intent` (novelizer/agents/intents.py) drops it
+    when there is no active blueprint, when target_chapter_count < 3, or
+    when it equals the blueprint's current count (no-change guard against
+    churn)."""
+
+    target_chapter_count: int
+    reason: str = ""
+
+
 class BriefIntent(BaseModel):
     """One agent-declared chapter-brief action from structured output.
 
@@ -288,6 +300,7 @@ class PlotterOutput(BaseModel):
     brief/beat/resolution/promise intents for the current pass."""
 
     blueprint_plan: BlueprintPlan | None = None
+    retarget_intent: RetargetIntent | None = None
     brief_intents: list[BriefIntent] = Field(default_factory=list)
     beat_intents: list[BeatIntent] = Field(default_factory=list)
     resolution_plan_intents: list[ResolutionPlanIntent] = Field(default_factory=list)

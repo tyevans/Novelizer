@@ -216,6 +216,28 @@ def _seed_thread(story_root, thread_id="the-locket", name="The Locket") -> str:
     return thread_id
 
 
+def _seed_blueprint(story_root, blueprint_id="b1", target_chapter_count=20) -> str:
+    from novelizer.canon.events import BlueprintAdopted
+    db_path = str(story_root / "world.db")
+
+    async def _write():
+        events = EventStore(db_path)
+        await events.init()
+        try:
+            await events.append(
+                EventType.BLUEPRINT_ADOPTED, blueprint_id,
+                BlueprintAdopted(
+                    blueprint_id=blueprint_id, framework="six-position",
+                    target_chapter_count=target_chapter_count, beats=[],
+                ),
+            )
+        finally:
+            await events.close()
+
+    asyncio.run(_write())
+    return blueprint_id
+
+
 def _seed_secret(story_root, secret_id="the-map", title="The Map") -> str:
     db_path = str(story_root / "world.db")
 
@@ -453,6 +475,33 @@ def test_plan_resolution_invalid_window_reports_rejection(tmp_path):
         )
         assert r.exit_code == 0, r.output
         assert "invalid window" in _strip_ansi(r.output)
+        assert "\x1b[33m" in r.output  # yellow
+    finally:
+        os.unlink(path)
+
+
+def test_retarget_command_sets_target_chapter_count(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        _seed_blueprint(story)
+        r = CliRunner().invoke(cli, ["--story", str(story), "retarget", "30"], env=_env(path, xdg))
+        assert r.exit_code == 0, r.output
+        assert "blueprint retargeted to 30 chapters" in _strip_ansi(r.output)
+        assert "\x1b[32m" in r.output  # green
+    finally:
+        os.unlink(path)
+
+
+def test_retarget_command_rejects_no_active_blueprint(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        r = CliRunner().invoke(cli, ["--story", str(story), "retarget", "30"], env=_env(path, xdg))
+        assert r.exit_code == 0, r.output
+        assert "no active blueprint" in _strip_ansi(r.output).lower()
         assert "\x1b[33m" in r.output  # yellow
     finally:
         os.unlink(path)
