@@ -212,3 +212,22 @@ Windows are 1-based chapter numbers (`lo hi`; `0 0` clears). Threads past their 
 show `OVERDUE` on the board and raise a "Resolution pacing" note; overdue promises raise
 the "Promise ledger" note nudging agents to pay or release. Three-plus resolutions
 targeting the same span raise a congestion warning before it happens.
+
+## 10. The Plotter and the blueprint
+
+The room now has a ninth agent: the **Plotter**, its showrunner. It never writes prose.
+When a story has chapters but no adopted shape, it proposes a **blueprint** — a structural
+framework (e.g. the six-position map), a target length, and minted beats with target
+chapter windows. Blueprint adoption is special: it lands in your **approval queue at every
+autonomy level**, even full auto — adopting a shape re-frames the whole book, so the
+Director always signs off.
+
+Once a blueprint is active, the Plotter keeps 1–3 **chapter briefs** drafted ahead of the
+Author — each with a goal, threads to touch, beats to hit, a value shift, and a planned
+outcome. The Author treats the current brief as its assignment (honoring it or deviating
+deliberately, with the deviation explained in its feed note), and the brief is marked
+fulfilled when the chapter lands. The Plotter also owns resolution windows now — it plans
+thread payoffs and secret reveals without you lifting a finger (your `plan-resolution` /
+`plan-reveal` commands still work and take precedence in its context).
+
+Settings: `plotter_interval` (default 240s) and `plotter_tools_enabled` (default true).
