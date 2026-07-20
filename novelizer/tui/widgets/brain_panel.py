@@ -50,7 +50,11 @@ class BrainPanel(Vertical):
         every cycle (M5.3 single-sourcing: settings -> pure-function params;
         keyword-only with no defaults so the app cannot forget to pass them)."""
         chapters = await read.list_chapters()  # one snapshot shared by three tabs
-        shape = shape_tab(await read.list_structure_scores(), chapters, delta)
+        blueprint = await read.get_active_blueprint()
+        beats = await read.list_beats()
+        shape = shape_tab(
+            await read.list_structure_scores(), chapters, delta, blueprint, beats
+        )
         secret_records = await read.list_secrets()
         threads = threads_tab(
             await read.list_threads(), chapters, await read.list_promises(), secret_records, threshold
@@ -60,7 +64,9 @@ class BrainPanel(Vertical):
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
 
-        shape_rows = [r for r in (shape.spark, shape.markers, shape.meta) if r is not None]
+        shape_rows = [
+            r for r in (shape.spark, shape.target, shape.markers, shape.meta) if r is not None
+        ]
         self.query_one("#shape_body", Static).update(Group(*shape_rows, *shape.callouts))
         self.query_one("#threads_body", Static).update(_joined(threads.lines))
         self.query_one("#secrets_body", Static).update(_joined(secrets.lines))

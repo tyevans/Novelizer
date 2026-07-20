@@ -18,10 +18,13 @@ from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.resolution_pacing import congested_windows, overdue_reveals, overdue_resolutions
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
+from novelizer.brain.tension_target import tension_deviations, target_curve
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import (
+    BeatRecord,
+    BlueprintRecord,
     CausalEdgeRecord,
     Chapter,
     Character,
@@ -82,10 +85,15 @@ class ShapeTab:
     meta: Text              # axis + pacing line, or the dim empty state
     callouts: list[Text]    # one ALARM_STYLE line per sag/spike, chapter order
     alarm_count: int
+    target: Text | None = None  # "plan     ▂▅█" — target_curve overlay; None with no blueprint
 
 
 def shape_tab(
-    scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA
+    scores: list[StructureScore],
+    chapters: list[Chapter],
+    delta: float = SAG_SPIKE_DELTA,
+    blueprint: BlueprintRecord | None = None,
+    beats: list[BeatRecord] | None = None,
 ) -> ShapeTab:
     """The Shape tab: a rendered tension-by-chapter spark row (rich.text.Text,
     not raw sparkline data) plus sag/spike callouts naming chapter TITLES.
@@ -94,7 +102,7 @@ def shape_tab(
     app's _brain_loop (M5.3 single-sourcing); the default is the imported
     constant, never a re-typed literal."""
     if not scores:
-        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0)
+        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0, None)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
     chapter_ids = {c.id for c in chapters}
     ordered = [by_chapter[c.id] for c in chapters if c.id in by_chapter]
@@ -122,10 +130,30 @@ def shape_tab(
         for s in ordered
         if s.chapter_id in flags
     ]
+
+    target: Text | None = None
+    if blueprint is not None:
+        curve = target_curve(blueprint, beats or [])
+        target_label = "plan".ljust(len(SHAPE_GUTTER))
+        target = Text(no_wrap=True, overflow="ellipsis", style=DIM)
+        target.append(target_label)
+        # ordinals 1..len(ordered) — truncate the curve to the drafted
+        # range; the curve's last value pads any shortfall via
+        # tension_deviations, never re-derived here.
+        for i in range(len(ordered)):
+            value = curve[i] if i < len(curve) else (curve[-1] if curve else 0.0)
+            target.append(spark_char(value))
+
+        deviations = tension_deviations(blueprint, beats or [], scores, chapters, delta)
+        callouts = callouts + [
+            Text(f"⚠ tension off-plan: {chapter_label(cid, chapters)}", style=ALARM_STYLE)
+            for cid, _actual, _target in deviations
+        ]
+
     axis = f"ch 1 ▸ ch {len(tensions)}" if len(tensions) > 1 else "ch 1"
     pacing = ordered[-1].pacing_label
     meta = Text(f"{axis} · pacing: {pacing}" if pacing else axis, style=DIM)
-    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts))
+    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts), target)
 
 
 AGE_BAR_CELLS = 5

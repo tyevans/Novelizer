@@ -1,6 +1,6 @@
 from hypothesis import given, strategies as st
 
-from novelizer.store.models import Chapter, StructureScore, ThreadRecord, ThreadState
+from novelizer.store.models import BeatRecord, BlueprintRecord, Chapter, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.brain_model import (
     SHAPE_EMPTY,
     SHAPE_GUTTER,
@@ -169,6 +169,52 @@ def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     assert tab.alarm_count == len(tab.callouts)
     assert len(tab.spark.plain) == len(SHAPE_GUTTER) + len(tensions)
     assert tab.markers is None or len(tab.markers.plain) == len(tab.spark.plain)
+
+
+def test_shape_tab_no_blueprint_target_is_none_and_output_unchanged():
+    chs = _chapters("One", "Two", "Three")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.3, 0.5, 0.7])
+    ]
+    tab = shape_tab(scores, chs)
+    assert tab.target is None
+    baseline = shape_tab(scores, chs, blueprint=None, beats=[])
+    assert baseline.target is None
+    assert baseline.spark.plain == tab.spark.plain
+    assert baseline.callouts == tab.callouts
+    assert baseline.alarm_count == tab.alarm_count
+
+
+def test_shape_tab_with_blueprint_adds_target_row_labeled_plan():
+    chs = _chapters("One", "Two", "Three")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.3, 0.5, 0.7])
+    ]
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=3)
+    beats: list[BeatRecord] = []
+    tab = shape_tab(scores, chs, blueprint=blueprint, beats=beats)
+    assert tab.target is not None
+    assert "plan" in tab.target.plain
+    assert len(tab.target.plain) == len(tab.spark.plain)
+
+
+def test_shape_tab_deviation_from_target_adds_off_plan_callout():
+    chs = _chapters("One", "Two", "Three")
+    # Blueprint anchors: (1, 0.3) implicit start, (3, 0.5) implicit end.
+    # c1 tension of 0.95 deviates hard from the 0.3 target.
+    scores = [
+        StructureScore(chapter_id="c1", tension=0.95, pacing_label=""),
+        StructureScore(chapter_id="c2", tension=0.4, pacing_label=""),
+        StructureScore(chapter_id="c3", tension=0.5, pacing_label=""),
+    ]
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=3)
+    beats: list[BeatRecord] = []
+    tab = shape_tab(scores, chs, delta=0.25, blueprint=blueprint, beats=beats)
+    assert any(c.plain == '⚠ tension off-plan: ch 1 "One"' for c in tab.callouts)
+    assert any(str(c.style) == ALARM_STYLE for c in tab.callouts if "off-plan" in c.plain)
+    assert tab.alarm_count == len(tab.callouts)
 
 
 def test_age_bar_scales_fill_and_heat_with_elapsed_over_threshold():
