@@ -12,17 +12,22 @@ from novelizer.scheduler import Scheduler
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
 from novelizer.telemetry.callbacks import TelemetryCallbackHandler
-from novelizer.agents.author import Author, build_author_runner
-from novelizer.agents.world_architect import WorldArchitect, build_world_architect_runner
-from novelizer.agents.character_keeper import CharacterKeeper, build_character_keeper_runner
-from novelizer.agents.editor import Editor, build_editor_runner
+from novelizer.agents.author import build_author_runner
+from novelizer.agents.world_architect import build_world_architect_runner
+from novelizer.agents.character_keeper import build_character_keeper_runner
+from novelizer.agents.editor import build_editor_runner
 from novelizer.agents.continuity_checker import (
-    ContinuityChecker, build_continuity_checker_runner, build_continuity_mining_runner,
+    build_continuity_checker_runner, build_continuity_mining_runner,
 )
-from novelizer.agents.retconner import Retconner, build_retconner_runner
-from novelizer.agents.structure_analyst import StructureAnalyst, build_structure_analyst_runner
-from novelizer.agents.plotter import Plotter, build_plotter_runner
-from novelizer.agents.muse import Muse
+from novelizer.agents.retconner import build_retconner_runner
+from novelizer.agents.structure_analyst import build_structure_analyst_runner
+from novelizer.agents.plotter import build_plotter_runner
+# NOTE: start() builds runners via each agent module's own build_X_runner binding
+# (reached through AgentSpec.construct/_construct in registry.py), while
+# apply_settings() below calls the build_X_runner names imported directly into
+# this module's namespace -- two separate bindings to the same underlying
+# functions. This split is intentional (a prior fix in this branch corrected a
+# test that monkeypatched the wrong binding); keep both in sync if you touch either.
 from novelizer.agents.registry import AGENT_REGISTRY
 from novelizer.agents.registry_types import AgentContext
 from novelizer.voices.loader import load_voice_pack
@@ -30,6 +35,16 @@ from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
 from novelizer.store.embeddings import EmbeddingStore
 from novelizer.store.indexer import CanonIndexer
+
+# Agents pinned into Runtime._tooling_pinned. author and continuity_checker are
+# deliberately excluded here even though their SPECs carry a tool_grant (needed
+# internally by their own _construct(ctx) functions) -- those two track their
+# own tooling state via `.pull_mode` on the agent instance instead, read
+# directly in apply_settings().
+_TOOLING_PINNED_NAMES = frozenset({
+    "world_architect", "character_keeper", "editor",
+    "retconner", "structure_analyst", "plotter",
+})
 
 
 class Runtime:
@@ -185,7 +200,8 @@ class Runtime:
         )
         self._tooling_pinned = {
             spec.name: spec.tool_grant.is_enabled(s)
-            for spec in AGENT_REGISTRY if spec.tool_grant is not None
+            for spec in AGENT_REGISTRY
+            if spec.tool_grant is not None and spec.name in _TOOLING_PINNED_NAMES
         }
         self.agents_by_name = {spec.name: spec.construct(ctx) for spec in AGENT_REGISTRY}
         self.world_architect = self.agents_by_name["world_architect"]
