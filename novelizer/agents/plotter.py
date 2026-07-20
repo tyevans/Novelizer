@@ -3,6 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+from novelizer.brain.beat_drift import beat_drifts
 from novelizer.brain.context import (
     arc_note, beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note,
     stale_threads_note, tension_target_note,
@@ -125,7 +126,13 @@ class Plotter(BaseAgent):
             if chapter_count < b.target_ordinal <= chapter_count + _READINESS_BRIEF_LOOKAHEAD
         )
         needed = max(0, _READINESS_BRIEF_RUNWAY - open_briefs_ahead)
-        return min(1.0, needed / _READINESS_BRIEF_RUNWAY)
+        runway = min(1.0, needed / _READINESS_BRIEF_RUNWAY)
+        if runway < 1.0 and blueprint is not None:
+            beats = await self._read.list_beats()
+            drifts = beat_drifts(blueprint, beats, chapters)
+            if any(d.kind == "late" for d in drifts):
+                return max(runway, 0.9)
+        return runway
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
