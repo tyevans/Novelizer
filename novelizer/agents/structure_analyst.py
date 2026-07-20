@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.schemas import StructureAnalystOutput
+from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, AnnotationStructureScored
@@ -76,8 +77,25 @@ class StructureAnalyst(BaseAgent):
         await self.commit(out, ctx)
 
 
-def build_structure_analyst_runner(settings, callbacks=None):
+def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)
+    model = build_chat_model(
+        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+        settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+        callbacks=None, streaming=callbacks is not None,
+    )
+    if backend is not None:
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
+        graph = create_deep_agent(
+            model=model, system_prompt=system_prompt, response_format=StructureAnalystOutput,
+            backend=backend, tools=tools,
+        )
+        config = {"recursion_limit": 50}
+        if callbacks:
+            config["callbacks"] = callbacks
+        return graph.with_config(config)
+    graph = create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)
+    if callbacks:
+        return graph.with_config({"callbacks": callbacks})
+    return graph

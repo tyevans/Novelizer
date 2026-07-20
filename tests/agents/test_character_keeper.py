@@ -322,3 +322,39 @@ async def test_retcon_matching_open_description_is_not_refiled(stack):
     await proj.catch_up()
     open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
     assert len([r for r in open_reqs if r.description == "stoic vs weeping"]) == 1
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_character_keeper_runner_without_backend_stays_constructible():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+
+    runner = build_character_keeper_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_character_keeper_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.character_keeper import build_character_keeper_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_character_keeper_runner_with_backend_bounds_recursion():
+    from novelizer.agents.character_keeper import build_character_keeper_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50
