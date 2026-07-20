@@ -209,6 +209,6 @@ novelizer plan-reveal SECRET_ID 5 9
 ```
 
 Windows are 1-based chapter numbers (`lo hi`; `0 0` clears). Threads past their window
-show `OVERDUE` on the board, agents get a "Promise ledger" note nudging them to pay or
-release, and three-plus resolutions targeting the same span raise a congestion warning
-before it happens.
+show `OVERDUE` on the board and raise a "Resolution pacing" note; overdue promises raise
+the "Promise ledger" note nudging agents to pay or release. Three-plus resolutions
+targeting the same span raise a congestion warning before it happens.

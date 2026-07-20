@@ -457,6 +457,31 @@ def test_threads_tab_empty_state_unchanged_when_no_threads_and_no_promises():
     assert tab.alarm_count == 0
 
 
+def test_threads_tab_renders_a_line_per_overdue_reveal():
+    chs = _chapters("One", "Two", "Three")  # now = 3
+    secrets = [SecretRecord(id="s", title="The Forged Letter", reveal_window_lo=1, reveal_window_hi=2)]
+    tab = threads_tab([], chs, promises=[], secrets=secrets)
+    plains = [line.plain for line in tab.lines]
+    assert any(l.startswith("⚠ reveal overdue: 'The Forged Letter'") and "ch2" in l for l in plains)
+    overdue_line = next(l for l in tab.lines if l.plain.startswith("⚠ reveal overdue:"))
+    assert str(overdue_line.style) == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_threads_tab_secrets_only_story_with_congested_reveal_windows_shows_warning_not_empty_state():
+    chs = _chapters(*[f"C{i}" for i in range(1, 6)])  # now = 5
+    secrets = [
+        SecretRecord(id="a", title="A", reveal_window_lo=19, reveal_window_hi=21),
+        SecretRecord(id="b", title="B", reveal_window_lo=19, reveal_window_hi=21),
+        SecretRecord(id="c", title="C", reveal_window_lo=19, reveal_window_hi=21),
+    ]
+    tab = threads_tab([], chs, promises=[], secrets=secrets)
+    plains = [line.plain for line in tab.lines]
+    assert THREADS_EMPTY not in plains
+    assert "⚠ 3 resolutions target ch19-21" in plains
+    assert tab.alarm_count == 1
+
+
 def test_cell_glyphs_cover_exactly_the_real_cell_states():
     # knowledge_cell_state's actual codomain — there is no "suspected" state.
     assert CELL_GLYPHS == {"known": "●", "unknown": "○", "revealed": "✓"}

@@ -345,7 +345,11 @@ def plan_resolution(ctx, thread_id: str, window_lo: int, window_hi: int, note: s
     """Set (or clear, with 0 0) a thread's resolution window."""
     async def _run(rt: Runtime):
         result = await commands.plan_thread_resolution(rt.events, rt.read, thread_id, window_lo, window_hi, note)
-        console.print(f"[green]{result}[/green]")
+        # commands.plan_thread_resolution has no ok/error return type -- its
+        # success strings always start with "resolution window" (see
+        # novelizer/director/commands.py), everything else is a rejection.
+        color = "green" if result.startswith("resolution window") else "yellow"
+        console.print(f"[{color}]{result}[/{color}]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
@@ -358,7 +362,11 @@ def plan_reveal(ctx, secret_id: str, window_lo: int, window_hi: int):
     """Set (or clear, with 0 0) a secret's reveal window."""
     async def _run(rt: Runtime):
         result = await commands.plan_secret_reveal(rt.events, rt.read, secret_id, window_lo, window_hi)
-        console.print(f"[green]{result}[/green]")
+        # commands.plan_secret_reveal has no ok/error return type -- its
+        # success strings always start with "reveal window" (see
+        # novelizer/director/commands.py), everything else is a rejection.
+        color = "green" if result.startswith("reveal window") else "yellow"
+        console.print(f"[{color}]{result}[/{color}]")
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 

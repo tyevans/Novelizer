@@ -269,15 +269,23 @@ def threads_tab(
         )
         lines.append(Text("✓ " + " · ".join(parts), style=DIM))
 
-    if not threads and not promises:
+    spans = congested_windows(threads, secrets)
+    overdue_resolved = overdue_resolutions(threads, chapters)
+    overdue_revealed = overdue_reveals(secrets, chapters)
+
+    if not threads and not promises and not spans and not overdue_revealed:
         return ThreadsTab([Text(THREADS_EMPTY, style=DIM)], 0)
 
-    spans = congested_windows(threads, secrets)
+    for secret in overdue_revealed:
+        lines.append(
+            Text(f"⚠ reveal overdue: '{secret.title}' (ch{secret.reveal_window_hi})", style=ALARM_STYLE)
+        )
     for lo, hi, count in spans:
         lines.append(Text(f"⚠ {count} resolutions target ch{lo}-{hi}", style=WARN_STYLE))
 
-    overdue_resolved = overdue_resolutions(threads, chapters)
-    overdue_revealed = overdue_reveals(secrets, chapters)
+    # stale + overdue resolutions/reveals/promises double-count on purpose:
+    # a thread/secret can be both stale and overdue at once, and each is its
+    # own kind of heat the alarm strip should reflect, not dedupe away.
     alarm_count = (
         len(stale) + len(overdue_resolved) + len(overdue_revealed) + len(overdue_p) + len(spans)
     )
