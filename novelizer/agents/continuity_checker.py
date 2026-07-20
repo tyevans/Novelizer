@@ -3,11 +3,13 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
+    PromiseIntent,
 )
 from novelizer.brain.context import chapter_map_note, open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
@@ -33,7 +35,10 @@ not 'learn' -- report 'learn' only when the chapter shows the moment of learning
 note to one short sentence. Return empty lists if the prose shows nothing new.
 If the prompt lists dealt inspiration items for this chapter, also report inspiration_facts:
 each dealt item the prose visibly uses, with its kind and the item exactly as listed. Only
-items from the dealt list are legal; never invent inspiration_facts."""
+items from the dealt list are legal; never invent inspiration_facts.
+If the prompt lists open promises, also report promise_progress_facts: for each open promise
+whose expectation this chapter's prose clearly references or develops, report its id (cited
+exactly, never invented) with a one-sentence note. Only the listed ids are legal."""
 
 # Thread actions mined prose can report ("touch", "planted", "paid_off" -- see
 # MinedThreadFact) map onto ThreadIntent's authoring vocabulary ("touch",
@@ -92,6 +97,7 @@ class ContinuityChecker(BaseAgent):
             "causal_edges": await self._read.list_causal_edges(),
             "threads": await self._read.list_threads(),
             "secrets": await self._read.list_secrets(),
+            "promises": await self._read.list_promises(),
             "mined_chapters": [c for c in chapters if c.id not in already_mined],
             "thread_touch_pairs": thread_touch_log(thread_events),
             "hands_by_chapter": {
@@ -162,12 +168,19 @@ class ContinuityChecker(BaseAgent):
                 f"settings: {', '.join(hand.settings) or '(none)'}\n"
                 f"beats: {', '.join(hand.beats) or '(none)'}"
             )
+        open_promises = [
+            p for p in ctx.get("promises", []) if p.state.value not in TERMINAL_PROMISE_STATES
+        ]
+        promises_block = ""
+        if open_promises:
+            promise_lines = "\n".join(f"- {p.id}: {p.name}" for p in open_promises)
+            promises_block = f"\n\nOpen promises:\n{promise_lines}"
         return (
             f"Chapter [{chapter.id}] {chapter.title}:\n{chapter.prose}\n\n"
             f"Active secret ids (the ONLY legal values for secret_facts ids; thread ids and "
             f"character names are never secret ids): {secret_ids}\n\n"
             f"Knowledge matrix:\n{matrix}\n\nSecret references:\n{secret_refs}\n\n"
-            f"Threads:\n{threads}\n\nCausal edges:\n{causal}{dealt}"
+            f"Threads:\n{threads}\n\nCausal edges:\n{causal}{dealt}{promises_block}"
         )
 
     async def _commit_mined_facts(
@@ -276,6 +289,18 @@ class ContinuityChecker(BaseAgent):
             await self._commit_causal_intents(
                 [CausalIntent(cause_chapter_id=fact.cause_chapter_id, effect_chapter_id=fact.effect_chapter_id, note=fact.note)],
                 valid_chapter_ids, source="mined",
+            )
+
+        active_promise_ids = {
+            p.id for p in ctx.get("promises", []) if p.state.value not in TERMINAL_PROMISE_STATES
+        }
+        if mined_out.promise_progress_facts:
+            await self._commit_promise_intents(
+                [
+                    PromiseIntent(action="progress", id=fact.promise_id, note=fact.note)
+                    for fact in mined_out.promise_progress_facts
+                ],
+                active_promise_ids, active_thread_ids, chapter_id=chapter_id, source="mined",
             )
 
         hand = ctx.get("hands_by_chapter", {}).get(chapter_id)

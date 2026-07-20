@@ -375,13 +375,25 @@ class MinedInspirationFact(BaseModel):
     item: str
 
 
+class PromiseProgressFact(BaseModel):
+    """A mined observation that prose touched an open ledger promise, cited
+    by id. Mining never mints a new promise (that stays a declaration-only,
+    judgment call for Author/Editor/Plotter) and never mines pay/release --
+    only 'progress', the low-stakes case where the prose clearly develops a
+    promise already on the open ledger. Cite existing ids only; an unknown
+    or terminal id is dropped at commit time (see intents.commit_promise_intents)."""
+
+    promise_id: str
+    note: str = ""
+
+
 class MinedFactsOutput(BaseModel):
     """Structured output from the prose-mining pass of the Continuity Checker.
 
     The mining pass reads a chapter's prose and returns a set of facts
-    (secret/reveal/thread/causal) that the prose shows but the log may not
-    have covering events for. See M5.1 for the mining architecture and
-    commit/dedup logic.
+    (secret/reveal/thread/causal/promise-progress) that the prose shows but
+    the log may not have covering events for. See M5.1 for the mining
+    architecture and commit/dedup logic.
     """
 
     secret_facts: list[MinedSecretFact] = Field(default_factory=list)
@@ -389,4 +401,5 @@ class MinedFactsOutput(BaseModel):
     thread_facts: list[MinedThreadFact] = Field(default_factory=list)
     causal_facts: list[MinedCausalFact] = Field(default_factory=list)
     inspiration_facts: list[MinedInspirationFact] = Field(default_factory=list)
+    promise_progress_facts: list[PromiseProgressFact] = Field(default_factory=list)
     feed_note: str = ""
