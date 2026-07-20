@@ -947,7 +947,7 @@ async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Chapter index:" in sent
     assert "Recent chapters:" not in sent
-    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "- ch001 'One' (draft) cast: none [id:c1]" in sent
     assert "secret prose text" not in sent
 
 

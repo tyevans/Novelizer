@@ -579,7 +579,7 @@ async def test_author_prompt_includes_causal_flags_when_edges_flagged(stack):
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Causal flags:" in sent
-    assert "c2" in sent and "c1" in sent and "ordering" in sent
+    assert "ch002 -> ch001" in sent and "ordering" in sent
 
 
 async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(stack):
@@ -620,7 +620,7 @@ async def test_author_pull_mode_true_replaces_prose_with_chapter_map(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Chapter index:" in sent
     assert "Previous chapters:" not in sent
-    assert "- [c1] 'One' (draft) cast: none" in sent
+    assert "- ch001 'One' (draft) cast: none [id:c1]" in sent
     assert "secret prose text" not in sent
 
 

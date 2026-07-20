@@ -4,6 +4,10 @@ from langchain_core.tools import tool
 
 from novelizer.canon_fs.paths import build_path_index
 
+# A long novel can match hundreds of records; an uncapped list would crowd out
+# the prose the agent is actually here to read.
+SEARCH_RESULT_CAP = 20
+
 
 def build_search_canon_tool(embedding_store, read_store):
     """Factory so the tool closes over story-scoped stores (one tool
@@ -11,11 +15,18 @@ def build_search_canon_tool(embedding_store, read_store):
 
     @tool
     async def search_canon(query: str, kinds: list[str] | None = None) -> str:
-        """Semantic search over the whole story canon (chapters, characters,
-        world entries, threads, secrets, themes). Returns the best matches
-        with their canon file path and exact record id — read the file at
-        the returned path for full content. kinds filters to a subset, e.g.
-        ["chapter", "secret"].
+        """Search the story canon by MEANING — chapters, characters, world
+        entries, threads, secrets, themes. Use this when you don't know the
+        exact words: "where was the locket last seen", "scenes about betrayal".
+        For an exact name, slug, or quoted phrase use grep instead; it is
+        faster and exact.
+
+        Returns one line per hit: (kind) <canon file path> — '<title>' [id: <id>].
+        Read the file at that path for the full content, and cite the id
+        exactly as shown. Results are ranked and capped; if what you need
+        isn't here, narrow the query or filter by kind.
+
+        Example: search_canon("the debt Mateo owes", kinds=["thread", "secret"])
         """
         try:
             hits = await embedding_store.search(query, kinds=kinds)
@@ -39,8 +50,15 @@ def build_search_canon_tool(embedding_store, read_store):
         path_by_id = {record_id: p for p, (_, record_id) in index.items()}
         lines = [
             f"({h.kind}) {path_by_id.get(h.id, '(no file)')} — '{h.title}' [id: {h.id}]"
-            for h in hits
+            for h in hits[:SEARCH_RESULT_CAP]
         ]
+        if len(hits) > SEARCH_RESULT_CAP:
+            # Announce the truncation: a silently-cut list reads as exhaustive,
+            # and the agent stops looking for what it never saw.
+            lines.append(
+                f"... {len(hits) - SEARCH_RESULT_CAP} more results — narrow your query "
+                f"or filter by kind."
+            )
         return "\n".join(lines)
 
     return search_canon
