@@ -87,7 +87,7 @@ def _summarize(ctx: dict, personality: str = "") -> str:
     for note in (
         ledger_note(promises, chapters),
         resolution_pacing_note(threads, secrets, chapters),
-        finale_convergence_note(blueprint, beats, promises, arcs, chapters),
+        finale_convergence_note(blueprint, beats, promises, arcs, chapters, characters),
         stale_threads_note(threads, chapters),
         beat_drift_note(blueprint, beats, chapters),
         tension_target_note(blueprint, beats, ctx.get("scores", []), chapters),

@@ -315,6 +315,14 @@ def test_completion_note_complete_message():
     )
 
 
+def test_completion_note_empty_when_zero_beats_is_sole_blocker():
+    # beats_total == 0 is completion_status's sole blocker ("no beats
+    # adopted yet"); the near-complete branch must never fire off that --
+    # no beats adopted is the furthest state from done, not the endgame.
+    note = completion_note(_bp(), [], [], [], _chapters(10), [])
+    assert note == ""
+
+
 # --- finale_convergence_note ---
 
 from novelizer.brain.context import finale_convergence_note
@@ -369,6 +377,14 @@ def test_finale_convergence_note_lists_unresolved_arc():
     arcs = [ArcRecord(id="a1", character_id="mara", arc_type="positive", active=True, resolved=False)]
     note = finale_convergence_note(_bp(10), beats, [], arcs, _chapters(8))
     assert "mara" in note
+
+
+def test_finale_convergence_note_names_unresolved_arc_via_character():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    arcs = [ArcRecord(id="a1", character_id="mara", arc_type="positive", active=True, resolved=False)]
+    characters = [Character(id="mara", name="Mara")]
+    note = finale_convergence_note(_bp(10), beats, [], arcs, _chapters(8), characters)
+    assert "Mara" in note
 
 
 def test_finale_convergence_note_caps_each_list_at_three_with_more_count():

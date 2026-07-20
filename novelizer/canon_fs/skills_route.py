@@ -127,8 +127,16 @@ class ReadOnlyBackend(BackendProtocol):
         return _filter_hidden_glob_matches(result)
 
 
-def _entry_basename(entry_path: str) -> str:
-    return entry_path.rstrip("/").rsplit("/", 1)[-1]
+def _has_hidden_segment(entry_path: str) -> bool:
+    """True if ANY path segment (not just the basename) is a hidden name.
+
+    A basename-only check misses nested hits: `aglob("**/*", "/skills")`
+    matches files *inside* `__pycache__/` too (e.g.
+    `/skills/__pycache__/__init__.cpython-313.pyc`), whose basename is the
+    `.pyc` filename, not `__pycache__`. Checking every segment catches
+    those regardless of depth.
+    """
+    return any(seg in _HIDDEN_ENTRY_NAMES for seg in entry_path.strip("/").split("/"))
 
 
 def _filter_hidden_entries(result: LsResult) -> LsResult:
@@ -138,7 +146,7 @@ def _filter_hidden_entries(result: LsResult) -> LsResult:
     `SkillsMiddleware` will otherwise probe `__pycache__/SKILL.md`."""
     if not result.entries:
         return result
-    entries = [e for e in result.entries if _entry_basename(e["path"]) not in _HIDDEN_ENTRY_NAMES]
+    entries = [e for e in result.entries if not _has_hidden_segment(e["path"])]
     return LsResult(entries=entries, error=result.error)
 
 
@@ -146,7 +154,7 @@ def _filter_hidden_glob_matches(result: GlobResult) -> GlobResult:
     """Same filtering as `_filter_hidden_entries`, applied to glob matches."""
     if not result.matches:
         return result
-    matches = [m for m in result.matches if _entry_basename(m["path"]) not in _HIDDEN_ENTRY_NAMES]
+    matches = [m for m in result.matches if not _has_hidden_segment(m["path"])]
     return GlobResult(matches=matches, error=result.error)
 
 

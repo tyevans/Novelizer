@@ -144,7 +144,10 @@ class CanonIndexer:
             record = briefs.get(aggregate_id)
             if record is not None:
                 await self._emb.upsert_brief(record)
-        else:
+        elif kind == "arc":
             record = await self._read.get_arc(aggregate_id)
             if record is not None:
                 await self._emb.upsert_arc(record)
+        else:
+            logger.warning("canon indexer: unknown kind %r for event_type %s (aggregate %s); skipping",
+                            kind, event_type, aggregate_id)

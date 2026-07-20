@@ -253,9 +253,15 @@ def completion_note(
     if len(status.blockers) != 1:
         return ""
 
+    if status.beats_total == 0:
+        # "0 beats" is completion_status's furthest-from-done signal (no
+        # beats adopted yet), not an endgame near-miss -- naming "0 beats"
+        # as the lone remaining blocker would be nonsense.
+        return ""
+
     names_by_id = {c.id: c.name for c in characters}
 
-    if status.beats_fulfilled < status.beats_total or status.beats_total == 0:
+    if status.beats_fulfilled < status.beats_total:
         unfulfilled = [b for b in beats if not b.fulfilled_by_chapter_id]
         names = ", ".join(b.name for b in unfulfilled)
         count = len(unfulfilled)
@@ -300,12 +306,16 @@ def finale_convergence_note(
     promises: list[PromiseRecord],
     arcs: list[ArcRecord],
     chapters: list[Chapter],
+    characters: list[Character] | None = None,
 ) -> str:
     """Build the finale-window steering block: empty string until the story
     has entered the finale window, then lists everything that must converge
     before the end (unfulfilled beats, open promises with overdue flagged,
     unresolved active arcs), capped at ~3 names per category, closing with
     how many chapters remain.
+
+    Unresolved arcs are named via `characters` (id -> name), falling back
+    to the raw character_id when no matching character is passed.
 
     Window threshold prefers the climax beat's window_lo (the highest
     ideal_pct beat in the active blueprint's beats, per beat_window),
@@ -351,7 +361,10 @@ def finale_convergence_note(
         noun = "promise" if count == 1 else "promises"
         lines.append(f"- {count} open {noun}: {names}")
     if unresolved_arcs:
-        names = _capped_names([a.character_id for a in unresolved_arcs])
+        names_by_id = {c.id: c.name for c in (characters or [])}
+        names = _capped_names(
+            [names_by_id.get(a.character_id, a.character_id) for a in unresolved_arcs]
+        )
         count = len(unresolved_arcs)
         noun = "arc" if count == 1 else "arcs"
         lines.append(f"- {count} unresolved {noun}: {names}")
