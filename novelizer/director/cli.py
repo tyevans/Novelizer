@@ -335,6 +335,33 @@ def autonomy(ctx, level: str, agent: str | None):
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+@cli.command("plan-resolution")
+@click.argument("thread_id")
+@click.argument("window_lo", type=int)
+@click.argument("window_hi", type=int)
+@click.option("--note", default="", help="Optional planned-payoff note.")
+@click.pass_context
+def plan_resolution(ctx, thread_id: str, window_lo: int, window_hi: int, note: str):
+    """Set (or clear, with 0 0) a thread's resolution window."""
+    async def _run(rt: Runtime):
+        result = await commands.plan_thread_resolution(rt.events, rt.read, thread_id, window_lo, window_hi, note)
+        console.print(f"[green]{result}[/green]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command("plan-reveal")
+@click.argument("secret_id")
+@click.argument("window_lo", type=int)
+@click.argument("window_hi", type=int)
+@click.pass_context
+def plan_reveal(ctx, secret_id: str, window_lo: int, window_hi: int):
+    """Set (or clear, with 0 0) a secret's reveal window."""
+    async def _run(rt: Runtime):
+        result = await commands.plan_secret_reveal(rt.events, rt.read, secret_id, window_lo, window_hi)
+        console.print(f"[green]{result}[/green]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
 @cli.command()
 @click.pass_context
 def proposals(ctx):

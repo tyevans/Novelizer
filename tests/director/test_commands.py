@@ -137,6 +137,88 @@ async def test_dispatch_routes_autonomy_and_approve_reject(stack):
     assert "approved" in result3.lower()
 
 
+async def test_plan_thread_resolution_appends_event_and_projects_window(stack):
+    events, proj, read = stack
+    from novelizer.store.models import ThreadRecord
+    from novelizer.canon.events import ThreadPlanted
+
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Ledger"))
+    await proj.catch_up()
+
+    result = await commands.plan_thread_resolution(events, read, "t1", 18, 20, "gate scene")
+    await proj.catch_up()
+
+    assert "18" in result and "20" in result
+    thread = await read.get_thread("t1")
+    assert thread.window_lo == 18
+    assert thread.window_hi == 20
+    assert thread.planned_payoff_note == "gate scene"
+
+
+async def test_plan_thread_resolution_rejects_unknown_and_terminal_ids(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import ThreadPlanted, ThreadPaidOff
+
+    result = await commands.plan_thread_resolution(events, read, "missing-id", 1, 2)
+    assert "no such thread" in result.lower() or "not found" in result.lower()
+    await proj.catch_up()
+    assert (await read.get_thread("missing-id")) is None
+
+    await events.append(EventType.THREAD_PLANTED, "t2", ThreadPlanted(id="t2", name="Paid"))
+    await events.append(EventType.THREAD_PAID_OFF, "t2", ThreadPaidOff(id="t2"))
+    await proj.catch_up()
+
+    result2 = await commands.plan_thread_resolution(events, read, "t2", 1, 2)
+    assert "paid_off" in result2.lower() or "terminal" in result2.lower() or "already" in result2.lower()
+    await proj.catch_up()
+    thread = await read.get_thread("t2")
+    assert thread.window_lo == 0
+    assert thread.window_hi == 0
+
+
+async def test_plan_thread_resolution_rejects_inverted_window(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import ThreadPlanted
+
+    await events.append(EventType.THREAD_PLANTED, "t3", ThreadPlanted(id="t3", name="Inverted"))
+    await proj.catch_up()
+
+    result = await commands.plan_thread_resolution(events, read, "t3", 20, 18)
+    assert "invalid" in result.lower() or "window" in result.lower()
+    await proj.catch_up()
+    thread = await read.get_thread("t3")
+    assert thread.window_lo == 0
+    assert thread.window_hi == 0
+
+
+async def test_plan_secret_reveal_appends_and_rejects_revealed(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import SecretCreated, SecretRevealed
+
+    await events.append(EventType.SECRET_CREATED, "s1", SecretCreated(id="s1", title="Who killed the duke"))
+    await proj.catch_up()
+
+    result = await commands.plan_secret_reveal(events, read, "s1", 5, 7)
+    await proj.catch_up()
+    assert "5" in result and "7" in result
+    secret = await read.get_secret("s1")
+    assert secret.reveal_window_lo == 5
+    assert secret.reveal_window_hi == 7
+
+    await events.append(EventType.SECRET_REVEALED, "s1", SecretRevealed(id="s1"))
+    await proj.catch_up()
+
+    result2 = await commands.plan_secret_reveal(events, read, "s1", 1, 2)
+    assert "revealed" in result2.lower() or "already" in result2.lower()
+    await proj.catch_up()
+    secret2 = await read.get_secret("s1")
+    assert secret2.reveal_window_lo == 5
+    assert secret2.reveal_window_hi == 7
+
+    result3 = await commands.plan_secret_reveal(events, read, "missing-id", 1, 2)
+    assert "no such secret" in result3.lower() or "not found" in result3.lower()
+
+
 async def test_seed_story_dir_appends_seed_event_without_runtime(tmp_path):
     from novelizer.director.commands import seed_story_dir
     from novelizer.settings.story_dir import create_story
