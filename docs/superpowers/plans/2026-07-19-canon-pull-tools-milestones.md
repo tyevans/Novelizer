@@ -22,10 +22,13 @@ milestone touches the write path.
 ## Status
 
 - **CPT-M5: delivered** (2026-07-19). Chat personas pull canon: chat runners
-  build with `CanonBackend` + `search_canon` + graph-scope telemetry callbacks
-  when `chat_tools_enabled` (default on), story-context prose excerpts replaced
+  build with `CanonBackend` + `search_canon` when `chat_tools_enabled`
+  (default on) — graph-scope telemetry callbacks and streaming are
+  unconditional, matching phase a — story-context prose excerpts replaced
   by the chapter map in pull mode, `write_todos` excluded from chat via the new
   `ExcludeToolsMiddleware` (novelizer-owned; no deepagents private imports).
+  Flag flips mid-session now clear the chat runner cache and update
+  ChatService pull mode (apply_settings).
 
 - **CPT-M4: delivered** (2026-07-19). Phase-a pull agents are live: Author
   and Continuity Checker run with `CanonBackend` + `search_canon` when

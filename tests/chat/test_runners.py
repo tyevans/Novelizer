@@ -26,7 +26,6 @@ def test_build_chat_runner_with_backend_builds():
 
 def test_build_chat_runner_with_backend_adds_retrieval_note_and_config(monkeypatch):
     captured = {}
-    import novelizer.chat.runners as runners_mod
 
     class FakeGraph:
         def with_config(self, config):

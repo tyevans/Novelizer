@@ -261,6 +261,11 @@ class Runtime:
         errors: list[str] = []
         stored = new.model_copy(update={k: getattr(old, k) for k in restart}) if restart else new
 
+        if "chat_tools_enabled" in changed:
+            self._chat_runner_cache.clear()
+            if self.chat is not None:
+                self.chat._pull_mode = stored.chat_tools_enabled
+
         if "voice_pack" in changed or "prose_profile" in changed:
             try:
                 new_pack = load_voice_pack(new.voice_pack)

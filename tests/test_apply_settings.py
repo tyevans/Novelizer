@@ -180,6 +180,32 @@ async def test_invalid_voice_pack_reports_error_and_other_changes_still_apply(tm
     await rt.close()
 
 
+async def test_chat_tools_enabled_flip_rewires_pull_mode_and_clears_cache(tmp_path, monkeypatch):
+    """apply_settings must rewire ChatService._pull_mode and clear the chat
+    runner cache when chat_tools_enabled flips, otherwise the ChatService
+    stays frozen at start()'s value and cached runners keep old wiring."""
+    rt = await _started_runtime(tmp_path, chat_tools_enabled=False)
+
+    class _FakeChatRunner:
+        async def ainvoke(self, inputs):
+            raise AssertionError("not used")
+
+    monkeypatch.setattr(
+        "novelizer.runtime.build_chat_runner",
+        lambda *a, **k: _FakeChatRunner(),
+    )
+    rt._chat_runner_for("editor")
+    assert rt._chat_runner_cache != {}
+    assert rt.chat._pull_mode is False
+
+    result = rt.apply_settings(rt.settings.model_copy(update={"chat_tools_enabled": True}))
+
+    assert "chat_tools_enabled" in result["applied"]
+    assert rt.chat._pull_mode is True
+    assert rt._chat_runner_cache == {}
+    await rt.close()
+
+
 async def test_apply_after_invalid_voice_pack_does_not_reraise(tmp_path):
     """A subsequent apply changing only author_interval must succeed cleanly —
     no re-raise, no lingering error — after an earlier apply had a bad

@@ -13,8 +13,8 @@ minting action (plant/introduce) with a name."""
 
 CHAT_RETRIEVAL_NOTE = (
     "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-    "semantic search (search_canon). The story context you receive is an index — "
-    "read any chapter or canon file you need in full before answering. Cite ids "
+    "semantic search (search_canon). The chapter list in the story context is an "
+    "index — read any chapter or canon file you need in full before answering. Cite ids "
     "exactly as shown in frontmatter or search results."
 )
 
