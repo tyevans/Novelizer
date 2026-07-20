@@ -16,6 +16,7 @@ from textual.widgets import Static, TabbedContent, TabPane
 
 from novelizer.tui.widgets.brain_model import (
     alarm_strip,
+    arcs_tab,
     causeway_tab,
     outline_tab,
     secrets_tab,
@@ -45,6 +46,8 @@ class BrainPanel(Vertical):
                 yield Static("", id="causeway_body")
             with TabPane("5 Outline", id="tab_outline"):
                 yield Static("", id="outline_body")
+            with TabPane("6 Arcs", id="tab_arcs"):
+                yield Static("", id="arcs_body")
         yield Static("", id="brain_strip")
 
     async def refresh_from(self, read, *, threshold: int, delta: float) -> None:
@@ -60,16 +63,18 @@ class BrainPanel(Vertical):
         )
         secret_records = await read.list_secrets()
         thread_records = await read.list_threads()  # one snapshot shared by threads_tab + outline_tab
+        character_records = await read.list_characters()  # shared by secrets_tab + arcs_tab
         threads = threads_tab(
             thread_records, chapters, await read.list_promises(), secret_records, threshold
         )
         secrets = secrets_tab(
-            secret_records, await read.list_characters(), await read.knowledge_matrix()
+            secret_records, character_records, await read.knowledge_matrix()
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
         outline = outline_tab(
             blueprint, beats, await read.list_briefs(), thread_records, chapters
         )
+        arcs = arcs_tab(await read.list_arcs(), character_records, chapters, beats, blueprint)
 
         shape_rows = [
             r for r in (shape.spark, shape.target, shape.markers, shape.meta) if r is not None
@@ -79,10 +84,11 @@ class BrainPanel(Vertical):
         self.query_one("#secrets_body", Static).update(_joined(secrets.lines))
         self.query_one("#causeway_body", Static).update(_joined(cause.lines))
         self.query_one("#outline_body", Static).update(_joined(outline.lines))
+        self.query_one("#arcs_body", Static).update(_joined(arcs.lines))
         self.query_one("#brain_strip", Static).update(
             alarm_strip(
                 shape.alarm_count, threads.alarm_count, secrets.alarm_count, cause.alarm_count,
-                outline.alarm_count,
+                outline.alarm_count, arcs.alarm_count,
             )
         )
 

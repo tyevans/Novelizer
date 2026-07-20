@@ -10,7 +10,7 @@ from novelizer.canon.events import EventType, StoredEvent
 from novelizer.store.models import (
     Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus,
     InspirationHandRecord, PromiseRecord, PromiseState, BlueprintRecord, BeatRecord,
-    ChapterBriefRecord, BriefStatus,
+    ChapterBriefRecord, BriefStatus, ArcRecord, ArcPivot,
 )
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
@@ -92,6 +92,9 @@ CREATE TABLE IF NOT EXISTS beats (
 CREATE TABLE IF NOT EXISTS chapter_briefs (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS arcs (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, character_id TEXT NOT NULL, active INTEGER NOT NULL
+);
 """
 
 
@@ -144,7 +147,7 @@ class Projector:
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
-            "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs",
+            "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs", "arcs",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -607,3 +610,93 @@ class Projector:
                 # else: superseded/fulfilled are absorbing -- the event is a
                 # fact in the log, but the projection does not change.
             # else: unknown brief id -- no-op, no error raised.
+        elif t == EventType.ARC_DECLARED:
+            # Declaring supersedes the character's prior active arc: fold
+            # active=False into every existing row's data JSON for this
+            # character_id (so records stay truthful on read) and clear the
+            # active=1 flag column, then insert the new arc as active.
+            cur = await self._conn.execute("SELECT id FROM arcs WHERE id=?", (p["arc_id"],))
+            existing_row = await cur.fetchone()
+            if existing_row is not None:
+                # An arc id is minted exactly once -- true first-mint-wins.
+                # A duplicate arc.declared for an existing arc_id is a
+                # complete no-op: it must not deactivate the character's
+                # other arcs, since nothing is actually being (re)minted.
+                pass
+            else:
+                cur = await self._conn.execute(
+                    "SELECT id, data FROM arcs WHERE character_id=?", (p["character_id"],)
+                )
+                rows = await cur.fetchall()
+                for row_id, row_data in rows:
+                    existing = ArcRecord.model_validate_json(row_data)
+                    updated = existing.model_copy(update={"active": False})
+                    await self._conn.execute(
+                        "UPDATE arcs SET data=?, active=0 WHERE id=?",
+                        (updated.model_dump_json(), row_id),
+                    )
+                record = ArcRecord(
+                    id=p["arc_id"], character_id=p["character_id"], arc_type=p["arc_type"],
+                    ghost=p.get("ghost", ""), lie=p.get("lie", ""), truth=p.get("truth", ""),
+                    want=p.get("want", ""), need=p.get("need", ""), active=True,
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                    (record.id, record.model_dump_json(), record.character_id, 1),
+                )
+        elif t == EventType.ARC_PIVOT_PLANNED:
+            cur = await self._conn.execute("SELECT data, character_id FROM arcs WHERE id=?", (p["arc_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ArcRecord.model_validate_json(row[0])
+                if not record.resolved:
+                    new_pivot = ArcPivot(beat_id=p["beat_id"], description=p.get("description", ""))
+                    pivots = list(record.pivots)
+                    for i, existing_pivot in enumerate(pivots):
+                        if existing_pivot.beat_id == p["beat_id"]:
+                            pivots[i] = new_pivot
+                            break
+                    else:
+                        pivots.append(new_pivot)
+                    updated = record.model_copy(update={"pivots": pivots})
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
+                    )
+                # else: no-op on a resolved arc.
+            # else: unknown arc id -- no-op, no error raised.
+        elif t == EventType.ARC_ADVANCED:
+            cur = await self._conn.execute("SELECT data, character_id FROM arcs WHERE id=?", (p["arc_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ArcRecord.model_validate_json(row[0])
+                if not record.resolved:
+                    updated = record.model_copy(update={
+                        "advance_count": record.advance_count + 1,
+                        "last_note": p.get("note", ""),
+                        "last_chapter_id": p.get("chapter_id", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
+                    )
+                # else: no-op on a resolved arc.
+            # else: unknown arc id -- no-op, no error raised.
+        elif t == EventType.ARC_RESOLVED:
+            cur = await self._conn.execute("SELECT data, character_id FROM arcs WHERE id=?", (p["arc_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ArcRecord.model_validate_json(row[0])
+                if not record.resolved:
+                    updated = record.model_copy(update={
+                        "resolved": True,
+                        "outcome": p.get("outcome", ""),
+                        "resolved_chapter_id": p.get("chapter_id", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
+                    )
+                # else: resolved is absorbing -- the event is a fact in the
+                # log, but the projection does not change.
+            # else: unknown arc id -- no-op, no error raised.

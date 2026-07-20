@@ -45,12 +45,38 @@ def test_pacing_flags_note_lists_flagged_chapter_and_direction():
     assert note.startswith("\n\n")
 
 
-from novelizer.brain.context import known_secrets_note, causal_flags_note
-from novelizer.store.models import Character, SecretRecord, CausalEdgeRecord
+from novelizer.brain.context import known_secrets_note, causal_flags_note, arc_note
+from novelizer.store.models import ArcRecord, Character, SecretRecord, CausalEdgeRecord
 
 
 def _character(id_, name):
     return Character(id=id_, name=name)
+
+
+def test_arc_note_empty_when_no_findings():
+    arc = ArcRecord(id="a1", character_id="mara", arc_type="positive", last_chapter_id="c0")
+    assert arc_note([arc], [_character("mara", "Mara")], _chapters(1), [], None) == ""
+
+
+def test_arc_note_lists_contradiction_with_adjudicate_guidance():
+    arc = ArcRecord(id="a1", character_id="mara", arc_type="fall", resolved=True, outcome="truth_embraced")
+    note = arc_note([arc], [_character("mara", "Mara")], _chapters(1), [], None)
+    assert note.startswith("\n\n")
+    assert "Mara" in note
+    assert "adjudicate: fall arc resolved truth_embraced" in note
+
+
+def test_arc_note_lists_stagnant_with_route_into_brief_guidance():
+    arc = ArcRecord(id="a1", character_id="mara", arc_type="positive", last_chapter_id="c0")
+    note = arc_note([arc], [_character("mara", "Mara")], _chapters(5), [], None, stagnation_chapters=4)
+    assert "Mara" in note
+    assert "route Mara into the next brief" in note
+
+
+def test_arc_note_falls_back_to_character_id_when_name_unknown():
+    arc = ArcRecord(id="a1", character_id="ghost-id", arc_type="positive", last_chapter_id="c0")
+    note = arc_note([arc], [], _chapters(5), [], None, stagnation_chapters=4)
+    assert "ghost-id" in note
 
 
 def test_known_secrets_note_empty_when_no_secrets():

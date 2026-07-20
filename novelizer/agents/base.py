@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.store.models import ChapterBriefRecord
 from novelizer.agents import intents as intent_helpers
@@ -231,6 +231,19 @@ class BaseAgent:
         await intent_helpers.commit_promise_intents(
             self._committer, self.name, intents, active_promise_ids, active_thread_ids,
             chapter_id=chapter_id, source=source,
+        )
+
+    async def _commit_arc_intents(
+        self,
+        intents: list[ArcIntent],
+        active_arc_ids: set[str],
+        character_ids: set[str],
+        active_beat_ids: set[str],
+        chapter_id: str = "",
+    ) -> None:
+        await intent_helpers.commit_arc_intents(
+            self._committer, self.name, intents, active_arc_ids, character_ids, active_beat_ids,
+            chapter_id=chapter_id,
         )
 
     async def _commit_blueprint_plan(self, plan: BlueprintPlan | None) -> None:

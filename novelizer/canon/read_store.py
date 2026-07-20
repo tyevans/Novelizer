@@ -6,7 +6,7 @@ from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
     InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
-    BlueprintRecord, BeatRecord, ChapterBriefRecord,
+    BlueprintRecord, BeatRecord, ChapterBriefRecord, ArcRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -142,6 +142,26 @@ class ReadStore:
             if record.target_ordinal == ordinal:
                 return record
         return None
+
+    async def list_arcs(self, active_only: bool = False) -> list[ArcRecord]:
+        if active_only:
+            cur = await self._conn.execute("SELECT data FROM arcs WHERE active=1 ORDER BY rowid")
+        else:
+            cur = await self._conn.execute("SELECT data FROM arcs ORDER BY rowid")
+        return [ArcRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_arc(self, arc_id: str) -> Optional[ArcRecord]:
+        cur = await self._conn.execute("SELECT data FROM arcs WHERE id=?", (arc_id,))
+        row = await cur.fetchone()
+        return ArcRecord.model_validate_json(row[0]) if row else None
+
+    async def get_active_arc_for_character(self, character_id: str) -> Optional[ArcRecord]:
+        cur = await self._conn.execute(
+            "SELECT data FROM arcs WHERE character_id=? AND active=1 ORDER BY rowid DESC LIMIT 1",
+            (character_id,),
+        )
+        row = await cur.fetchone()
+        return ArcRecord.model_validate_json(row[0]) if row else None
 
     async def list_themes(self) -> list[ThemeRecord]:
         cur = await self._conn.execute("SELECT data FROM themes ORDER BY rowid")

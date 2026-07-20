@@ -841,3 +841,136 @@ async def test_get_open_brief_for_ordinal_ignores_terminal_briefs(wired):
     await proj.catch_up()
     assert await read.get_open_brief_for_ordinal(4) is None
     await read.close()
+
+
+async def test_arc_declared_supersedes_per_character_only(wired):
+    from novelizer.canon.events import ArcDeclared
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.ARC_DECLARED, "a1", ArcDeclared(
+        arc_id="a1", character_id="c1", arc_type="positive",
+    ))
+    await events.append(EventType.ARC_DECLARED, "b1", ArcDeclared(
+        arc_id="b1", character_id="c2", arc_type="fall",
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.ARC_DECLARED, "a2", ArcDeclared(
+        arc_id="a2", character_id="c1", arc_type="flat",
+    ))
+    await proj.catch_up()
+
+    a1 = await read.get_arc("a1")
+    a2 = await read.get_arc("a2")
+    b1 = await read.get_arc("b1")
+    assert a1.active is False
+    assert a2.active is True
+    assert b1.active is True  # other character's arc untouched
+
+    active_c1 = await read.get_active_arc_for_character("c1")
+    assert active_c1.id == "a2"
+    active_c2 = await read.get_active_arc_for_character("c2")
+    assert active_c2.id == "b1"
+    await read.close()
+
+
+async def test_arc_declared_duplicate_arc_id_is_true_noop(wired):
+    from novelizer.canon.events import ArcDeclared
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    payload = ArcDeclared(arc_id="a1", character_id="c1", arc_type="positive", lie="I am alone")
+    await events.append(EventType.ARC_DECLARED, "a1", payload)
+    await proj.catch_up()
+
+    # Replay the same ARC_DECLARED payload for the same arc_id -- must be a
+    # complete no-op: no deactivation, no re-insert.
+    await events.append(EventType.ARC_DECLARED, "a1", payload)
+    await proj.catch_up()
+
+    active = await read.list_arcs(active_only=True)
+    c1_active = [a for a in active if a.character_id == "c1"]
+    assert len(c1_active) == 1
+    assert c1_active[0].id == "a1"
+    await read.close()
+
+
+async def test_arc_pivot_same_beat_replaces(wired):
+    from novelizer.canon.events import ArcDeclared, ArcPivotPlanned
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.ARC_DECLARED, "a1", ArcDeclared(
+        arc_id="a1", character_id="c1", arc_type="positive",
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.ARC_PIVOT_PLANNED, "a1", ArcPivotPlanned(
+        arc_id="a1", beat_id="b-mid", description="first take",
+    ))
+    await proj.catch_up()
+    await events.append(EventType.ARC_PIVOT_PLANNED, "a1", ArcPivotPlanned(
+        arc_id="a1", beat_id="b-mid", description="second take",
+    ))
+    await proj.catch_up()
+
+    arc = await read.get_arc("a1")
+    assert len(arc.pivots) == 1
+    assert arc.pivots[0].description == "second take"
+    await read.close()
+
+
+async def test_arc_unknown_id_pivot_and_advance_are_noops(wired):
+    from novelizer.canon.events import ArcPivotPlanned, ArcAdvanced
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+
+    await events.append(EventType.ARC_PIVOT_PLANNED, "zz", ArcPivotPlanned(
+        arc_id="zz", beat_id="b1", description="ghost",
+    ))
+    await events.append(EventType.ARC_ADVANCED, "zz", ArcAdvanced(
+        arc_id="zz", chapter_id="c1",
+    ))
+    await proj.catch_up()
+
+    assert await read.get_arc("zz") is None
+    assert await read.list_arcs() == []
+    await read.close()
+
+
+async def test_arc_resolved_absorbs_later_events(wired):
+    from novelizer.canon.events import ArcDeclared, ArcAdvanced, ArcResolved, ArcPivotPlanned
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.ARC_DECLARED, "a1", ArcDeclared(
+        arc_id="a1", character_id="c1", arc_type="positive",
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.ARC_RESOLVED, "a1", ArcResolved(
+        arc_id="a1", chapter_id="ch5", outcome="truth_embraced",
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.ARC_ADVANCED, "a1", ArcAdvanced(
+        arc_id="a1", chapter_id="ch6", note="late",
+    ))
+    await events.append(EventType.ARC_RESOLVED, "a1", ArcResolved(
+        arc_id="a1", chapter_id="ch7", outcome="lie_embraced",
+    ))
+    await events.append(EventType.ARC_PIVOT_PLANNED, "a1", ArcPivotPlanned(
+        arc_id="a1", beat_id="b1", description="too late",
+    ))
+    await proj.catch_up()
+
+    arc = await read.get_arc("a1")
+    assert arc.resolved is True
+    assert arc.outcome == "truth_embraced"
+    assert arc.resolved_chapter_id == "ch5"
+    assert arc.advance_count == 0
+    assert arc.pivots == []
+    assert arc.active is True  # resolved leaves active as-is
+    await read.close()

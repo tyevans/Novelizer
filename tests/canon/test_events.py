@@ -176,3 +176,38 @@ def test_blueprint_beat_brief_event_payloads_construct_with_defaults():
     assert EventType.CHAPTER_BRIEF_DRAFTED == "chapter_brief.drafted"
     assert EventType.CHAPTER_BRIEF_SUPERSEDED == "chapter_brief.superseded"
     assert EventType.CHAPTER_BRIEF_FULFILLED == "chapter_brief.fulfilled"
+
+
+def test_arc_event_payloads_construct_with_defaults():
+    from novelizer.canon.events import (
+        EventType, ArcDeclared, ArcPivotPlanned, ArcAdvanced, ArcResolved,
+    )
+    # Test ArcDeclared defaults
+    declared = ArcDeclared(arc_id="a1", character_id="c1", arc_type="positive")
+    assert declared.ghost == ""
+    assert declared.lie == ""
+    assert declared.truth == ""
+    assert declared.want == ""
+    assert declared.need == ""
+    assert declared.note == ""
+
+    # Test ArcPivotPlanned defaults
+    pivot = ArcPivotPlanned(arc_id="a1", beat_id="b-midpoint")
+    assert pivot.description == ""
+
+    # Test ArcAdvanced defaults
+    advanced = ArcAdvanced(arc_id="a1")
+    assert advanced.chapter_id == ""
+    assert advanced.note == ""
+
+    # Test ArcResolved defaults
+    resolved = ArcResolved(arc_id="a1")
+    assert resolved.chapter_id == ""
+    assert resolved.outcome == ""
+    assert resolved.note == ""
+
+    # Test constants
+    assert EventType.ARC_DECLARED == "arc.declared"
+    assert EventType.ARC_PIVOT_PLANNED == "arc.pivot_planned"
+    assert EventType.ARC_ADVANCED == "arc.advanced"
+    assert EventType.ARC_RESOLVED == "arc.resolved"

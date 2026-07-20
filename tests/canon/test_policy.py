@@ -141,6 +141,16 @@ async def test_promise_and_planning_events_are_never_gated(level, event_type):
 
 
 @pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.ARC_DECLARED, EventType.ARC_PIVOT_PLANNED,
+    EventType.ARC_ADVANCED, EventType.ARC_RESOLVED,
+])
+async def test_arc_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("character_keeper", event_type) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
 async def test_blueprint_adopted_is_gated_at_every_level_including_full_auto(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("plotter", EventType.BLUEPRINT_ADOPTED) is True

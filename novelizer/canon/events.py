@@ -52,6 +52,10 @@ class EventType:
     CHAPTER_BRIEF_DRAFTED = "chapter_brief.drafted"
     CHAPTER_BRIEF_SUPERSEDED = "chapter_brief.superseded"
     CHAPTER_BRIEF_FULFILLED = "chapter_brief.fulfilled"
+    ARC_DECLARED = "arc.declared"
+    ARC_PIVOT_PLANNED = "arc.pivot_planned"
+    ARC_ADVANCED = "arc.advanced"
+    ARC_RESOLVED = "arc.resolved"
 
 
 class StoredEvent(BaseModel):
@@ -532,3 +536,50 @@ class ChapterBriefFulfilled(BaseModel):
 
     brief_id: str
     chapter_id: str
+
+
+class ArcDeclared(BaseModel):
+    """Payload for arc.declared — mints a character's planned arc.
+
+    `arc_id` is minted (uuid) by the committing helper. One arc is ACTIVE per
+    character at a time: declaring supersedes the character's prior active arc
+    in projection (Locked decision #1, mirroring blueprint supersession scoped
+    to character_id). The declared plan complements Character.arc_status (the
+    Keeper's observed snapshot) — it never replaces it."""
+    arc_id: str
+    character_id: str
+    arc_type: str            # positive|flat|disillusionment|fall|corruption
+    ghost: str = ""
+    lie: str = ""
+    truth: str = ""
+    want: str = ""
+    need: str = ""
+    note: str = ""
+
+
+class ArcPivotPlanned(BaseModel):
+    """Payload for arc.pivot_planned — pins an internal pivot to a blueprint
+    beat, cited by arc_id + beat_id. Re-emission for the same (arc, beat)
+    supersedes. Unknown/resolved arcs and unknown beats are projection no-ops."""
+    arc_id: str
+    beat_id: str
+    description: str = ""
+
+
+class ArcAdvanced(BaseModel):
+    """Payload for arc.advanced — evidence the arc moved in a chapter, cited
+    by arc_id. No-op on resolved arcs."""
+    arc_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
+class ArcResolved(BaseModel):
+    """Payload for arc.resolved — terminal and absorbing. `outcome` is one of
+    truth_embraced|lie_embraced|truth_tragic|world_changed; an outcome
+    inconsistent with the declared arc_type is an arc_alignment ALARM for the
+    Director, never a projection error (Locked decision #2)."""
+    arc_id: str
+    chapter_id: str = ""
+    outcome: str = ""
+    note: str = ""

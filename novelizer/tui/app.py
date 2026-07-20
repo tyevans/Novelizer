@@ -55,6 +55,7 @@ class NovelizerApp(App):
         ("3", "brain_tab('tab_secrets')", "Secrets"),
         ("4", "brain_tab('tab_causeway')", "Cause"),
         ("5", "brain_tab('tab_outline')", "Outline"),
+        ("6", "brain_tab('tab_arcs')", "Arcs"),
         ("q", "quit", "Quit"),
     ]
 

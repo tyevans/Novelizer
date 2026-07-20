@@ -3,7 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import open_retcons_note
+from novelizer.brain.context import arc_note, open_retcons_note
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -23,6 +23,9 @@ You receive the current cast (with traits and arcs) and recent prose chapters. Y
 3. Flag behavioral contradictions between a character's defined traits and their actions.
 4. Note each character's voice: dialogue patterns, vocabulary, and verbal tics you observe
    in their lines, and revise it as their voice evolves across chapters.
+5. Declare or advance each significant character's planned arc: the lie they believe, what
+   they want vs need, their arc type; plan pivots on blueprint beats; resolve the arc when
+   the story settles it. Cite arc and beat ids exactly.
 Return new_characters, updated_characters (id + revised arc_status, and any corrected
 traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
 proposed_resolution). You may also be shown retcon requests already filed and still open:
@@ -65,9 +68,14 @@ class CharacterKeeper(BaseAgent):
         return {
             "characters": await self._read.list_characters(),
             "recent": chapters[-5:],
+            "chapters": chapters,
             "secrets": await self._read.list_secrets(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
             "hands": (await self._read.list_hands(status="consumed"))[-NAME_UPTAKE_HAND_WINDOW:],
+            "arcs": await self._read.list_arcs(active_only=True),
+            "all_arcs": await self._read.list_arcs(active_only=False),
+            "beats": await self._read.list_beats(),
+            "blueprint": await self._read.get_active_blueprint(),
         }
 
     async def work(self, ctx: dict) -> KeeperOutput | None:
@@ -77,7 +85,21 @@ class CharacterKeeper(BaseAgent):
         chapters = "\n\n".join(f"Chapter '{c.title}': {c.prose[:self._prose_chars]}" for c in ctx["recent"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
-        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}"
+        names_by_id = {c.id: c.name for c in ctx["characters"]}
+        arcs_lines = "\n".join(
+            f"- {names_by_id.get(arc.character_id, arc.character_id)}: {arc.arc_type} arc "
+            f"(id:{arc.id}) lie='{arc.lie}' advances={arc.advance_count}"
+            + (f" [resolved:{arc.outcome}]" if arc.resolved else "")
+            for arc in ctx.get("arcs", [])
+        )
+        beats = ctx.get("beats", [])
+        if beats:
+            arcs_lines += f"\nAvailable beat ids for pivots: {', '.join(b.id for b in beats)}"
+        arcs_block = f"\n\nActive arcs:\n{arcs_lines}" if arcs_lines else ""
+        note = arc_note(
+            ctx.get("all_arcs", []), ctx["characters"], ctx.get("chapters", []), beats, ctx.get("blueprint"),
+        )
+        msg = f"Characters:\n{chars}\n\nRecent chapters:\n{chapters}{retcons}{cast}{arcs_block}{note}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -144,6 +166,21 @@ class CharacterKeeper(BaseAgent):
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
         await self._commit_knowledge_intents(
             out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})
+        )
+        # Use the in-memory seen_ids (not a fresh re-read): the ReadStore only
+        # updates on the Projector's periodic catch_up, so a character minted
+        # earlier in this same commit() would be invisible to a re-read here,
+        # silently dropping an arc declare for a character created moments ago.
+        character_ids = seen_ids
+        # Known limitation: this active_arc_ids re-read has the same theoretical
+        # staleness for a declare-then-advance-in-one-pass (an arc declared above
+        # in this same commit() won't appear here either) -- left as-is since
+        # arc actions are rarer than character mentions; the next tick picks it up.
+        active_arc_ids = {a.id for a in await self._read.list_arcs(active_only=True)}
+        active_beat_ids = {b.id for b in ctx.get("beats", [])}
+        await self._commit_arc_intents(
+            out.arc_intents, active_arc_ids, character_ids, active_beat_ids,
+            chapter_id=ctx["recent"][-1].id if ctx["recent"] else "",
         )
         await self._remark(out.feed_note)
 

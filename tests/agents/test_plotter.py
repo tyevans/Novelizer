@@ -43,6 +43,68 @@ async def stack():
 
 # --- readiness ladder ---
 
+async def test_readiness_raised_by_late_beat_drift_when_runway_full(stack):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    for i in range(2):
+        await events.append(
+            EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=f"Ch{i}", prose="p")
+        )
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10,
+            beats=[BeatSpec(
+                beat_id="bp1-beat1", slug="beat1", name="Beat1",
+                ideal_pct=0.0, tolerance_pct=0.0,
+            )],
+        ),
+    )
+    # Fill the brief runway so the plain runway computation alone would be 0.0.
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=3, goal="g1"),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b2",
+        ChapterBriefDrafted(brief_id="b2", target_ordinal=4, goal="g2"),
+    )
+    await proj.catch_up()
+    plotter = Plotter(FakeRunner(None), read, committer)
+    # Beat1's window closes at chapter 1; with 2 chapters drafted and it still
+    # unfulfilled, beat_drifts should report "late" and raise readiness.
+    assert await plotter.readiness() >= 0.9
+
+
+async def test_readiness_unchanged_when_runway_full_and_no_drift(stack):
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    for i in range(2):
+        await events.append(
+            EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=f"Ch{i}", prose="p")
+        )
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10, beats=[],
+        ),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=3, goal="g1"),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b2",
+        ChapterBriefDrafted(brief_id="b2", target_ordinal=4, goal="g2"),
+    )
+    await proj.catch_up()
+    plotter = Plotter(FakeRunner(None), read, committer)
+    assert await plotter.readiness() == 0.0
+
+
+
 async def test_readiness_is_zero_with_no_chapters_and_no_world(stack):
     events, proj, read, committer = stack
     plotter = Plotter(FakeRunner(None), read, committer)
@@ -389,6 +451,40 @@ class _FakeSettings:
     llm_api_key = "test-key"
     agent_temperature = 0.7
     llm_max_tokens = None
+
+
+async def test_prompt_includes_arc_note_when_arc_stagnant(stack):
+    from novelizer.canon.events import ArcDeclared
+    from novelizer.store.models import Character
+
+    events, proj, read, committer = stack
+    for i in range(5):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="I am alone"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Arc alignment:" in sent
+    assert "route Mara into the next brief" in sent
+
+
+async def test_prompt_omits_arc_note_when_quiet(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Arc alignment:" not in sent
 
 
 def test_build_plotter_runner_without_backend_stays_constructible():

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
+from novelizer.brain.arc_alignment import arc_findings
 from novelizer.brain.beat_drift import beat_drifts
 from novelizer.brain.ledger import due_promises, open_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
@@ -25,6 +26,7 @@ from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import (
+    ArcRecord,
     BeatRecord,
     BlueprintRecord,
     CausalEdgeRecord,
@@ -571,15 +573,103 @@ def outline_tab(
     return OutlineTab(lines, late_count + stale_count)
 
 
-def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int) -> Text:
+ARCS_EMPTY = "No arcs declared — the Character Keeper will find the cast's spines."
+
+
+@dataclass(frozen=True)
+class ArcsTab:
+    lines: list[Text]
+    alarm_count: int
+
+
+def _arc_pivot_line(
+    beat: BeatRecord, blueprint: BlueprintRecord, missed: bool,
+) -> Text:
+    """One pivot row: ' ◈ {beat name} @ch lo-hi {status}'. missed comes from
+    arc_findings' pivot_missed findings — never re-derived here."""
+    window_lo, window_hi = beat_window(beat.ideal_pct, beat.tolerance_pct, blueprint.target_chapter_count)
+    if missed:
+        glyph, style = "missed", ALARM_STYLE
+    elif beat.fulfilled_by_chapter_id:
+        glyph, style = "✓", None
+    else:
+        glyph, style = "pending", DIM
+    text = f"  ◈ {beat.name} @ch {window_lo}-{window_hi} {glyph}"
+    return Text(text, style=style) if style else Text(text)
+
+
+def arcs_tab(
+    arcs: list[ArcRecord],
+    characters: list[Character],
+    chapters: list[Chapter],
+    beats: list[BeatRecord],
+    blueprint: BlueprintRecord | None,
+) -> ArcsTab:
+    """One lane per active arc (header + dim detail + pivot rows), resolved
+    arcs folded to a single line each (dim if consistent, full + ALARM if
+    contradictory). Glyphs and alarm_count come entirely from arc_findings —
+    never re-derived here."""
+    if not arcs:
+        return ArcsTab([Text(ARCS_EMPTY, style=DIM)], 0)
+
+    names = {c.id: c.name for c in characters}
+    beats_by_id = {b.id: b for b in beats}
+    findings = arc_findings(arcs, characters, chapters, beats, blueprint)
+    contradiction_arc_ids = {f.arc_id for f in findings if f.kind == "contradiction"}
+    stagnant_arc_ids = {f.arc_id for f in findings if f.kind == "stagnant"}
+    missed_beat_ids_by_arc: dict[str, set[str]] = {}
+    for f in findings:
+        if f.kind == "pivot_missed":
+            missed_beat_ids_by_arc.setdefault(f.arc_id, set()).add(f.beat_id)
+
+    lines: list[Text] = []
+    for arc in arcs:
+        name = names.get(arc.character_id, arc.character_id)
+        if arc.resolved:
+            if arc.id in contradiction_arc_ids:
+                lines.append(Text(f"⚠ {name} · {arc.arc_type}", style=ALARM_STYLE))
+            else:
+                lines.append(Text(f"✓ {name} · {arc.arc_type}", style=DIM))
+            continue
+
+        if not arc.active:
+            continue
+
+        if arc.id in stagnant_arc_ids:
+            glyph, style = "!", ALARM_STYLE
+        else:
+            glyph, style = "·", None
+        header_text = f"{glyph} {name} · {arc.arc_type}"
+        lines.append(Text(header_text, style=style) if style else Text(header_text))
+        last = chapter_label(arc.last_chapter_id, chapters) if arc.last_chapter_id else "—"
+        detail = f"lie '{arc.lie}' → truth '{arc.truth}' · advances {arc.advance_count} · last {last}"
+        lines.append(Text(detail, style=DIM))
+        if blueprint is not None:
+            missed_beat_ids = missed_beat_ids_by_arc.get(arc.id, set())
+            for pivot in arc.pivots:
+                beat = beats_by_id.get(pivot.beat_id)
+                if beat is None:
+                    # Beat no longer exists in the current blueprint (e.g.
+                    # superseded/re-outlined): the pivot citation is orphaned.
+                    # Surface it rather than silently dropping it -- a real
+                    # re-pin finding is deferred to M10.
+                    lines.append(Text("  ◈ (beat superseded — re-pin)", style=DIM))
+                    continue
+                missed = pivot.beat_id in missed_beat_ids
+                lines.append(_arc_pivot_line(beat, blueprint, missed))
+
+    return ArcsTab(lines, len(findings))
+
+
+def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
-    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline'."""
+    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs'."""
     strip = Text()
     for i, (label, count) in enumerate(
         [
             ("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause),
-            ("Outline", outline),
+            ("Outline", outline), ("Arcs", arcs),
         ]
     ):
         if i:
