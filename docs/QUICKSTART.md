@@ -253,3 +253,27 @@ not auto-corrected: the story may have earned it). The Plotter reads the same fi
 routes stagnant characters into upcoming chapter briefs; it also wakes early when a beat
 goes late. The freeform `arc_status` line on each character remains the Keeper's observed
 snapshot — the arc aggregate is the plan it's measured against.
+
+## 12. Craft skills and the workspace
+
+Agents no longer carry all their craft knowledge in their prompts. Five **skill packs**
+ship with novelizer — outlining, promise-payoff, character-arcs, scene-sequel, pacing —
+and are mounted read-only at `/skills/`. Every tooled agent sees the *names and
+descriptions* of all five packs (progressive disclosure keeps that cost to a
+handful of lines per pack) until a task actually calls for one; then it reads the pack
+body, and pulls reference tables (beat frameworks with their percentage positions,
+per-genre obligatory scenes, the arc-type outcome table, the try-fail outcome taxonomy,
+tension-curve anchors) on demand. Watch the Engine Room for `⚒ read_file /skills/...`
+lines to see a skill activate mid-plan — so asking the Editor "how should I pace this
+reveal?" gets an answer grounded in your actual ledger and adopted framework.
+
+Agents also get `/workspace/` — a writable scratch space (per-invocation, not persisted
+across turns — there's no checkpointer or thread reuse today) for drafting and comparing
+options in files instead of holding everything in one context.
+Canon and `/outline/` remain read-only: the only way to change the story record is still a
+declared intent through the gated commit path.
+
+Semantic search now covers promises, chapter briefs, and character arcs alongside chapters,
+characters, world entries, threads, secrets, and themes — and closed records (paid promises,
+superseded briefs, resolved arcs) carry their status in the index, so a search hit never
+reads as live guidance when it isn't.

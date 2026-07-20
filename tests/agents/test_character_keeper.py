@@ -452,6 +452,48 @@ def test_build_character_keeper_runner_with_backend_bounds_recursion():
     assert runner.config.get("recursion_limit") == 100
 
 
+def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkeypatch):
+    from novelizer.agents import character_keeper as keeper_mod
+    from novelizer.canon_fs.backend import CanonBackend
+
+    captured = {}
+
+    class FakeGraph:
+        def with_config(self, config):
+            return self
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
+        captured["skills"] = skills
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    backend = CanonBackend(read_store=None)
+    keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
+    assert captured["skills"] == keeper_mod.KEEPER_SKILLS
+    assert captured["skills"] == ["/skills"]
+
+
+def test_build_character_keeper_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):
+    from novelizer.agents import character_keeper as keeper_mod
+
+    captured = {}
+
+    class FakeGraph:
+        pass
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format):
+        captured["called"] = True
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    keeper_mod.build_character_keeper_runner(_FakeSettings())
+    assert captured["called"]
+
+
 def test_system_prompt_mentions_arc_task():
     assert "arc" in SYSTEM_PROMPT.lower()
 

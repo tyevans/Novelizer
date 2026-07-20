@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.agents.author import RETRIEVAL_NOTE
 from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
 
@@ -11,6 +12,11 @@ You may optionally declare intents (threads, secrets, causal edges, themes) when
 conversation genuinely warrants a real change to the story record; otherwise leave every
 intent list empty. Never invent ids — cite ids shown in the story context, or use the
 minting action (plant/introduce) with a name."""
+
+# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
+# middleware's container source contract makes per-agent pack selectivity
+# unavailable, so every tooled agent shares the same source list.
+CHAT_SKILLS = CRAFT_SKILLS
 
 
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
@@ -29,7 +35,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
         system_prompt = system_prompt + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChatReply,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=CHAT_SKILLS,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

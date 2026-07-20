@@ -693,6 +693,62 @@ def test_build_author_runner_binds_callbacks_at_graph_scope_not_model():
     assert handler in (runner.config.get("callbacks") or [])
 
 
+def test_build_author_runner_tooled_branch_passes_author_skills(monkeypatch):
+    from novelizer.agents import author as author_mod
+    from novelizer.canon_fs.backend import CanonBackend
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    captured = {}
+
+    class FakeGraph:
+        def with_config(self, config):
+            return self
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None):
+        captured["skills"] = skills
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    backend = CanonBackend(read_store=None)
+    author_mod.build_author_runner(FakeSettings(), backend=backend, tools=[])
+    assert captured["skills"] == author_mod.AUTHOR_SKILLS
+    assert captured["skills"] == ["/skills"]
+
+
+def test_build_author_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):
+    from novelizer.agents import author as author_mod
+
+    class FakeSettings:
+        author_model = "gpt-4o-mini"
+        llm_base_url = None
+        llm_api_key = "test-key"
+        author_temperature = 0.7
+        llm_max_tokens = None
+
+    captured = {}
+
+    class FakeGraph:
+        pass
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format):
+        captured["called"] = True
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    author_mod.build_author_runner(FakeSettings())
+    assert captured["called"]
+
+
 def test_retrieval_note_pinned_and_base_split():
     from novelizer.agents.author import RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE
 

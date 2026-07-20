@@ -18,6 +18,11 @@ INDEXED_EVENT_TYPES = [
     EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED,
     EventType.SECRET_CREATED, EventType.SECRET_REVEALED,
     EventType.THEME_INTRODUCED, EventType.THEME_DEVELOPED,
+    EventType.PROMISE_MADE, EventType.PROMISE_PROGRESSED,
+    EventType.PROMISE_PAID, EventType.PROMISE_RELEASED,
+    EventType.CHAPTER_BRIEF_DRAFTED,
+    EventType.CHAPTER_BRIEF_SUPERSEDED, EventType.CHAPTER_BRIEF_FULFILLED,
+    EventType.ARC_DECLARED, EventType.ARC_ADVANCED, EventType.ARC_RESOLVED,
 ]
 
 _PREFIX_TO_KIND = {
@@ -27,6 +32,9 @@ _PREFIX_TO_KIND = {
     "thread": "thread",
     "secret": "secret",
     "theme": "theme",
+    "promise": "promise",
+    "chapter_brief": "brief",
+    "arc": "arc",
 }
 
 
@@ -123,7 +131,20 @@ class CanonIndexer:
             record = await self._read.get_secret(aggregate_id)
             if record is not None:
                 await self._emb.upsert_secret(record)
-        else:
+        elif kind == "theme":
             record = await self._read.get_theme(aggregate_id)
             if record is not None:
                 await self._emb.upsert_theme(record)
+        elif kind == "promise":
+            record = await self._read.get_promise(aggregate_id)
+            if record is not None:
+                await self._emb.upsert_promise(record)
+        elif kind == "brief":
+            briefs = {b.id: b for b in await self._read.list_briefs()}
+            record = briefs.get(aggregate_id)
+            if record is not None:
+                await self._emb.upsert_brief(record)
+        else:
+            record = await self._read.get_arc(aggregate_id)
+            if record is not None:
+                await self._emb.upsert_arc(record)

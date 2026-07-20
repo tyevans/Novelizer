@@ -19,9 +19,9 @@ def test_build_chat_runner_bare_stays_constructible(monkeypatch):
     class FakeGraph:
         pass
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
         captured["kwargs"] = {
-            "system_prompt": system_prompt, "backend": backend, "tools": tools,
+            "system_prompt": system_prompt, "backend": backend, "tools": tools, "skills": skills,
         }
         return FakeGraph()
 
@@ -33,6 +33,7 @@ def test_build_chat_runner_bare_stays_constructible(monkeypatch):
     assert runner is not None
     assert captured["kwargs"]["backend"] is None
     assert captured["kwargs"]["tools"] is None
+    assert captured["kwargs"]["skills"] is None
     assert runners_mod.RETRIEVAL_NOTE not in captured["kwargs"]["system_prompt"]
 
 
@@ -55,7 +56,7 @@ def test_build_chat_runner_with_backend_includes_retrieval_note(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
         captured["system_prompt"] = system_prompt
         return FakeGraph()
 
@@ -65,6 +66,29 @@ def test_build_chat_runner_with_backend_includes_retrieval_note(monkeypatch):
     backend = CanonBackend(read_store=None)
     runners_mod.build_chat_runner(FakeSettings(), "author", backend=backend, tools=[])
     assert runners_mod.RETRIEVAL_NOTE in captured["system_prompt"]
+
+
+def test_build_chat_runner_with_backend_passes_all_five_skills(monkeypatch):
+    from novelizer.chat import runners as runners_mod
+    from novelizer.canon_fs.backend import CanonBackend
+
+    captured = {}
+
+    class FakeGraph:
+        def with_config(self, config):
+            return self
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
+        captured["skills"] = skills
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    backend = CanonBackend(read_store=None)
+    runners_mod.build_chat_runner(FakeSettings(), "author", backend=backend, tools=[])
+    assert captured["skills"] == runners_mod.CHAT_SKILLS
+    assert captured["skills"] == ["/skills"]
 
 
 def test_build_chat_runner_with_backend_bounds_recursion():
@@ -109,7 +133,7 @@ def test_build_chat_runner_streams_when_callbacks_provided(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, middleware=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
         return FakeGraph()
 
     import deepagents

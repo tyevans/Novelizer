@@ -4,6 +4,7 @@ from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_P
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import arc_note, open_retcons_note
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -30,6 +31,11 @@ Return new_characters, updated_characters (id + revised arc_status, and any corr
 traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
 proposed_resolution). You may also be shown retcon requests already filed and still open:
 do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
+
+# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
+# middleware's container source contract makes per-agent pack selectivity
+# unavailable, so every tooled agent shares the same source list.
+KEEPER_SKILLS = CRAFT_SKILLS
 
 
 class CharacterKeeper(BaseAgent):
@@ -214,7 +220,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=KEEPER_SKILLS,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

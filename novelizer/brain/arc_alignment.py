@@ -2,10 +2,11 @@
 
 Pure functions over ReadStore data. Never persisted, never mutates state --
 callers pass ArcRecord/Character/Chapter/BeatRecord/BlueprintRecord
-snapshots and receive plain data back. Flags three kinds of arc trouble:
+snapshots and receive plain data back. Flags four kinds of arc trouble:
 a resolved arc whose outcome contradicts its declared type, an unresolved
-arc that has gone quiet, and an unresolved arc whose planned pivot beat's
-window has closed without a recorded advance inside it.
+arc that has gone quiet, an unresolved arc whose planned pivot beat's
+window has closed without a recorded advance inside it, and an unresolved
+arc whose pivot cites a beat that no longer exists in the blueprint.
 """
 
 from dataclasses import dataclass
@@ -29,7 +30,7 @@ STAGNATION_CHAPTERS = 4
 class ArcFinding:
     arc_id: str
     character_id: str
-    kind: str  # "contradiction" | "stagnant" | "pivot_missed"
+    kind: str  # "contradiction" | "stagnant" | "pivot_missed" | "pivot_orphaned"
     detail: str
     beat_id: str = ""
 
@@ -100,6 +101,15 @@ def arc_findings(
             for pivot in arc.pivots:
                 beat = beats_by_id.get(pivot.beat_id)
                 if beat is None:
+                    # The pivot's beat no longer exists in the current
+                    # blueprint (superseded/re-outlined) -- flag it as
+                    # orphaned so the citation gets re-pinned rather than
+                    # silently going quiet.
+                    findings.append(ArcFinding(
+                        arc_id=arc.id, character_id=arc.character_id, kind="pivot_orphaned",
+                        detail=f"pivot beat '{pivot.beat_id}' no longer exists — re-pin",
+                        beat_id=pivot.beat_id,
+                    ))
                     continue
                 lo, hi = beat_window(beat.ideal_pct, beat.tolerance_pct, blueprint.target_chapter_count)
                 if now > hi and (last_ordinal is None or last_ordinal < lo):

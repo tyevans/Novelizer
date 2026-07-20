@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.continuity_checker import ContinuityChecker
-from novelizer.agents.schemas import ContinuityOutput, RetconDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact
+from novelizer.agents.schemas import ContinuityOutput, RetconDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact, PromiseProgressFact
 from novelizer.store.models import WorldEntry, RetconStatus, Chapter
 from novelizer.canon.events import SecretCreated, SecretReferenced
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
@@ -494,6 +494,82 @@ async def test_mining_thread_fact_dedups_against_raw_log_scan(stack):
     log = await events.events_since(0)
     touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED and e.payload["chapter_id"] == "c1"]
     assert len(touches) == 1
+
+
+async def test_mining_promise_progress_fact_commits_mined_progress(stack):
+    from novelizer.canon.events import PromiseMade
+
+    events, proj, read, committer = stack
+    await events.append(EventType.PROMISE_MADE, "the-locked-door",
+                        PromiseMade(id="the-locked-door", name="The Locked Door"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(promise_progress_facts=[
+        PromiseProgressFact(promise_id="the-locked-door", note="She tries the handle again."),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    promises = await read.list_promises()
+    promise = next(p for p in promises if p.id == "the-locked-door")
+    assert promise.progress_count == 1
+    assert promise.last_chapter_id == "c1"
+
+    log = await events.events_since(0)
+    progressed = [e for e in log if e.event_type == EventType.PROMISE_PROGRESSED]
+    assert len(progressed) == 1
+    assert progressed[0].payload["source"] == "mined"
+
+
+async def test_mining_promise_progress_fact_unknown_id_drops(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_out = MinedFactsOutput(promise_progress_facts=[
+        PromiseProgressFact(promise_id="no-such-promise", note="Nothing to see."),
+    ])
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    progressed = [e for e in log if e.event_type == EventType.PROMISE_PROGRESSED]
+    assert len(progressed) == 0
+
+
+async def test_mining_prompt_includes_open_promise_list(stack):
+    from novelizer.canon.events import PromiseMade
+
+    events, proj, read, committer = stack
+    await events.append(EventType.PROMISE_MADE, "the-locked-door",
+                        PromiseMade(id="the-locked-door", name="The Locked Door"))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_runner = FakeRunner(MinedFactsOutput())
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+    await agent.run_once()
+
+    assert len(mining_runner.calls) == 1
+    prompt = mining_runner.calls[0]["messages"][0]["content"]
+    assert "the-locked-door: The Locked Door" in prompt
+
+
+async def test_mining_prompt_omits_open_promise_section_when_none(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    mining_runner = FakeRunner(MinedFactsOutput())
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), mining_runner, read, committer, events)
+    await agent.run_once()
+
+    assert len(mining_runner.calls) == 1
+    prompt = mining_runner.calls[0]["messages"][0]["content"]
+    assert "Open promises" not in prompt
 
 
 class RaisingThenFakeMiningRunner:

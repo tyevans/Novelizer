@@ -9,6 +9,7 @@ from novelizer.brain.context import (
     stale_threads_note, tension_target_note,
 )
 from novelizer.canon.beat_templates import beat_window
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.events import ChapterBriefSuperseded, EventType
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -27,6 +28,11 @@ toward overdue payoffs and dark threads over introducing new material."""
 
 _READINESS_BRIEF_RUNWAY = 2
 _READINESS_BRIEF_LOOKAHEAD = 3
+
+# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
+# middleware's container source contract makes per-agent pack selectivity
+# unavailable, so every tooled agent shares the same source list.
+PLOTTER_SKILLS = CRAFT_SKILLS
 
 
 def _summarize(ctx: dict, personality: str = "") -> str:
@@ -261,7 +267,7 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=PLOTTER_SKILLS,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

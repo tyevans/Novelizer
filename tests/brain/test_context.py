@@ -79,6 +79,18 @@ def test_arc_note_falls_back_to_character_id_when_name_unknown():
     assert "ghost-id" in note
 
 
+def test_arc_note_lists_orphaned_pivot_with_re_pin_guidance():
+    from novelizer.store.models import ArcPivot, BlueprintRecord
+
+    arc = ArcRecord(
+        id="a1", character_id="mara", arc_type="positive", last_chapter_id="c1",
+        pivots=[ArcPivot(beat_id="dead-beat")],
+    )
+    blueprint = BlueprintRecord(id="bp1", framework="three_act", target_chapter_count=10)
+    note = arc_note([arc], [_character("mara", "Mara")], _chapters(2), [], blueprint, stagnation_chapters=100)
+    assert "re-pin Mara's pivot — beat dead-beat was superseded" in note
+
+
 def test_known_secrets_note_empty_when_no_secrets():
     assert known_secrets_note([], [], {}) == ""
 

@@ -198,11 +198,12 @@ def arc_note(
     stagnation_chapters: int = STAGNATION_CHAPTERS,
 ) -> str:
     """Build the prompt block naming every arc-alignment finding (a resolved
-    arc whose outcome contradicts its type, a stagnant unresolved arc, or a
-    missed pivot window), with per-character guidance: contradictions need
-    adjudication, stagnation/missed pivots need routing into the next brief.
-    Empty string when nothing is flagged, so the prompt stays byte-identical
-    when quiet.
+    arc whose outcome contradicts its type, a stagnant unresolved arc, a
+    missed pivot window, or an orphaned pivot citation), with per-character
+    guidance: contradictions need adjudication, stagnation/missed pivots
+    need routing into the next brief, orphaned pivots need re-pinning to a
+    live beat. Empty string when nothing is flagged, so the prompt stays
+    byte-identical when quiet.
     """
     findings = arc_findings(arcs, characters, chapters, beats, blueprint, stagnation_chapters)
     if not findings:
@@ -213,6 +214,8 @@ def arc_note(
         name = names_by_id.get(f.character_id, f.character_id)
         if f.kind == "contradiction":
             guidance = f"adjudicate: {f.detail}"
+        elif f.kind == "pivot_orphaned":
+            guidance = f"re-pin {name}'s pivot — beat {f.beat_id} was superseded"
         else:
             guidance = f"route {name} into the next brief ({f.detail})"
         lines.append(f"- {name} (arc:{f.arc_id}) — {guidance}")

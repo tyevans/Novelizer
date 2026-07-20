@@ -4,7 +4,11 @@ import tempfile
 import pytest
 
 from novelizer.canon.event_store import EventStore
-from novelizer.canon.events import EventType, SecretCreated, ThemeIntroduced, ThreadPlanted
+from novelizer.canon.events import (
+    ArcDeclared, ArcResolved, ChapterBriefDrafted, ChapterBriefFulfilled,
+    ChapterBriefSuperseded, EventType, PromiseMade, PromisePaid,
+    SecretCreated, ThemeIntroduced, ThreadPlanted,
+)
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.store.embeddings import EmbeddingStore
@@ -37,6 +41,12 @@ async def seed(events, proj):
     await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="Curse"))
     await events.append(EventType.SECRET_CREATED, "s1", SecretCreated(id="s1", title="Scar"))
     await events.append(EventType.THEME_INTRODUCED, "th1", ThemeIntroduced(id="th1", title="Memory"))
+    await events.append(EventType.PROMISE_MADE, "the-sealed-letter",
+                        PromiseMade(id="the-sealed-letter", name="The Sealed Letter", description="bell wax seal"))
+    await events.append(EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+                        ChapterBriefDrafted(brief_id="b1", target_ordinal=2, goal="bell tolls", synopsis="dusk"))
+    await events.append(EventType.ARC_DECLARED, "arc1",
+                        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="bells lie"))
     await proj.catch_up()
 
 
@@ -44,15 +54,18 @@ async def test_backfill_indexes_every_kind(stack):
     events, proj, read, store, indexer = stack
     await seed(events, proj)
     processed = await indexer.catch_up()
-    assert processed == 6
+    assert processed == 9
     hits = await store.search("bell", n=20)
-    assert {h.kind for h in hits} == {"chapter", "character", "world", "thread", "secret", "theme"}
+    assert {h.kind for h in hits} == {
+        "chapter", "character", "world", "thread", "secret", "theme",
+        "promise", "brief", "arc",
+    }
 
 
 async def test_catch_up_is_incremental_and_idempotent(stack):
     events, proj, read, store, indexer = stack
     await seed(events, proj)
-    assert await indexer.catch_up() == 6
+    assert await indexer.catch_up() == 9
     assert await indexer.catch_up() == 0  # cursor persisted, nothing new
     await events.append(EventType.CHAPTER_CREATED, "ch2",
                         Chapter(id="ch2", title="Two", prose="More prose."))
@@ -78,7 +91,16 @@ async def test_embed_failure_leaves_cursor_for_retry(stack, tmp_path):
 
     broken = CanonIndexer(events, read, Boom(), str(tmp_path / "cursor2.json"))
     assert await broken.catch_up() == 0  # swallowed, not raised
-    assert await indexer.catch_up() == 6  # untouched cursor path still backfills
+    assert await indexer.catch_up() == 9  # untouched cursor path still backfills
+
+
+async def test_promise_brief_arc_kind_filter_isolates_each(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+    assert {h.id for h in await store.search("bell", kinds=["promise"], n=20)} == {"the-sealed-letter"}
+    assert {h.id for h in await store.search("bell", kinds=["brief"], n=20)} == {"b1"}
+    assert {h.id for h in await store.search("bell", kinds=["arc"], n=20)} == {"arc1"}
 
 
 async def test_catch_up_never_raises_even_if_event_store_fails(stack, tmp_path):
@@ -123,3 +145,63 @@ async def test_supersede_via_real_retconner_convention_removes_old_embedding(sta
     await indexer.catch_up()
     assert store._world.get(ids=["w1"])["ids"] == []
     assert store._world.get(ids=["w2"])["ids"] == ["w2"]
+
+
+async def test_promise_paid_refreshes_vector_with_terminal_state(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.PROMISE_PAID, "the-sealed-letter",
+                        PromisePaid(id="the-sealed-letter", chapter_id="ch1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._promises.get(ids=["the-sealed-letter"])["documents"][0]
+    assert "state: paid" in doc
+
+
+async def test_brief_superseded_refreshes_vector_with_terminal_status(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.CHAPTER_BRIEF_SUPERSEDED, "b1",
+                        ChapterBriefSuperseded(brief_id="b1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._briefs.get(ids=["b1"])["documents"][0]
+    assert "status: superseded" in doc
+
+
+async def test_brief_fulfilled_refreshes_vector_with_terminal_status(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.CHAPTER_BRIEF_FULFILLED, "b1",
+                        ChapterBriefFulfilled(brief_id="b1", chapter_id="ch1"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._briefs.get(ids=["b1"])["documents"][0]
+    assert "status: fulfilled" in doc
+
+
+async def test_arc_resolved_refreshes_vector_with_outcome(stack):
+    events, proj, read, store, indexer = stack
+    await seed(events, proj)
+    await indexer.catch_up()
+
+    await events.append(EventType.ARC_RESOLVED, "arc1",
+                        ArcResolved(arc_id="arc1", chapter_id="ch1", outcome="truth_embraced"))
+    await proj.catch_up()
+    processed = await indexer.catch_up()
+    assert processed == 1
+
+    doc = store._arcs.get(ids=["arc1"])["documents"][0]
+    assert "resolved: truth_embraced" in doc

@@ -5,6 +5,7 @@ from novelizer.brain.context import (
     stale_threads_note,
 )
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, InspirationHandConsumed, ChapterBriefFulfilled
@@ -38,6 +39,14 @@ _RETRIEVAL_NOTE_SUFFIX = (
 RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
 
 RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
+
+# SkillsMiddleware treats each source as a container directory listing skill
+# subdirectories; the container is /skills, not an individual pack (see
+# novelizer.canon_fs.skills_route.CRAFT_SKILLS docstring). Per-agent pack
+# selectivity is unavailable under that contract, so every tooled agent
+# shares the same source list -- progressive disclosure keeps the cost to
+# each pack's name + description line.
+AUTHOR_SKILLS = CRAFT_SKILLS
 
 
 def _summarize(
@@ -232,7 +241,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=AUTHOR_SKILLS,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

@@ -512,3 +512,70 @@ def test_build_plotter_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+def test_build_plotter_runner_tooled_branch_passes_plotter_skills(monkeypatch):
+    from novelizer.agents import plotter as plotter_mod
+    from novelizer.canon_fs.backend import CanonBackend
+
+    captured = {}
+
+    class FakeGraph:
+        def with_config(self, config):
+            return self
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None):
+        captured["skills"] = skills
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    backend = CanonBackend(read_store=None)
+    plotter_mod.build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
+    assert captured["skills"] == plotter_mod.PLOTTER_SKILLS
+    assert captured["skills"] == ["/skills"]
+
+
+def test_build_plotter_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):
+    from novelizer.agents import plotter as plotter_mod
+
+    captured = {}
+
+    class FakeGraph:
+        pass
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format):
+        captured["called"] = True
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    plotter_mod.build_plotter_runner(_FakeSettings())
+    assert captured["called"]
+
+
+def test_build_plotter_runner_with_real_composite_backend_is_constructible():
+    """Integration smoke: build the tooled Plotter runner against the real
+    CompositeBackend recipe from Runtime._phase_a_toolkit (canon default +
+    /outline/, /skills/, /workspace/ routes). SkillsMiddleware validates its
+    sources lazily (at invoke/before_agent time, not construction), so this
+    proves the graph is constructible with the real skills backend wired in
+    -- not that the skill paths resolve to actual skill packs."""
+    from deepagents.backends import CompositeBackend, StateBackend
+    from novelizer.agents.plotter import build_plotter_runner
+    from novelizer.canon_fs.backend import CanonBackend
+    from novelizer.canon_fs.outline import OutlineBackend
+    from novelizer.canon_fs.skills_route import build_skills_backend
+
+    backend = CompositeBackend(
+        default=CanonBackend(read_store=None),
+        routes={
+            "/outline/": OutlineBackend(None),
+            "/skills/": build_skills_backend(),
+            "/workspace/": StateBackend(),
+        },
+    )
+    runner = build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
