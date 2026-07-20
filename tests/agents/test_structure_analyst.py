@@ -139,3 +139,39 @@ async def test_commit_propagates_validation_error_and_commits_nothing_for_the_ba
         await analyst.run_once()
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.ANNOTATION_STRUCTURE_SCORED] == []
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_structure_analyst_runner_without_backend_stays_constructible():
+    from novelizer.agents.structure_analyst import build_structure_analyst_runner
+
+    runner = build_structure_analyst_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_structure_analyst_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.structure_analyst import build_structure_analyst_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_structure_analyst_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_structure_analyst_runner_with_backend_bounds_recursion():
+    from novelizer.agents.structure_analyst import build_structure_analyst_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_structure_analyst_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50

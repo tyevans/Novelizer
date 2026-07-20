@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -90,3 +91,32 @@ def test_precedence_property(global_d, story_d, env_d):
     for key in _PROPERTY_KEYS:
         expected = env_d.get(key, story_d.get(key, global_d.get(key, getattr(defaults, key))))
         assert getattr(eff, key) == expected
+
+
+@pytest.mark.parametrize("flag_name", [
+    "world_architect_tools_enabled",
+    "character_keeper_tools_enabled",
+    "editor_tools_enabled",
+    "retconner_tools_enabled",
+    "structure_analyst_tools_enabled",
+])
+def test_phase_b_agent_tools_enabled_precedence(flag_name):
+    """Phase-B per-agent tools_enabled flags follow env > story > global > default precedence."""
+    # Default is True
+    eff = build_effective(GlobalConfig(), StoryConfig(), _env())
+    assert getattr(eff, flag_name) is True
+
+    # Global can override
+    global_kwargs = {flag_name: False}
+    eff = build_effective(GlobalConfig(**global_kwargs), StoryConfig(), _env())
+    assert getattr(eff, flag_name) is False
+
+    # Story overrides global
+    story_kwargs = {flag_name: True}
+    eff = build_effective(GlobalConfig(**global_kwargs), StoryConfig(**story_kwargs), _env())
+    assert getattr(eff, flag_name) is True
+
+    # Env overrides all
+    env_kwargs = {flag_name: False}
+    eff = build_effective(GlobalConfig(**global_kwargs), StoryConfig(**story_kwargs), _env(**env_kwargs))
+    assert getattr(eff, flag_name) is False
