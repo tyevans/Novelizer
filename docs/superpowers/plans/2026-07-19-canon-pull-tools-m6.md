@@ -7,7 +7,7 @@
 **Architecture:** Pure phase-b flag flips per the ladder: five settings flags, five builders mirroring `build_author_runner`'s reviewed pattern (graph-scope callbacks + `recursion_limit: 50`, constructor-callback-free model with explicit `streaming`, retrieval note when backend given), runtime `_tooled` wiring with rebuild parity. **No prompt diets in M6** — each agent's push is deliberate: Editor reviews ONE chapter in full; Keeper mines recent prose (its truncation was just tuned on main); Analyst's 400-char whole-book skim IS its scoring algorithm; Architect/Retconner push world-entry bodies they act on. Tools are additive research capacity.
 
 **Two spec deviations to document, not implement:**
-1. `write_todos` stays available to ALL agents — deepagents hardcodes `TodoListMiddleware` in the stack; exclusion requires a `HarnessProfile` entry-point plugin, disproportionate to the schema-weight savings.
+1. `write_todos` is now Author-only via `ExcludeToolsMiddleware` (novelizer/agents/middleware.py) — user middleware passed to `create_deep_agent(middleware=[...])` filters the tool from the model request; the earlier HarnessProfile-plugin premise was incorrect.
 2. The retrieval note is SPLIT: phase-a agents' note references "the chapter list below" (their map); phase-b agents have no map, so they get a base note without that sentence.
 
 ## Global Constraints
@@ -65,7 +65,7 @@ Tests: spy-pattern (as in the M4/M5 runtime tests) — flags on ⇒ each of the 
 **Files:** `docs/superpowers/plans/2026-07-19-canon-pull-tools-milestones.md`, `docs/superpowers/specs/2026-07-19-canon-pull-tools-design.md`, `docs/QUICKSTART.md`.
 
 - [ ] Milestone doc: CPT-M6 delivered note (rollout complete; the two deviations above; Muse + mining untouched; no prompt diets with the per-agent rationale).
-- [ ] Spec: annotate the Wiring section — `write_todos` scoping not implemented (HarnessProfile plugin disproportionate); note-split delivered.
+- [x] Spec: annotate the Wiring section — `write_todos` scoping delivered via `ExcludeToolsMiddleware`; note-split delivered.
 - [ ] QUICKSTART: document the eight `*_tools_enabled` flags (author/checker/chat + five) with one line on what turning one off does (legacy push prompts, no canon tools; restart required).
 - [ ] Full-suite gate: `uv run pytest -q` — zero failures (known load-only flakes: rerun isolated before treating as real).
 - [ ] Commit: `docs: CPT-M6 delivered — canon pull tools rollout complete`

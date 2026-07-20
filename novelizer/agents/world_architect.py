@@ -63,6 +63,7 @@ class WorldArchitect(BaseAgent):
 def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
+    from novelizer.agents.middleware import ExcludeToolsMiddleware
     if backend is not None:
         model = build_chat_model(
             settings.agent_model, settings.llm_base_url, settings.llm_api_key,
@@ -73,6 +74,7 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=WorldEntriesDraft,
             backend=backend, tools=tools,
+            middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": 50}
         if callbacks:

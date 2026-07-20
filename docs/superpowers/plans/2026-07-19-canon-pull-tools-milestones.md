@@ -32,11 +32,11 @@ milestone touches the write path.
   algorithm; Architect/Retconner push the world-entry bodies they act on.
   The retrieval note was split (`RETRIEVAL_NOTE_BASE` without the map
   sentence) so phase-b prompts don't reference a chapter index they don't
-  have; phase-a note byte-identical. **Deviation:** `write_todos` remains
-  available to all agents — deepagents hardcodes `TodoListMiddleware`, and
-  exclusion would require a `HarnessProfile` entry-point plugin,
-  disproportionate to the schema-weight savings. Muse and the checker's
-  mining runner remain untouched.
+  have; phase-a note byte-identical. `write_todos` is now Author-only via
+  `ExcludeToolsMiddleware` (novelizer/agents/middleware.py) — user middleware
+  passed to `create_deep_agent(middleware=[...])` filters the tool from the
+  model request; the earlier HarnessProfile-plugin premise was incorrect.
+  Muse and the checker's mining runner remain untouched.
 
 - **CPT-M5: delivered** (2026-07-19). Phase-c chat personas are wired: the
   per-agent chat runner (`Runtime._chat_runner_for`) builds via
