@@ -160,9 +160,15 @@ class CharacterKeeper(BaseAgent):
         await self._commit_knowledge_intents(
             out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})
         )
-        # Re-read the cast at commit time (not from ctx): mirrors the new-character
-        # re-read above -- a character minted mid-cycle must still be citable.
-        character_ids = {c.id for c in await self._read.list_characters()}
+        # Use the in-memory seen_ids (not a fresh re-read): the ReadStore only
+        # updates on the Projector's periodic catch_up, so a character minted
+        # earlier in this same commit() would be invisible to a re-read here,
+        # silently dropping an arc declare for a character created moments ago.
+        character_ids = seen_ids
+        # Known limitation: this active_arc_ids re-read has the same theoretical
+        # staleness for a declare-then-advance-in-one-pass (an arc declared above
+        # in this same commit() won't appear here either) -- left as-is since
+        # arc actions are rarer than character mentions; the next tick picks it up.
         active_arc_ids = {a.id for a in await self._read.list_arcs(active_only=True)}
         active_beat_ids = {b.id for b in ctx.get("beats", [])}
         await self._commit_arc_intents(

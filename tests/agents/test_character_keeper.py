@@ -473,6 +473,21 @@ async def test_declare_arc_intent_projects_active_arc_for_character(stack):
     assert arcs[0].lie == "I am alone"
 
 
+async def test_new_character_and_declare_arc_intent_in_same_pass(stack):
+    events, proj, read, committer = stack
+    out = KeeperOutput(
+        new_characters=[NewCharacter(name="Mara")],
+        arc_intents=[ArcIntent(action="declare", character_id="mara", arc_type="positive", lie="I am alone")],
+    )
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.commit(out, {"characters": [], "recent": []})
+    await proj.catch_up()
+    arc = await read.get_active_arc_for_character("mara")
+    assert arc is not None
+    assert arc.arc_type == "positive"
+    assert arc.lie == "I am alone"
+
+
 async def test_resolve_arc_intent_citing_unknown_id_is_dropped(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
