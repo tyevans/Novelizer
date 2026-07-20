@@ -142,3 +142,41 @@ def test_pivot_missed_quiet_when_window_still_open():
     )
     findings = arc_findings([arc], [], _chapters(5), [_beat()], _blueprint(), stagnation_chapters=100)
     assert [f for f in findings if f.kind == "pivot_missed"] == []
+
+
+# --- pivot_orphaned --------------------------------------------------------
+
+def test_pivot_orphaned_fires_with_blueprint_and_dead_beat_id():
+    arc = ArcRecord(
+        id="a1", character_id="mara", arc_type="positive", last_chapter_id="c1",
+        pivots=[ArcPivot(beat_id="dead-beat")],
+    )
+    findings = arc_findings([arc], [], _chapters(2), [], _blueprint(), stagnation_chapters=100)
+    orphaned = [f for f in findings if f.kind == "pivot_orphaned"]
+    assert len(orphaned) == 1
+    f = orphaned[0]
+    assert f.arc_id == "a1"
+    assert f.character_id == "mara"
+    assert f.beat_id == "dead-beat"
+    assert "dead-beat" in f.detail
+
+
+def test_pivot_orphaned_quiet_without_blueprint():
+    # No blueprint means no beats at all -- stay quiet rather than flag
+    # every pivot as orphaned.
+    arc = ArcRecord(
+        id="a1", character_id="mara", arc_type="positive", last_chapter_id="c1",
+        pivots=[ArcPivot(beat_id="dead-beat")],
+    )
+    findings = arc_findings([arc], [], _chapters(2), [], None, stagnation_chapters=100)
+    assert [f for f in findings if f.kind == "pivot_orphaned"] == []
+
+
+def test_pivot_orphaned_not_double_reported_as_missed():
+    arc = ArcRecord(
+        id="a1", character_id="mara", arc_type="positive", last_chapter_id="c1",
+        pivots=[ArcPivot(beat_id="dead-beat")],
+    )
+    findings = arc_findings([arc], [], _chapters(20), [], _blueprint(), stagnation_chapters=100)
+    kinds = [f.kind for f in findings if f.beat_id == "dead-beat"]
+    assert kinds == ["pivot_orphaned"]

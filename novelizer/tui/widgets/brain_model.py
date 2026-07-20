@@ -650,10 +650,13 @@ def arcs_tab(
                 beat = beats_by_id.get(pivot.beat_id)
                 if beat is None:
                     # Beat no longer exists in the current blueprint (e.g.
-                    # superseded/re-outlined): the pivot citation is orphaned.
-                    # Surface it rather than silently dropping it -- a real
-                    # re-pin finding is deferred to M10.
-                    lines.append(Text("  ◈ (beat superseded — re-pin)", style=DIM))
+                    # superseded/re-outlined): the pivot citation is orphaned
+                    # -- named by arc_findings' pivot_orphaned kind, never
+                    # re-derived here. A pivot is orphaned XOR missed XOR
+                    # fulfilled/pending -- never double-reported.
+                    lines.append(Text(
+                        f"  ◈ (beat {pivot.beat_id} superseded — re-pin)", style=DIM,
+                    ))
                     continue
                 missed = pivot.beat_id in missed_beat_ids
                 lines.append(_arc_pivot_line(beat, blueprint, missed))
