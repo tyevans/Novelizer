@@ -51,9 +51,12 @@ class BrainPanel(Vertical):
         keyword-only with no defaults so the app cannot forget to pass them)."""
         chapters = await read.list_chapters()  # one snapshot shared by three tabs
         shape = shape_tab(await read.list_structure_scores(), chapters, delta)
-        threads = threads_tab(await read.list_threads(), chapters, threshold)
+        secret_records = await read.list_secrets()
+        threads = threads_tab(
+            await read.list_threads(), chapters, await read.list_promises(), secret_records, threshold
+        )
         secrets = secrets_tab(
-            await read.list_secrets(), await read.list_characters(), await read.knowledge_matrix()
+            secret_records, await read.list_characters(), await read.knowledge_matrix()
         )
         cause = causeway_tab(await read.list_causal_edges(), chapters)
 

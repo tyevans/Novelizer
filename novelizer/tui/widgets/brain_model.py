@@ -13,12 +13,25 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
+from novelizer.brain.ledger import due_promises, open_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
+from novelizer.brain.resolution_pacing import congested_windows, overdue_reveals, overdue_resolutions
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import CausalEdgeRecord, Chapter, Character, SecretRecord, StructureScore, ThreadRecord, ThreadState
+from novelizer.store.models import (
+    CausalEdgeRecord,
+    Chapter,
+    Character,
+    PromiseRecord,
+    PromiseState,
+    SecretRecord,
+    StructureScore,
+    ThreadRecord,
+    ThreadState,
+)
 from novelizer.tui.widgets.feed_model import ALARM_STYLE
 
 DIM = "dim"
@@ -135,29 +148,51 @@ def age_bar(elapsed: int, threshold: int) -> Text:
     return Text(glyphs, style=style)
 
 
+def _window_badge(window_lo: int, window_hi: int, overdue: bool) -> tuple[str, str] | None:
+    """The shared 'due chL-H' / 'OVERDUE chH' badge text+style for both
+    thread rows and ledger rows. `overdue` is decided by the caller via the
+    relevant brain/canon faculty (overdue_resolutions/overdue_promises) —
+    never re-derived here."""
+    if window_hi <= 0:
+        return None
+    if overdue:
+        return f"OVERDUE ch{window_hi}", ALARM_STYLE
+    return f"due ch{window_lo}-{window_hi}", DIM
+
+
 def thread_line(
     thread: ThreadRecord, chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
 ) -> Text:
     """One Threads-tab row: state glyph, padded name, age heat bar, detail.
     Staleness comes from is_thread_stale / chapters_elapsed_since — never
     re-derived; `threshold` arrives from settings.staleness_threshold_chapters
-    via the app's _brain_loop. No slugs/ids anywhere."""
+    via the app's _brain_loop. No slugs/ids anywhere. A set window appends a
+    'due chL-H' / 'OVERDUE chH' badge, overdue decided via
+    resolution_pacing.overdue_resolutions (reused, never reimplemented)."""
     if thread.state.value in TERMINAL_STATES:
         return Text(f"✓ {thread.name} · {thread.state.value}", style=DIM)
     elapsed = chapters_elapsed_since(thread.last_chapter_id, chapters)
     n = chapter_number(thread.last_chapter_id, chapters)
     bar = age_bar(elapsed, threshold)
     name = _clip_title(thread.name, NAME_WIDTH).ljust(NAME_WIDTH)
+    overdue = bool(overdue_resolutions([thread], chapters))
+    badge = _window_badge(thread.window_lo, thread.window_hi, overdue)
     if is_thread_stale(thread, chapters, threshold):
         if n is None:
             detail = f"stale — untouched for {elapsed} chapters"
         else:
             detail = f"stale — last touched ch {n}, {elapsed} chapters ago"
-        return Text(f"⚠ {name}  {bar.plain}  {detail}", style=ALARM_STYLE)
+        line = f"⚠ {name}  {bar.plain}  {detail}"
+        if badge is not None:
+            line += f" · {badge[0]}"
+        return Text(line, style=ALARM_STYLE)
     detail = thread.state.value + (f" — ch {n}" if n is not None else "")
     row = Text(f"· {name}  ")
     row.append(bar.plain, style=bar.style)
     row.append(f"  {detail}")
+    if badge is not None:
+        row.append(" · ")
+        row.append(badge[0], style=badge[1])
     return row
 
 
@@ -167,13 +202,38 @@ class ThreadsTab:
     alarm_count: int
 
 
+def ledger_line(promise: PromiseRecord, chapters: list[Chapter]) -> Text:
+    """One Ledger row: glyph, name, kind tag for red herrings, window badge —
+    same badge rules as thread_line, overdue decided via
+    ledger.overdue_promises (reused, never reimplemented)."""
+    overdue = bool(overdue_promises([promise], chapters))
+    badge = _window_badge(promise.window_lo, promise.window_hi, overdue)
+    text = f"◇ {promise.name}"
+    if promise.kind == "red_herring":
+        text += " (red herring)"
+    if badge is None:
+        return Text(text)
+    if overdue:
+        return Text(f"{text} · {badge[0]}", style=ALARM_STYLE)
+    line = Text(f"{text} · ")
+    line.append(badge[0], style=badge[1])
+    return line
+
+
 def threads_tab(
-    threads: list[ThreadRecord], chapters: list[Chapter], threshold: int = STALENESS_THRESHOLD_CHAPTERS
+    threads: list[ThreadRecord],
+    chapters: list[Chapter],
+    promises: list[PromiseRecord] | None = None,
+    secrets: list[SecretRecord] | None = None,
+    threshold: int = STALENESS_THRESHOLD_CHAPTERS,
 ) -> ThreadsTab:
     """Threads grouped by state: stale pinned first (alarms), then live open
-    threads, terminal threads folded to one dim count line."""
-    if not threads:
-        return ThreadsTab([Text(THREADS_EMPTY, style=DIM)], 0)
+    threads, terminal threads folded to one dim count line. Followed by a
+    Ledger section (open promises, overdue pinned first, paid/released
+    folded) and congestion warnings — alarm arithmetic sums every source
+    from Task 7's faculties, never re-derived here."""
+    promises = promises or []
+    secrets = secrets or []
     stale = [t for t in threads if is_thread_stale(t, chapters, threshold)]
     stale_ids = {t.id for t in stale}
     live = [
@@ -181,15 +241,47 @@ def threads_tab(
         if t.id not in stale_ids and t.state.value not in TERMINAL_STATES
     ]
     terminal = [t for t in threads if t.state.value in TERMINAL_STATES]
-    lines = [thread_line(t, chapters, threshold) for t in stale + live]
-    if terminal:
-        paid = sum(1 for t in terminal if t.state == ThreadState.paid_off)
-        abandoned = len(terminal) - paid
-        parts = ([f"{paid} paid off"] if paid else []) + (
-            [f"{abandoned} abandoned"] if abandoned else []
+
+    lines: list[Text] = []
+    if threads:
+        lines += [thread_line(t, chapters, threshold) for t in stale + live]
+        if terminal:
+            paid = sum(1 for t in terminal if t.state == ThreadState.paid_off)
+            abandoned = len(terminal) - paid
+            parts = ([f"{paid} paid off"] if paid else []) + (
+                [f"{abandoned} abandoned"] if abandoned else []
+            )
+            lines.append(Text("✓ " + " · ".join(parts), style=DIM))
+
+    open_ = open_promises(promises)
+    overdue_p = overdue_promises(promises, chapters)
+    overdue_p_ids = {p.id for p in overdue_p}
+    due_or_future = [p for p in open_ if p.id not in overdue_p_ids]
+    terminal_promises = [p for p in promises if p.state.value in TERMINAL_PROMISE_STATES]
+    if open_:
+        lines.append(Text("Ledger", style=DIM))
+        lines += [ledger_line(p, chapters) for p in overdue_p + due_or_future]
+    if terminal_promises:
+        paid = sum(1 for p in terminal_promises if p.state == PromiseState.paid)
+        released = len(terminal_promises) - paid
+        parts = ([f"{paid} paid"] if paid else []) + (
+            [f"{released} released"] if released else []
         )
         lines.append(Text("✓ " + " · ".join(parts), style=DIM))
-    return ThreadsTab(lines, len(stale))
+
+    if not threads and not promises:
+        return ThreadsTab([Text(THREADS_EMPTY, style=DIM)], 0)
+
+    spans = congested_windows(threads, secrets)
+    for lo, hi, count in spans:
+        lines.append(Text(f"⚠ {count} resolutions target ch{lo}-{hi}", style=WARN_STYLE))
+
+    overdue_resolved = overdue_resolutions(threads, chapters)
+    overdue_revealed = overdue_reveals(secrets, chapters)
+    alarm_count = (
+        len(stale) + len(overdue_resolved) + len(overdue_revealed) + len(overdue_p) + len(spans)
+    )
+    return ThreadsTab(lines, alarm_count)
 
 
 # Glyphs cover knowledge_cell_state's exact codomain. "revealed" is
