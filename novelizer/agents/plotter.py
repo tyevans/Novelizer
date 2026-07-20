@@ -3,8 +3,12 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import chapter_map_note, ledger_note, resolution_pacing_note, stale_threads_note
+from novelizer.brain.context import (
+    beat_drift_note, chapter_map_note, ledger_note, resolution_pacing_note, stale_threads_note,
+    tension_target_note,
+)
 from novelizer.canon.beat_templates import beat_window
+from novelizer.canon.events import ChapterBriefSuperseded, EventType
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.muse.prompts import inspiration_note
@@ -21,6 +25,7 @@ supersede rather than contradict. Cite every id exactly as shown. Prefer steerin
 toward overdue payoffs and dark threads over introducing new material."""
 
 _READINESS_BRIEF_RUNWAY = 2
+_READINESS_BRIEF_LOOKAHEAD = 3
 
 
 def _summarize(ctx: dict, personality: str = "") -> str:
@@ -71,6 +76,8 @@ def _summarize(ctx: dict, personality: str = "") -> str:
         ledger_note(promises, chapters),
         resolution_pacing_note(threads, secrets, chapters),
         stale_threads_note(threads, chapters),
+        beat_drift_note(blueprint, beats, chapters),
+        tension_target_note(blueprint, beats, ctx.get("scores", []), chapters),
     ):
         if note:
             blocks.append(note.strip())
@@ -109,7 +116,11 @@ class Plotter(BaseAgent):
         if chapters and blueprint is None:
             return 1.0
         open_briefs = await self._read.list_briefs("open")
-        open_briefs_ahead = sum(1 for b in open_briefs if b.target_ordinal > len(chapters))
+        chapter_count = len(chapters)
+        open_briefs_ahead = sum(
+            1 for b in open_briefs
+            if chapter_count < b.target_ordinal <= chapter_count + _READINESS_BRIEF_LOOKAHEAD
+        )
         needed = max(0, _READINESS_BRIEF_RUNWAY - open_briefs_ahead)
         return min(1.0, needed / _READINESS_BRIEF_RUNWAY)
 
@@ -126,6 +137,7 @@ class Plotter(BaseAgent):
         signals = await self._read.list_unconsumed_signals(target_agent="plotter")
         hand = await self._read.get_active_hand()
         open_proposals = await self._read.list_proposals(status="open")
+        scores = await self._read.list_structure_scores()
         return {
             "chapters": chapters,
             "world": world[:10],
@@ -139,6 +151,7 @@ class Plotter(BaseAgent):
             "signals": signals,
             "hand": hand,
             "open_proposals": open_proposals,
+            "scores": scores,
         }
 
     async def work(self, ctx: dict) -> PlotterOutput | None:
@@ -148,12 +161,14 @@ class Plotter(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, out: PlotterOutput | None, ctx: dict) -> None:
+        await self._reap_stale_open_briefs(ctx["open_briefs"], len(ctx["chapters"]))
+
         if out is None:
             return
 
         if out.blueprint_plan is not None:
             pending_blueprint_proposal = any(
-                p.target_event_type == "blueprint.adopted" for p in ctx["open_proposals"]
+                p.target_event_type == EventType.BLUEPRINT_ADOPTED for p in ctx["open_proposals"]
             )
             if ctx["blueprint"] is not None:
                 logger.warning(
@@ -188,6 +203,29 @@ class Plotter(BaseAgent):
         )
         await self._remark(out.feed_note)
         await self._consume_signals(ctx["signals"])
+
+    async def _reap_stale_open_briefs(self, open_briefs: list, drafted_chapter_count: int) -> None:
+        """Mechanically supersede open briefs whose target_ordinal has already
+        been drafted past -- deterministic housekeeping, not dependent on the
+        LLM emitting a supersede intent. Runs before any LLM-driven brief
+        commits so a stale brief never lingers just because the model had
+        nothing else to say this pass.
+
+        Idempotency note: if an LLM brief intent this same pass (or a prior
+        cached one) cites a brief_id just reaped here, re-committing it to
+        CHAPTER_BRIEF_SUPERSEDED is a projection no-op -- not because this
+        helper filters already-superseded ids, but because the projector's
+        open-status guard makes SUPERSEDED an absorbing state."""
+        for brief in open_briefs:
+            if brief.target_ordinal <= drafted_chapter_count:
+                logger.info(
+                    "plotter: reaping stale open brief %r (target_ordinal=%r, drafted_chapter_count=%r)",
+                    brief.id, brief.target_ordinal, drafted_chapter_count,
+                )
+                await self._committer.commit(
+                    self.name, EventType.CHAPTER_BRIEF_SUPERSEDED, brief.id,
+                    ChapterBriefSuperseded(brief_id=brief.id, superseded_by_brief_id=""),
+                )
 
     async def _run(self) -> None:
         ctx = await self.poll()

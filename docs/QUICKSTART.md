@@ -231,3 +231,11 @@ thread payoffs and secret reveals without you lifting a finger (your `plan-resol
 `plan-reveal` commands still work and take precedence in its context).
 
 Settings: `plotter_interval` (default 240s) and `plotter_tools_enabled` (default true).
+
+The Outline board lives on Brain tab `5`: the adopted framework and its beats (with
+target chapter windows and fulfillment status), a threads × chapters grid with planned
+resolution windows and the future runway, and the open briefs marching ahead of the
+draft. The Shape tab (`1`) now overlays the blueprint's target tension curve (the dim
+`plan` row) under the actual sparkline — divergence raises "tension off-plan" callouts.
+Agents can read the whole plan themselves under `/outline/` (blueprint.md, beats.md,
+briefs/, threads-plan.md, ledger.md) through their canon file tools.

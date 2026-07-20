@@ -13,18 +13,25 @@ from dataclasses import dataclass
 
 from rich.text import Text
 
+from novelizer.brain.beat_drift import beat_drifts
 from novelizer.brain.ledger import due_promises, open_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.resolution_pacing import congested_windows, overdue_reveals, overdue_resolutions
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, chapters_elapsed_since, is_thread_stale
+from novelizer.brain.tension_target import tension_deviations, target_curve
+from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import (
+    BeatRecord,
+    BlueprintRecord,
     CausalEdgeRecord,
     Chapter,
     Character,
+    ChapterBriefRecord,
+    BriefStatus,
     PromiseRecord,
     PromiseState,
     SecretRecord,
@@ -82,19 +89,29 @@ class ShapeTab:
     meta: Text              # axis + pacing line, or the dim empty state
     callouts: list[Text]    # one ALARM_STYLE line per sag/spike, chapter order
     alarm_count: int
+    target: Text | None = None  # "plan     ▂▅█" — target_curve overlay; None with no blueprint
 
 
 def shape_tab(
-    scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA
+    scores: list[StructureScore],
+    chapters: list[Chapter],
+    delta: float = SAG_SPIKE_DELTA,
+    blueprint: BlueprintRecord | None = None,
+    beats: list[BeatRecord] | None = None,
 ) -> ShapeTab:
     """The Shape tab: a rendered tension-by-chapter spark row (rich.text.Text,
     not raw sparkline data) plus sag/spike callouts naming chapter TITLES.
     Flags come from detect_sag_spike over the raw score list — never
     re-derived here. `delta` arrives from settings.sag_spike_delta via the
     app's _brain_loop (M5.3 single-sourcing); the default is the imported
-    constant, never a re-typed literal."""
+    constant, never a re-typed literal.
+
+    Note: the rendered `plan` row aligns beats by scored-chapter position
+    (index into the spark), matching the spark's own existing approximation
+    -- it is not a true chapter ordinal. Deviations/alarms below it use true
+    ordinals from beat_window, so the two rows are not on the same axis."""
     if not scores:
-        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0)
+        return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0, None)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
     chapter_ids = {c.id for c in chapters}
     ordered = [by_chapter[c.id] for c in chapters if c.id in by_chapter]
@@ -122,10 +139,30 @@ def shape_tab(
         for s in ordered
         if s.chapter_id in flags
     ]
+
+    target: Text | None = None
+    if blueprint is not None:
+        curve = target_curve(blueprint, beats or [])
+        target_label = "plan".ljust(len(SHAPE_GUTTER))
+        target = Text(no_wrap=True, overflow="ellipsis", style=DIM)
+        target.append(target_label)
+        # ordinals 1..len(ordered) — truncate the curve to the drafted
+        # range; the curve's last value pads any shortfall via
+        # tension_deviations, never re-derived here.
+        for i in range(len(ordered)):
+            value = curve[i] if i < len(curve) else (curve[-1] if curve else 0.0)
+            target.append(spark_char(value))
+
+        deviations = tension_deviations(blueprint, beats or [], scores, chapters, delta)
+        callouts = callouts + [
+            Text(f"⚠ tension off-plan: {chapter_label(cid, chapters)}", style=ALARM_STYLE)
+            for cid, _actual, _target in deviations
+        ]
+
     axis = f"ch 1 ▸ ch {len(tensions)}" if len(tensions) > 1 else "ch 1"
     pacing = ordered[-1].pacing_label
     meta = Text(f"{axis} · pacing: {pacing}" if pacing else axis, style=DIM)
-    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts))
+    return ShapeTab(tensions, spark, markers, meta, callouts, len(callouts), target)
 
 
 AGE_BAR_CELLS = 5
@@ -422,13 +459,128 @@ def causeway_tab(edges: list[CausalEdgeRecord], chapters: list[Chapter]) -> Caus
     return CausewayTab(lines, alarms)
 
 
-def alarm_strip(shape: int, threads: int, secrets: int, cause: int) -> Text:
+OUTLINE_EMPTY = "No blueprint adopted — the Plotter will propose one."
+
+
+@dataclass(frozen=True)
+class OutlineTab:
+    lines: list[Text]
+    alarm_count: int
+
+
+def _beat_line(beat: BeatRecord, blueprint: BlueprintRecord, drifts_by_id: dict[str, "object"]) -> tuple[Text, bool]:
+    """One beat-strip row. Status glyph comes from beat_drifts (reused, never
+    re-derived): '!' ALARM_STYLE for a late drift, '≈' for a fulfilled beat
+    whose drift is early/off_window, '✓' for fulfilled with no drift entry
+    (i.e. inside its window), '·' for pending. Returns (line, is_late) so the
+    caller can sum alarm_count without re-scanning."""
+    window_lo, window_hi = beat_window(beat.ideal_pct, beat.tolerance_pct, blueprint.target_chapter_count)
+    drift = drifts_by_id.get(beat.id)
+    is_late = drift is not None and drift.kind == "late"
+    if is_late:
+        glyph, style = "!", ALARM_STYLE
+    elif beat.fulfilled_by_chapter_id and drift is not None:
+        glyph, style = "≈", DIM
+    elif beat.fulfilled_by_chapter_id:
+        glyph, style = "✓", None
+    else:
+        glyph, style = "·", DIM
+    text = f"{glyph} {beat.name} @ch {window_lo}-{window_hi}"
+    return (Text(text, style=style) if style else Text(text)), is_late
+
+
+def _outline_grid_row(thread: ThreadRecord, chapters: list[Chapter], max_col: int) -> Text:
+    """One outline-grid row: NAME_WIDTH-padded name, then one cell per
+    chapter ordinal 1..max_col. '●' marks the thread's last-touch column
+    (last_chapter_id ordinal — the only per-thread column data the model
+    carries); '░' fills a planned-resolution window span; '·' otherwise.
+    Columns beyond the drafted chapters (the future) render DIM."""
+    name = _clip_title(thread.name, NAME_WIDTH).ljust(NAME_WIDTH)
+    row = Text(name)
+    touched_col = chapter_number(thread.last_chapter_id, chapters) if thread.last_chapter_id else None
+    drafted = len(chapters)
+    for col in range(1, max_col + 1):
+        future = col > drafted
+        if col == touched_col:
+            glyph = "●"
+        elif thread.window_hi > 0 and thread.window_lo <= col <= thread.window_hi:
+            glyph = "░"
+        else:
+            glyph = "·"
+        row.append(" ")
+        row.append(glyph, style=DIM if future else None)
+    return row
+
+
+def _brief_line(brief: ChapterBriefRecord, drafted: int) -> tuple[Text, bool]:
+    """One briefs-strip row: 'ch N: goal', dim for a future chapter, '!'
+    ALARM_STYLE when target_ordinal <= drafted (the brief should have been
+    fulfilled/reaped by now but is still open — stale)."""
+    stale = brief.target_ordinal <= drafted
+    text = f"ch {brief.target_ordinal}: {brief.goal}"
+    if stale:
+        return Text(f"! {text}", style=ALARM_STYLE), True
+    if brief.target_ordinal > drafted:
+        return Text(text, style=DIM), False
+    return Text(text), False
+
+
+def outline_tab(
+    blueprint: BlueprintRecord | None,
+    beats: list[BeatRecord],
+    briefs: list[ChapterBriefRecord],
+    threads: list[ThreadRecord],
+    chapters: list[Chapter],
+) -> OutlineTab:
+    """The Outline board: framework header, beat strip (glyphs from
+    beat_drifts, reused not re-derived), a threads×chapters grid, and an
+    open-briefs strip. The grid's per-thread column data is coarse —
+    ThreadRecord only carries a last-touch chapter, not full per-chapter
+    touch history — so per-chapter touch history is an M9+ refinement; this
+    board shows current state, windows, and the future runway, not a replay
+    of every touch."""
+    if blueprint is None:
+        return OutlineTab([Text(OUTLINE_EMPTY, style=DIM)], 0)
+
+    header_text = f"{blueprint.framework} · target {blueprint.target_chapter_count} ch"
+    if blueprint.genre:
+        header_text += f" · {blueprint.genre}"
+    lines: list[Text] = [Text(header_text, style=DIM)]
+
+    drifts_by_id = {d.beat_id: d for d in beat_drifts(blueprint, beats, chapters)}
+    late_count = 0
+    for beat in beats:
+        line, is_late = _beat_line(beat, blueprint, drifts_by_id)
+        lines.append(line)
+        late_count += is_late
+
+    open_threads = [t for t in threads if t.state.value not in TERMINAL_STATES]
+    open_briefs = [b for b in briefs if b.status == BriefStatus.open]
+    max_brief_ordinal = max((b.target_ordinal for b in open_briefs), default=0)
+    max_col = max(len(chapters), max_brief_ordinal)
+    if open_threads and max_col > 0:
+        lines += [_outline_grid_row(t, chapters, max_col) for t in open_threads]
+
+    stale_count = 0
+    if open_briefs:
+        for brief in sorted(open_briefs, key=lambda b: b.target_ordinal):
+            line, stale = _brief_line(brief, len(chapters))
+            lines.append(line)
+            stale_count += stale
+
+    return OutlineTab(lines, late_count + stale_count)
+
+
+def alarm_strip(shape: int, threads: int, secrets: int, cause: int, outline: int) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
-    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1'."""
+    'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline'."""
     strip = Text()
     for i, (label, count) in enumerate(
-        [("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause)]
+        [
+            ("Shape", shape), ("Threads", threads), ("Secrets", secrets), ("Cause", cause),
+            ("Outline", outline),
+        ]
     ):
         if i:
             strip.append(" · ", style=DIM)

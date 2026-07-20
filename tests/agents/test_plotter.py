@@ -93,6 +93,31 @@ async def test_readiness_is_zero_with_two_open_future_briefs(stack):
     assert await plotter.readiness() == 0.0
 
 
+async def test_readiness_ignores_far_future_brief_beyond_runway(stack):
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(
+            EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=f"Ch{i}", prose="p")
+        )
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=50, beats=[]),
+    )
+    # ordinal 40 is far beyond the 3-chapter runway window (len(chapters) < ordinal <= len+3)
+    # and must not count toward open_briefs_ahead.
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "b1",
+        ChapterBriefDrafted(brief_id="b1", target_ordinal=40, goal="far off"),
+    )
+    await proj.catch_up()
+    plotter = Plotter(FakeRunner(None), read, committer)
+    # Since the far-future brief doesn't count, readiness should behave as if
+    # there are zero open briefs ahead within the runway -- i.e. fully ready.
+    assert await plotter.readiness() == 1.0
+
+
 # --- run_once: blueprint proposal, gated end-to-end ---
 
 async def test_run_once_blueprint_plan_creates_gated_proposal_and_approval_yields_six_beats(stack):
@@ -147,6 +172,72 @@ async def test_run_once_brief_draft_projects_open_brief(stack):
     open_briefs = await read.list_briefs("open")
     assert len(open_briefs) == 1
     assert open_briefs[0].target_ordinal == 2
+
+
+async def test_run_once_reaps_stale_open_brief_even_with_no_intents(stack):
+    """A stale open brief (target_ordinal <= drafted chapter count) must be
+    mechanically superseded before commit, deterministically -- not
+    dependent on the LLM emitting a supersede intent."""
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "stale1",
+        ChapterBriefDrafted(brief_id="stale1", target_ordinal=2, goal="already past"),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput()  # no intents at all -- LLM chose to stand aside
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    open_briefs = await read.list_briefs("open")
+    assert open_briefs == []
+
+    log = await events.events_since(0)
+    superseded = [e for e in log if e.event_type == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(superseded) == 1
+    assert superseded[0].payload["brief_id"] == "stale1"
+    assert superseded[0].payload["superseded_by_brief_id"] == ""
+
+
+async def test_run_once_reaps_stale_open_brief_even_when_llm_returns_none(stack):
+    """The reap is deterministic housekeeping that must not depend on the
+    LLM succeeding at all -- structured_response None (e.g. an LLM/parse
+    failure) must still supersede a stale open brief."""
+    from novelizer.canon.events import BlueprintAdopted, ChapterBriefDrafted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await events.append(
+        EventType.CHAPTER_BRIEF_DRAFTED, "stale1",
+        ChapterBriefDrafted(brief_id="stale1", target_ordinal=2, goal="already past"),
+    )
+    await proj.catch_up()
+
+    plotter = Plotter(FakeRunner(None), read, committer)  # LLM failure -> structured_response None
+    await plotter.run_once()
+    await proj.catch_up()
+
+    open_briefs = await read.list_briefs("open")
+    assert open_briefs == []
+
+    log = await events.events_since(0)
+    superseded = [e for e in log if e.event_type == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(superseded) == 1
+    assert superseded[0].payload["brief_id"] == "stale1"
 
 
 async def test_run_once_drops_blueprint_plan_when_one_already_active(stack):
@@ -232,6 +323,64 @@ async def test_prompt_with_blueprint_includes_beat_window_line(stack):
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "[bp1-catalyst]" in sent
     assert "-" in sent  # window range present
+
+
+async def test_prompt_includes_beat_drift_note_when_present(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    for i in range(9):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Beat drift:" in sent
+    assert "Midpoint" in sent
+
+
+async def test_prompt_includes_tension_target_note_when_deviated(stack):
+    from novelizer.canon.events import BlueprintAdopted, AnnotationStructureScored
+
+    events, proj, read, committer = stack
+    for i in range(20):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=20,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c19",
+                        AnnotationStructureScored(chapter_id="c19", tension=0.99))
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Tension vs blueprint:" in sent
+    assert "ch 20" in sent
 
 
 class _FakeSettings:

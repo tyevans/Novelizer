@@ -91,9 +91,18 @@ class Runtime:
         access + semantic search. Built once per start() and cached on
         self._canon_backend / self._canon_tools so later rebuilds (e.g.
         apply_settings) can reuse the same toolkit instead of losing it."""
+        from deepagents.backends import CompositeBackend
         from novelizer.canon_fs.backend import CanonBackend
+        from novelizer.canon_fs.outline import OutlineBackend
         from novelizer.canon_fs.search import build_search_canon_tool
-        backend = CanonBackend(self.read)
+        # deepagents' CompositeBackend fans unrouted-path globs (e.g. a bare
+        # "**/*") out to every routed backend as well as default, so a
+        # canon-scoped glob can surface /outline/ files alongside canon
+        # files -- upstream fan-out behavior, not a bug in our routing.
+        backend = CompositeBackend(
+            default=CanonBackend(self.read),
+            routes={"/outline/": OutlineBackend(self.read)},
+        )
         tools = [build_search_canon_tool(self.embeddings, self.read)]
         return backend, tools
 

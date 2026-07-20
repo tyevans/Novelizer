@@ -1,13 +1,16 @@
 from __future__ import annotations
+from novelizer.brain.beat_drift import beat_drifts, next_expected_beat
 from novelizer.brain.ledger import due_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
 from novelizer.brain.resolution_pacing import congested_windows, overdue_resolutions, overdue_reveals
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, stale_threads
+from novelizer.brain.tension_target import tension_deviations
+from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
-    CausalEdgeRecord, Chapter, Character, PromiseRecord, RetconRequest, SecretRecord, StructureScore,
-    ThreadRecord,
+    BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord, RetconRequest,
+    SecretRecord, StructureScore, ThreadRecord,
 )
 
 
@@ -135,6 +138,54 @@ def resolution_pacing_note(
         for lo, hi, count in spans
     ]
     return "\n\nResolution pacing:\n" + "\n".join(lines)
+
+
+def beat_drift_note(
+    blueprint: BlueprintRecord | None, beats: list[BeatRecord], chapters: list[Chapter],
+) -> str:
+    """Build the prompt block naming every beat currently drifting from its
+    ideal window (early, late, or off-window per beat_drifts). Empty string
+    when nothing has drifted, so the prompt stays byte-identical when quiet.
+    """
+    drifts = beat_drifts(blueprint, beats, chapters)
+    if not drifts:
+        return ""
+    lines = "\n".join(f"- {d.detail}" for d in drifts)
+    return f"\n\nBeat drift:\n{lines}"
+
+
+def tension_target_note(
+    blueprint: BlueprintRecord | None,
+    beats: list[BeatRecord],
+    scores: list[StructureScore],
+    chapters: list[Chapter],
+) -> str:
+    """Build the single-sentence prompt block naming the worst tension
+    deviation from the blueprint's target curve, plus the polarity guidance
+    for whichever beat is next expected -- deliberately terse (one sentence,
+    not a list) since this note steers re-planning, not enumeration. Empty
+    string when there are no deviations, so the prompt stays byte-identical
+    when quiet.
+    """
+    deviations = tension_deviations(blueprint, beats, scores, chapters)
+    if not deviations:
+        return ""
+    chapter_id, actual, target = max(deviations, key=lambda d: abs(d[1] - d[2]))
+    ordinal = next((i + 1 for i, c in enumerate(chapters) if c.id == chapter_id), None)
+    label = f"ch {ordinal}" if ordinal is not None else chapter_id
+    sentence = f"Tension vs blueprint: {label} actual {actual:.2g} vs target {target:.2g}"
+    next_beat = next_expected_beat(blueprint, beats, chapters)
+    if next_beat is not None and blueprint is not None:
+        lo, hi = beat_window(next_beat.ideal_pct, next_beat.tolerance_pct, blueprint.target_chapter_count)
+        guidance = (
+            f"{next_beat.name.lower()} {next_beat.expected_polarity}".strip()
+            if next_beat.expected_polarity
+            else next_beat.name.lower()
+        )
+        sentence += f" — the {guidance} is planned for ch {lo}-{hi}."
+    else:
+        sentence += "."
+    return f"\n\n{sentence}"
 
 
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:

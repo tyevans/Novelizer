@@ -1,5 +1,7 @@
-from novelizer.brain.context import stale_threads_note, pacing_flags_note
-from novelizer.store.models import Chapter, ThreadRecord, ThreadState, StructureScore
+from novelizer.brain.context import (
+    beat_drift_note, pacing_flags_note, stale_threads_note, tension_target_note,
+)
+from novelizer.store.models import BeatRecord, BlueprintRecord, Chapter, ThreadRecord, ThreadState, StructureScore
 
 
 def _chapters(n: int) -> list[Chapter]:
@@ -179,3 +181,39 @@ def test_resolution_pacing_note_lists_congestion():
     ts = [ThreadRecord(id=f"t{i}", name=str(i), window_lo=19, window_hi=21) for i in range(3)]
     note = resolution_pacing_note(ts, [], _chapters(1))
     assert "resolve in the same window" in note
+
+
+# --- beat_drift_note ---
+
+def test_beat_drift_note_empty_when_quiet():
+    assert beat_drift_note(None, [], _chapters(3)) == ""
+
+
+def test_beat_drift_note_lists_drifting_beat():
+    blueprint = BlueprintRecord(id="bp1", framework="six-position", target_chapter_count=10)
+    beat = BeatRecord(id="b1", blueprint_id="bp1", slug="midpoint", name="Midpoint",
+                       ideal_pct=0.5, tolerance_pct=0.1)
+    note = beat_drift_note(blueprint, [beat], _chapters(7))
+    assert note.startswith("\n\nBeat drift:\n")
+    assert "Midpoint" in note
+
+
+# --- tension_target_note ---
+
+def test_tension_target_note_empty_when_quiet():
+    blueprint = BlueprintRecord(id="bp1", framework="six-position", target_chapter_count=4)
+    assert tension_target_note(blueprint, [], [], _chapters(4)) == ""
+    assert tension_target_note(None, [], [], _chapters(4)) == ""
+
+
+def test_tension_target_note_reports_worst_deviation_and_next_beat_guidance():
+    blueprint = BlueprintRecord(id="bp1", framework="six-position", target_chapter_count=20)
+    beats = [
+        BeatRecord(id="b1", blueprint_id="bp1", slug="midpoint", name="Midpoint",
+                   ideal_pct=0.5, tolerance_pct=0.1, expected_polarity="flip"),
+    ]
+    chapters = _chapters(20)
+    scores = [StructureScore(chapter_id="c19", tension=0.99)]  # ch 20, target 0.5
+    note = tension_target_note(blueprint, beats, scores, chapters)
+    assert note.startswith("\n\nTension vs blueprint: ch 20 actual 0.99 vs target 0.5")
+    assert "midpoint flip is planned for ch 8-12" in note

@@ -2,7 +2,8 @@
 
 Craft reference data — richer templates arrive as skills packs in M10; adopting a
 framework mints Beat rows from one of these lists. Kishōtenketsu is deliberately
-conflict-optional: templates must never require an antagonist or non-empty polarity.
+conflict-optional: templates must never require conflict or an antagonist; a
+polarity mark on the turn denotes recontextualization, not battle.
 """
 
 from pydantic import BaseModel, ConfigDict
