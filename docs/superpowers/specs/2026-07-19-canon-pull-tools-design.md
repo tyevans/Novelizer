@@ -123,6 +123,14 @@ follow the rollout phases). `execute` middleware is excluded everywhere.
 `write_todos` stays only where it plausibly helps (Author); excluded
 elsewhere to cut schema weight.
 
+*(As delivered: `execute` exclusion is free — deepagents auto-filters it
+for non-sandbox backends. `write_todos` scoping was NOT implemented:
+`TodoListMiddleware` is hardcoded in deepagents' stack and exclusion needs
+a `HarnessProfile` entry-point plugin, disproportionate to the savings.
+The retrieval note ships in two forms: full (with the chapter-index
+sentence) for map-carrying agents, `RETRIEVAL_NOTE_BASE` for phase-b
+agents that keep their push prompts.)*
+
 ### 5. Prompt changes
 
 - Chapter excerpts in `poll()`-built prompts → map lines:
