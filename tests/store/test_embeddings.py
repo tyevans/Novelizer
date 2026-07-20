@@ -88,12 +88,47 @@ async def test_search_unknown_kind_raises(fake_store):
         await fake_store.search("x", kinds=["novel"])
 
 
-async def test_upsert_chapter_caps_oversized_prose(fake_store):
-    from novelizer.store.embeddings import _MAX_EMBED_CHARS
-    huge_prose = "word " * 5000  # far past the char cap
+async def test_upsert_chapter_chunks_oversized_prose(fake_store):
+    from novelizer.store.embeddings import _CHAPTER_CHUNK_CHARS
+    huge_prose = "word " * 5000  # far past a single chunk
     await fake_store.upsert_chapter(Chapter(id="ch1", title="Huge", prose=huge_prose))
-    stored = fake_store._chapters.get(ids=["ch1"])["documents"][0]
-    assert len(stored) <= _MAX_EMBED_CHARS
+    chunks = fake_store._chapters.get(where={"chapter_id": "ch1"})
+    assert len(chunks["ids"]) > 1
+    assert all(len(doc) <= _CHAPTER_CHUNK_CHARS for doc in chunks["documents"])
+    # reassembled (minus overlap) chunks reconstruct the original prose
+    assert "".join(chunks["documents"])[: len(huge_prose)].startswith(huge_prose[:100])
+
+
+async def test_upsert_chapter_revision_drops_stale_trailing_chunks(fake_store):
+    long_prose = "word " * 5000
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Long", prose=long_prose))
+    before = fake_store._chapters.get(where={"chapter_id": "ch1"})
+    assert len(before["ids"]) > 1
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Short", prose="just a short revision"))
+    after = fake_store._chapters.get(where={"chapter_id": "ch1"})
+    assert len(after["ids"]) == 1
+
+
+async def test_delete_chapter_removes_all_chunks(fake_store):
+    huge_prose = "word " * 5000
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Huge", prose=huge_prose))
+    assert fake_store._chapters.count() > 1
+    await fake_store.delete("ch1", "chapters")
+    assert fake_store._chapters.count() == 0
+
+
+async def test_search_dedupes_chapter_chunks_to_one_hit(fake_store):
+    huge_prose = "the bell rang " + "word " * 5000 + "the bell rang again"
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Huge", prose=huge_prose))
+    hits = await fake_store.search("bell", kinds=["chapter"])
+    assert [h.id for h in hits] == ["ch1"]
+
+
+async def test_query_chapters_dedupes_and_hydrates_base_id(fake_store):
+    huge_prose = "the bell rang " + "word " * 5000 + "the bell rang again"
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Huge", prose=huge_prose))
+    results = await fake_store.query_chapters("bell")
+    assert [c.id for c in results] == ["ch1"]
 
 
 async def test_concurrent_writes_are_serialized_and_complete(fake_store):

@@ -20,14 +20,44 @@ class SearchHit:
 # Conservative char cap so embedding input stays under the embed model's
 # token context window (e.g. nomic-embed-text's 2048 tokens): ~4 chars/token
 # is a safe average for English prose, so 6000 chars stays well under 2048
-# tokens even for token-dense text. Without this, any chapter/entry whose
-# text tokenizes past the window makes upsert raise every catch_up retry,
+# tokens even for token-dense text. Without this, any record whose text
+# tokenizes past the window makes upsert raise every catch_up retry,
 # permanently stalling canon indexing at that event (see seq 65 stall).
+# Applies to every non-chapter collection: those records (world entry body,
+# character backstory, etc.) are short-form and losing tail content past
+# this cap is an acceptable trade for never stalling the indexer.
 _MAX_EMBED_CHARS = 6000
+
+# Chapters have no length bound (prose is free-form and routinely runs
+# 12,000-24,000+ chars), so a flat cap would silently drop everything past
+# the first ~1,500 words from search. Chapters are chunked into overlapping
+# windows instead, each embedded and stored as its own vector, so the whole
+# chapter stays searchable. Overlap keeps a match from being split across a
+# chunk boundary and missed entirely.
+_CHAPTER_CHUNK_CHARS = 6000
+_CHAPTER_CHUNK_OVERLAP = 500
 
 
 def _cap(text: str) -> str:
     return text[:_MAX_EMBED_CHARS]
+
+
+def _chunk_prose(text: str) -> list[str]:
+    if len(text) <= _CHAPTER_CHUNK_CHARS:
+        return [text]
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + _CHAPTER_CHUNK_CHARS
+        chunks.append(text[start:end])
+        if end >= len(text):
+            break
+        start = end - _CHAPTER_CHUNK_OVERLAP
+    return chunks
+
+
+def _chunk_id(chapter_id: str, index: int) -> str:
+    return f"{chapter_id}#{index}"
 
 
 class EmbeddingStore:
@@ -82,13 +112,26 @@ class EmbeddingStore:
             )
 
     async def upsert_chapter(self, chapter: Chapter) -> None:
+        chunks = _chunk_prose(chapter.prose)
+        ids = [_chunk_id(chapter.id, i) for i in range(len(chunks))]
+        metadatas = [
+            {"title": chapter.title, "chapter_id": chapter.id, "chunk_index": i}
+            for i in range(len(chunks))
+        ]
         async with self._write_lock:
-            await asyncio.to_thread(
-                self._chapters.upsert,
-                ids=[chapter.id],
-                documents=[_cap(chapter.prose)],
-                metadatas=[{"title": chapter.title}],
-            )
+            await asyncio.to_thread(self._replace_chapter_chunks_sync, chapter.id, ids, chunks, metadatas)
+
+    def _replace_chapter_chunks_sync(
+        self, chapter_id: str, ids: list[str], chunks: list[str], metadatas: list[dict]
+    ) -> None:
+        # A revision can shrink the chunk count (shorter prose), which would
+        # otherwise leave stale trailing chunks from the old, longer version
+        # behind after upsert only overwrites the ids it's given.
+        existing = self._chapters.get(where={"chapter_id": chapter_id}, include=[])
+        stale_ids = [i for i in existing.get("ids", []) if i not in set(ids)]
+        if stale_ids:
+            self._chapters.delete(ids=stale_ids)
+        self._chapters.upsert(ids=ids, documents=chunks, metadatas=metadatas)
 
     async def upsert_theme(self, theme: ThemeRecord) -> None:
         async with self._write_lock:
@@ -155,7 +198,19 @@ class EmbeddingStore:
         # is unreachable, not just once at startup). The lock serializes this
         # against concurrent upserts/deletes from agent commits and catch_up.
         async with self._write_lock:
-            await asyncio.to_thread(col.delete, ids=[entity_id])
+            if collection == "chapters":
+                # Chapters are stored as multiple chunk ids ("{id}#0", ...),
+                # never as entity_id itself -- delete by the chapter_id
+                # metadata all of a chapter's chunks share instead.
+                await asyncio.to_thread(self._delete_chapter_chunks_sync, entity_id)
+            else:
+                await asyncio.to_thread(col.delete, ids=[entity_id])
+
+    def _delete_chapter_chunks_sync(self, chapter_id: str) -> None:
+        existing = self._chapters.get(where={"chapter_id": chapter_id}, include=[])
+        ids = existing.get("ids", [])
+        if ids:
+            self._chapters.delete(ids=ids)
 
     async def query_world_entries(self, query: str, n: int = 5) -> list[WorldEntry]:
         if self._world.count() == 0:
@@ -195,12 +250,19 @@ class EmbeddingStore:
     async def query_chapters(self, query: str, n: int = 5) -> list[Chapter]:
         if self._chapters.count() == 0:
             return []
-        results = self._chapters.query(query_texts=[query], n_results=min(n, self._chapters.count()))
-        chapters = []
+        # Over-fetch chunks: a chapter's several best-matching chunks would
+        # otherwise crowd out other chapters before dedup narrows to n.
+        fetch_n = min(n * 4, self._chapters.count())
+        results = self._chapters.query(query_texts=[query], n_results=fetch_n)
+        best_by_chapter: dict[str, Chapter] = {}
         for i, doc_id in enumerate(results["ids"][0]):
             meta = results["metadatas"][0][i]
-            chapters.append(Chapter(id=doc_id, title=meta.get("title", ""), prose=results["documents"][0][i]))
-        return chapters
+            chapter_id = meta.get("chapter_id", doc_id)
+            if chapter_id not in best_by_chapter:
+                best_by_chapter[chapter_id] = Chapter(
+                    id=chapter_id, title=meta.get("title", ""), prose=results["documents"][0][i]
+                )
+        return list(best_by_chapter.values())[:n]
 
     def _collections_by_kind(self) -> dict:
         return {
@@ -231,6 +293,7 @@ class EmbeddingStore:
         if unknown:
             raise ValueError(f"Unknown kinds: {unknown}. Valid: {sorted(by_kind)}")
         hits: list[SearchHit] = []
+        seen_chapter_ids: set[str] = set()
         for kind in wanted:
             col = by_kind[kind]
             results = await asyncio.to_thread(self._search_one_collection_sync, col, query, n)
@@ -239,6 +302,16 @@ class EmbeddingStore:
             for i, doc_id in enumerate(results["ids"][0]):
                 meta = results["metadatas"][0][i] or {}
                 title = meta.get("title") or meta.get("name") or ""
+                # Chapters are stored as multiple chunks per chapter; several
+                # chunks of the same chapter can each match, so report the
+                # chapter once at its best (lowest-distance, hence first
+                # encountered -- chromadb returns results distance-sorted)
+                # chunk's score instead of one SearchHit per chunk.
+                if kind == "chapter":
+                    doc_id = meta.get("chapter_id", doc_id)
+                    if doc_id in seen_chapter_ids:
+                        continue
+                    seen_chapter_ids.add(doc_id)
                 hits.append(SearchHit(kind=kind, id=doc_id, title=title,
                                       distance=results["distances"][0][i]))
         hits.sort(key=lambda h: h.distance)
