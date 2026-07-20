@@ -188,16 +188,16 @@ async def test_story_brain_threads_and_shape_tabs_populate():
         await rt.projector.catch_up()
         app = NovelizerApp(rt)
         async with app.run_test() as pilot:
-            from textual.widgets import Sparkline, Static
+            from textual.widgets import Static
             await pilot.pause(0.5)
             threads_text = str(app.query_one("#threads_body", Static).renderable)
-            shape_text = str(app.query_one("#shape_body", Static).renderable)
-            spark = app.query_one("#shape_spark", Sparkline)
+            shape_rows = app.query_one("#shape_body", Static).renderable.renderables
             assert "The Locket" in threads_text
             assert "the-locket" not in threads_text          # no ids on the dashboard
-            assert list(spark.data) == [0.6] and spark.display
-            assert "pacing: rising" in shape_text
-            assert "c1" not in shape_text                    # no ids on the dashboard
+            assert shape_rows[0].plain == "tension  ▅"   # 0.6 → level 4 of 8
+            assert shape_rows[0].no_wrap               # the render-site contract: flags survive to the screen
+            assert any("pacing: rising" in r.plain for r in shape_rows)
+            assert all("c1" not in r.plain for r in shape_rows)   # no ids on the dashboard
     finally:
         await rt.close(); os.unlink(path)
 
@@ -231,7 +231,7 @@ async def test_story_brain_secrets_matrix_and_causeway_tabs_populate():
             strip_text = str(app.query_one("#brain_strip", Static).renderable)
             assert "The Heir Lives" in secrets_text
             assert "M" in secrets_text.splitlines()[0]       # Mara's initial in the header
-            assert "●" in secrets_text and "1 knows" in secrets_text
+            assert "●" in secrets_text and "1/1" in secrets_text
             assert "the-heir-lives" not in secrets_text      # no ids on the dashboard
             assert 'ch 2 "Two" ──▶ ch 1 "One"' in causeway_text
             assert "⚠ PARADOX" in causeway_text

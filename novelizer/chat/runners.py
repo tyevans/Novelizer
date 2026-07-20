@@ -1,5 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.author import RETRIEVAL_NOTE
+from novelizer.agents.base import GRAPH_RECURSION_LIMIT
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
 
@@ -31,7 +32,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
             backend=backend, tools=tools,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

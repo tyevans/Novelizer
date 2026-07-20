@@ -3,10 +3,15 @@ from hypothesis import given, strategies as st
 from novelizer.store.models import Chapter, StructureScore, ThreadRecord, ThreadState
 from novelizer.tui.widgets.brain_model import (
     SHAPE_EMPTY,
+    SHAPE_GUTTER,
+    SPARK_LEVELS,
     THREADS_EMPTY,
+    WARN_STYLE,
+    age_bar,
     chapter_label,
     chapter_number,
     shape_tab,
+    spark_char,
     thread_line,
     threads_tab,
 )
@@ -39,6 +44,8 @@ def test_shape_tab_empty_is_one_dim_line_no_data():
     assert tab.meta.plain == SHAPE_EMPTY
     assert str(tab.meta.style) == "dim"
     assert tab.callouts == [] and tab.alarm_count == 0
+    assert tab.spark is None
+    assert tab.markers is None
 
 
 def test_shape_tab_single_score_axis_and_pacing():
@@ -112,6 +119,44 @@ def test_shape_tab_score_for_unknown_chapter_keeps_its_data_at_the_end():
     assert tab.tensions == [0.2, 0.9]
 
 
+def test_spark_char_maps_tension_onto_the_eight_block_levels():
+    assert spark_char(0.0) == "▁"
+    assert spark_char(1.0) == "█"
+    assert spark_char(0.6) == "▅"
+    assert spark_char(-3.0) == "▁"   # clamped low
+    assert spark_char(9.0) == "█"    # clamped high
+
+
+def test_shape_tab_spark_is_one_cell_per_chapter_after_the_gutter():
+    chs = _chapters("One", "Two", "Three")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.3, 0.5, 0.7])
+    ]
+    tab = shape_tab(scores, chs)
+    assert tab.spark.plain == SHAPE_GUTTER + "▃▅▆"
+    assert tab.markers is None                    # quiet story: no marker row
+    assert (SHAPE_GUTTER, "dim") in [
+        (tab.spark.plain[s.start:s.end], str(s.style)) for s in tab.spark.spans
+    ]
+    glyph_start = len(SHAPE_GUTTER)
+    assert not any(s.end > glyph_start for s in tab.spark.spans)  # glyphs carry no style span
+
+
+def test_shape_tab_marker_row_aligns_alarm_glyphs_under_flagged_chapters():
+    chs = _chapters("One", "Two", "The Long Calm")
+    scores = [
+        StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
+        for i, t in enumerate([0.6, 0.6, 0.1])    # c3 sags
+    ]
+    tab = shape_tab(scores, chs)
+    assert tab.markers.plain == " " * len(SHAPE_GUTTER) + "  ⚠"
+    marker_spans = [
+        (tab.markers.plain[s.start:s.end], str(s.style)) for s in tab.markers.spans
+    ]
+    assert ("⚠", ALARM_STYLE) in marker_spans
+
+
 @given(st.lists(st.floats(min_value=0.0, max_value=1.0), min_size=1, max_size=12))
 def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     chs = [Chapter(id=f"c{i}", title=f"T{i}", prose="p") for i in range(len(tensions))]
@@ -122,13 +167,30 @@ def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     tab = shape_tab(scores, chs)
     assert len(tab.tensions) == len(tensions)
     assert tab.alarm_count == len(tab.callouts)
+    assert len(tab.spark.plain) == len(SHAPE_GUTTER) + len(tensions)
+    assert tab.markers is None or len(tab.markers.plain) == len(tab.spark.plain)
+
+
+def test_age_bar_scales_fill_and_heat_with_elapsed_over_threshold():
+    assert age_bar(0, 3).plain == "▱▱▱▱▱"
+    assert str(age_bar(0, 3).style) == "dim"
+    assert age_bar(1, 3).plain == "▰▰▱▱▱"          # round(1/3 · 5) = 2
+    assert age_bar(2, 3).plain == "▰▰▰▱▱"          # round(2/3 · 5) = 3
+    assert str(age_bar(2, 3).style) == WARN_STYLE  # 2/3 ≥ 0.6: warming
+    assert age_bar(3, 3).plain == "▰▰▰▰▰"
+    assert str(age_bar(3, 3).style) == ALARM_STYLE
+    assert age_bar(9, 3).plain == "▰▰▰▰▰"          # clamped past threshold
+    assert age_bar(0, 0).plain == "▰▰▰▰▰"          # degenerate threshold: elapsed >= threshold, full
+    assert str(age_bar(0, 0).style) == ALARM_STYLE
 
 
 def test_thread_line_stale_names_last_touched_chapter_and_gap():
     chs = _chapters("One", "Two", "Three", "Four", "Five")
     t = ThreadRecord(id="the-locket", name="The Locket", state=ThreadState.planted, last_chapter_id="c1")
     line = thread_line(t, chs)
-    assert line.plain == "⚠ The Locket · stale — last touched ch 1, 4 chapters ago"
+    assert line.plain == (
+        "⚠ " + "The Locket".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 4 chapters ago"
+    )
     assert str(line.style) == ALARM_STYLE
     assert "the-locket" not in line.plain
 
@@ -136,13 +198,29 @@ def test_thread_line_stale_names_last_touched_chapter_and_gap():
 def test_thread_line_stale_with_no_known_chapter_reads_untouched():
     chs = _chapters("One", "Two", "Three")
     t = ThreadRecord(id="t", name="The Boy's Gift", state=ThreadState.planted, last_chapter_id="")
-    assert thread_line(t, chs).plain == "⚠ The Boy's Gift · stale — untouched for 3 chapters"
+    line = thread_line(t, chs)
+    assert line.plain == (
+        "⚠ " + "The Boy's Gift".ljust(20) + "  ▰▰▰▰▰  stale — untouched for 3 chapters"
+    )
 
 
-def test_thread_line_live_shows_name_and_state_no_id():
+def test_thread_line_live_shows_name_bar_state_and_chapter_no_id():
     chs = _chapters("One")
     t = ThreadRecord(id="t", name="Fresh", state=ThreadState.touched, last_chapter_id="c1")
-    assert thread_line(t, chs).plain == "· Fresh · touched"
+    line = thread_line(t, chs)
+    assert line.plain == "· " + "Fresh".ljust(20) + "  ▱▱▱▱▱  touched — ch 1"
+    bar_spans = [(line.plain[s.start:s.end], str(s.style)) for s in line.spans]
+    assert ("▱▱▱▱▱", "dim") in bar_spans
+
+
+def test_thread_line_live_warming_bar_is_warn_styled_and_long_names_clip():
+    chs = _chapters("One", "Two", "Three")          # elapsed since c1 = 2, threshold 3
+    t = ThreadRecord(id="t", name="The Unraveling of Everything",
+                     state=ThreadState.touched, last_chapter_id="c1")
+    line = thread_line(t, chs)
+    assert line.plain.startswith("· The Unraveling of E…")   # clipped to NAME_WIDTH
+    bar_spans = [(line.plain[s.start:s.end], str(s.style)) for s in line.spans]
+    assert ("▰▰▰▱▱", WARN_STYLE) in bar_spans
 
 
 def test_thread_line_terminal_is_dim_and_never_stale():
@@ -165,8 +243,8 @@ def test_threads_tab_pins_stale_first_then_open_then_folds_terminal():
     ]
     tab = threads_tab(threads, chs)
     plains = [line.plain for line in tab.lines]
-    assert plains[0] == "⚠ Stale C · stale — last touched ch 1, 4 chapters ago"
-    assert plains[1] == "· Open A · touched"
+    assert plains[0] == "⚠ " + "Stale C".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 4 chapters ago"
+    assert plains[1] == "· " + "Open A".ljust(20) + "  ▱▱▱▱▱  touched — ch 5"
     assert plains[2] == "✓ 2 paid off · 1 abandoned"
     assert len(plains) == 3
     assert tab.alarm_count == 1
@@ -190,7 +268,7 @@ def test_thread_line_and_threads_tab_respect_explicit_threshold():
     assert "stale" in thread_line(t, chs, threshold=2).plain
     tab = threads_tab([t], chs, threshold=2)
     assert tab.alarm_count == 1
-    assert tab.lines[0].plain == "⚠ T · stale — last touched ch 1, 2 chapters ago"
+    assert tab.lines[0].plain == "⚠ " + "T".ljust(20) + "  ▰▰▰▰▰  stale — last touched ch 1, 2 chapters ago"
 
 
 def test_threads_tab_empty_state():
@@ -226,6 +304,7 @@ from novelizer.tui.widgets.brain_model import (
     matrix_header,
     secret_row,
     secrets_tab,
+    spread_meter,
 )
 
 
@@ -247,28 +326,44 @@ def test_matrix_header_aligns_initials_after_title_gutter():
     assert str(header.style) == "dim"
 
 
-def test_secret_row_glyph_cells_align_under_header_and_count_knowers():
+def test_spread_meter_heats_as_spread_approaches_everyone():
+    assert spread_meter(0, 4).plain == "○○○○ 0/4"
+    assert str(spread_meter(0, 4).style) == "dim"
+    assert spread_meter(2, 4).plain == "●●○○ 2/4"
+    assert str(spread_meter(2, 4).style) == WARN_STYLE   # half know: warming
+    assert spread_meter(3, 4).plain == "●●●○ 3/4"
+    assert str(spread_meter(3, 4).style) == ALARM_STYLE  # one reveal from public
+    assert str(spread_meter(4, 4).style) == ALARM_STYLE  # everyone knows
+    assert str(spread_meter(1, 4).style) == "dim"        # 1/4: still quiet
+    assert str(spread_meter(1, 1).style) == ALARM_STYLE  # the whole cast of one knows
+
+
+def test_secret_row_glyph_cells_align_under_header_and_show_spread_meter():
     chars = [Character(id="elara", name="Elara"), Character(id="boy", name="The Boy")]
     secret = SecretRecord(id="the-heir-lives", title="The Heir Lives")
     matrix = {"the-heir-lives": {"revealed": False, "known_by": {"elara"}}}
     row = secret_row(secret, chars, matrix)
-    assert row.plain == "The Heir Lives".ljust(TITLE_WIDTH) + "●  ○" + "   1 knows"
+    assert row.plain == "The Heir Lives".ljust(TITLE_WIDTH) + "●  ○" + "   ●○ 1/2"
     assert "the-heir-lives" not in row.plain
 
 
-def test_secret_row_known_to_no_one():
+def test_secret_row_known_to_no_one_has_a_cold_meter():
     secret = SecretRecord(id="s", title="The Map Is Forged")
     matrix = {"s": {"revealed": False, "known_by": set()}}
     row = secret_row(secret, [Character(id="k", name="Kestrel")], matrix)
-    assert row.plain.endswith("no one knows")
-    assert "●" not in row.plain and "○" in row.plain
+    assert row.plain.endswith("○ 0/1")
+    meter_spans = [(row.plain[s.start:s.end], str(s.style)) for s in row.spans]
+    assert ("○ 0/1", "dim") in meter_spans
 
 
-def test_secret_row_plural_summary_matches_spec_sketch():
+def test_secret_row_two_of_three_know_is_leak_hot():
     chars = [Character(id="a", name="Ana"), Character(id="b", name="Bram"), Character(id="c", name="Cole")]
     secret = SecretRecord(id="s", title="The Tide Debt")
     matrix = {"s": {"revealed": False, "known_by": {"a", "b"}}}
-    assert secret_row(secret, chars, matrix).plain.endswith("2 know")
+    row = secret_row(secret, chars, matrix)
+    assert row.plain.endswith("●●○ 2/3")
+    meter_spans = [(row.plain[s.start:s.end], str(s.style)) for s in row.spans]
+    assert ("●●○ 2/3", ALARM_STYLE) in meter_spans
 
 
 def test_secret_row_clips_long_titles():
@@ -320,7 +415,10 @@ def test_matrix_rows_cover_every_secret_by_character_pair(n_secrets, n_chars):
     rows = [line for line in tab.lines if line.plain.startswith("S")]
     assert len(rows) == n_secrets
     for row in rows:
-        assert row.plain.count("○") + row.plain.count("●") == n_chars
+        cells = row.plain.count("○") + row.plain.count("●")
+        assert cells == (2 * n_chars if n_chars else 0)   # matrix cells + meter cells
+        if n_chars:
+            assert row.plain.endswith(f"0/{n_chars}")
 
 
 def test_causeway_line_uses_chapter_titles_and_arrow_never_ids():
@@ -380,6 +478,25 @@ def test_causeway_empty_state():
     tab = causeway_tab([], [])
     assert [line.plain for line in tab.lines] == [CAUSEWAY_EMPTY]
     assert str(tab.lines[0].style) == "dim"
+
+
+def test_causeway_paradoxes_sort_above_normal_edges():
+    chs = _chapters("One", "Two", "Three")
+    edges = [
+        CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2"),   # normal, earliest
+        CausalEdgeRecord(cause_chapter_id="c3", effect_chapter_id="c2"),   # paradox, latest
+    ]
+    tab = causeway_tab(edges, chs)
+    assert "⚠ PARADOX" in tab.lines[0].plain
+    assert tab.lines[0].plain.startswith('ch 3 "Three"')
+    assert tab.lines[1].plain.startswith('ch 1 "One"')
+
+
+def test_causeway_normal_edge_arrow_is_dim():
+    chs = _chapters("One", "Two")
+    tab = causeway_tab([CausalEdgeRecord(cause_chapter_id="c1", effect_chapter_id="c2")], chs)
+    spans = [(tab.lines[0].plain[s.start:s.end], str(s.style)) for s in tab.lines[0].spans]
+    assert ("──▶", "dim") in spans
 
 
 def test_alarm_strip_matches_spec_format():

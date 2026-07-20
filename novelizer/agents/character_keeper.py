@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import open_retcons_note
@@ -26,7 +26,7 @@ You receive the current cast (with traits and arcs) and recent prose chapters. Y
 Return new_characters, updated_characters (id + revised arc_status, and any corrected
 traits/motivations/backstory/voice), and retcon_requests (description, conflicting_entry_ids,
 proposed_resolution). You may also be shown retcon requests already filed and still open:
-do not re-report those issues, even reworded."""
+do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
 
 
 class CharacterKeeper(BaseAgent):
@@ -52,7 +52,13 @@ class CharacterKeeper(BaseAgent):
             # Prose exists but the cast is empty: bootstrapping the cast is
             # the Keeper's most urgent work — nothing else mints characters.
             return 0.8
-        return 0.5 if (chars and chapters) else 0.2
+        score = 0.5 if (chars and chapters) else 0.2
+        return await self._gate_on_watermark(score)
+
+    async def _fingerprint(self) -> tuple:
+        chapters = await self._read.list_chapters()
+        open_retcons = await self._read.list_retcon_requests(status=RetconStatus.open)
+        return (len(chapters), chapters[-1].id if chapters else "", len(open_retcons))
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
@@ -77,6 +83,10 @@ class CharacterKeeper(BaseAgent):
 
     async def commit(self, out: KeeperOutput | None, ctx: dict) -> None:
         if out is None:
+            return
+        if out.no_action:
+            await self._remark(out.feed_note or DEFAULT_PASS_REMARK)
+            self.note_pass()
             return
         # Re-read the cast at commit time (not from ctx): the LLM call in
         # work() is slow enough that a concurrent cycle may have minted
@@ -138,9 +148,20 @@ class CharacterKeeper(BaseAgent):
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         out = await self.work(ctx)
         await self.commit(out, ctx)
+        fp_now = await self._fingerprint()
+        # The chapter components (count, latest id) are purely external — the
+        # Keeper never writes chapters. If they moved mid-run, this run's
+        # analysis did not cover the new prose: leave the watermark clear so
+        # the next tick re-dispatches. Own retcon filings land in fp_now and
+        # are absorbed.
+        if fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
 def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=None):
@@ -159,7 +180,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
             backend=backend, tools=tools,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

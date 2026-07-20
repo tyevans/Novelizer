@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import StructureAnalystOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
@@ -93,7 +93,7 @@ def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools
             backend=backend, tools=tools,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

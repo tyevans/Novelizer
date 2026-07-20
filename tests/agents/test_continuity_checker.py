@@ -246,7 +246,7 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     matrix = await read.knowledge_matrix()
     row = secret_row(secret, characters, matrix).plain
     assert "●" not in row          # no filled cell — Kestrel hasn't learned it
-    assert "no one knows" in row
+    assert "0/1" in row            # spread meter shows 0 knowers among 1 character
 
 
 from novelizer.brain.mining import MINED_SOURCE_TAG
@@ -854,6 +854,74 @@ async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
     assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
 
 
+async def test_continuity_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    assert await agent.readiness() > 0.0
+    await agent.run_once()      # mines ch1, stamps chapter.mined
+    await proj.catch_up()
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch2", Chapter(id="ch2", title="Two", prose="more"))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+async def test_continuity_pass_skips_llm_retcons_but_still_mines(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    out = ContinuityOutput(no_action=True,
+                           retcon_requests=[RetconDraft(description="phantom", proposed_resolution="x")])
+    agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+    # LLM retcon ignored on a pass...
+    assert await read.list_retcon_requests(status=RetconStatus.open) == []
+    # ...but the deterministic mining pass still ran and stamped the chapter.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert [e.payload["chapter_id"] for e in mined] == ["ch1"]
+    # Mining WAS deterministic work, so no backoff this run.
+    assert agent._backoff_until == 0.0
+
+
+async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    quiet = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()),
+                              read, committer, events)
+    await quiet.run_once()      # first run mines ch1
+    passing = ContinuityChecker(FakeRunner(ContinuityOutput(no_action=True, feed_note="All threads hold.")),
+                                FakeRunner(MinedFactsOutput()), read, committer, events)
+    await passing.run_once()    # nothing left to mine, no leaks/paradoxes
+    log = await events.events_since(0)
+    remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
+    assert remarks[-1].payload["note"] == "All threads hold."
+    import time
+    assert passing.seconds_until_ready(time.monotonic()) > passing.interval
+
+
+class NoneMiningRunner:
+    async def ainvoke(self, inputs):
+        return {"structured_response": None}
+
+
+async def test_continuity_failed_mining_keeps_gate_open(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), NoneMiningRunner(), read, committer, events)
+    await agent.run_once()
+    # ch1 was not stamped chapter.mined; the "retry next poll" contract
+    # requires readiness to stay open, not gate to 0.0.
+    mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
+    assert mined == []
+    assert await agent.readiness() > 0.0
+
+
 async def test_checker_pull_mode_false_keeps_chapter_excerpt_block(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="secret prose text" * 20))
@@ -927,7 +995,7 @@ def test_build_continuity_checker_runner_with_backend_bounds_recursion():
 
     backend = CanonBackend(read_store=None)
     runner = build_continuity_checker_runner(FakeSettings(), backend=backend, tools=[])
-    assert runner.config.get("recursion_limit") == 50
+    assert runner.config.get("recursion_limit") == 100
 
 
 def test_build_continuity_checker_runner_binds_callbacks_at_graph_scope_not_model():

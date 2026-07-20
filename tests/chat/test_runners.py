@@ -73,7 +73,7 @@ def test_build_chat_runner_with_backend_bounds_recursion():
 
     backend = CanonBackend(read_store=None)
     runner = build_chat_runner(FakeSettings(), "author", backend=backend, tools=[])
-    assert runner.config.get("recursion_limit") == 50
+    assert runner.config.get("recursion_limit") == 100
 
 
 def test_build_chat_runner_binds_callbacks_at_graph_scope_not_model():

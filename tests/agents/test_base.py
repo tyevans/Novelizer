@@ -646,3 +646,61 @@ def test_guarded_line_returns_labeled_value_when_present():
 
 def test_guarded_line_returns_empty_when_value_falsy():
     assert BaseAgent._guarded_line("In character", "") == ""
+
+
+from novelizer.agents.base import DEFAULT_PASS_REMARK, PASS_BACKOFF_MULTIPLIER
+
+
+def test_note_pass_extends_backoff_beyond_interval():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.mark_ran(1000.0)
+    agent.note_pass(now=1000.0)
+    # Normal interval has elapsed at t=1100, but the pass backoff (3x) has not.
+    assert not agent.ready_for_interval(1100.0)
+    assert agent.seconds_until_ready(1100.0) == 200.0
+    assert agent.ready_for_interval(1300.0)
+
+
+def test_note_pass_defaults_to_monotonic_clock():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.note_pass()
+    import time
+    assert agent._backoff_until > time.monotonic()
+
+
+def test_no_pass_means_plain_interval_gate():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
+    agent.mark_ran(1000.0)
+    assert agent.ready_for_interval(1100.0)
+
+
+def test_pass_constants():
+    assert PASS_BACKOFF_MULTIPLIER == 3
+    assert DEFAULT_PASS_REMARK == "Nothing needs my attention — carry on with the story."
+
+
+class _WatermarkAgent(BaseAgent):
+    def __init__(self, fp):
+        super().__init__(runner=None, read_store=None, committer=None, interval=0)
+        self.fp = fp
+
+    async def _fingerprint(self):
+        return self.fp
+
+    async def readiness(self) -> float:
+        return await self._gate_on_watermark(0.5)
+
+
+async def test_watermark_zeroes_readiness_until_state_changes():
+    agent = _WatermarkAgent((1, "ch1"))
+    assert await agent.readiness() == 0.5      # never ran: full score
+    await agent._record_watermark()
+    assert await agent.readiness() == 0.0      # same state: gated
+    agent.fp = (2, "ch2")
+    assert await agent.readiness() == 0.5      # external change: restored
+
+
+async def test_default_fingerprint_disables_watermarking():
+    agent = BaseAgent(runner=None, read_store=None, committer=None, interval=0)
+    await agent._record_watermark()
+    assert await agent._gate_on_watermark(0.7) == 0.7

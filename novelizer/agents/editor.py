@@ -1,5 +1,5 @@
 from __future__ import annotations
-from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import causal_flags_note, pacing_flags_note
@@ -168,7 +168,7 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
             backend=backend, tools=tools,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)
