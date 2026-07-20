@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from click.testing import CliRunner
 from novelizer.director.cli import cli, format_voice_report
@@ -9,7 +10,7 @@ from novelizer.voices.models import ProseProfile, VoicePack
 from novelizer.store.models import Character, DirectorSignal, SignalKind
 from novelizer.canon.autonomy import Proposal
 from novelizer.canon.event_store import EventStore
-from novelizer.canon.events import EventType
+from novelizer.canon.events import EventType, ThreadPlanted, SecretCreated
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.settings.story_dir import create_story
@@ -191,6 +192,43 @@ def _seed_proposal(story_root) -> str:
 
     asyncio.run(_write())
     return proposal.id
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _seed_thread(story_root, thread_id="the-locket", name="The Locket") -> str:
+    db_path = str(story_root / "world.db")
+
+    async def _write():
+        events = EventStore(db_path)
+        await events.init()
+        try:
+            await events.append(EventType.THREAD_PLANTED, thread_id, ThreadPlanted(id=thread_id, name=name))
+        finally:
+            await events.close()
+
+    asyncio.run(_write())
+    return thread_id
+
+
+def _seed_secret(story_root, secret_id="the-map", title="The Map") -> str:
+    db_path = str(story_root / "world.db")
+
+    async def _write():
+        events = EventStore(db_path)
+        await events.init()
+        try:
+            await events.append(EventType.SECRET_CREATED, secret_id, SecretCreated(id=secret_id, title=title))
+        finally:
+            await events.close()
+
+    asyncio.run(_write())
+    return secret_id
 
 
 async def _read_after_catchup(db_path: str):
@@ -384,5 +422,68 @@ def test_approve_command_logs_at_info_level(tmp_path, caplog):
             "approved proposal" in rec.message and proposal_id in rec.message
             for rec in caplog.records
         )
+    finally:
+        os.unlink(path)
+
+
+def test_plan_resolution_valid_window_reports_success(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        thread_id = _seed_thread(story)
+        r = CliRunner().invoke(
+            cli, ["--story", str(story), "plan-resolution", thread_id, "3", "5"], env=_env(path, xdg)
+        )
+        assert r.exit_code == 0, r.output
+        assert "resolution window ch3-5 planned" in _strip_ansi(r.output)
+        assert "\x1b[32m" in r.output  # green
+    finally:
+        os.unlink(path)
+
+
+def test_plan_resolution_invalid_window_reports_rejection(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        thread_id = _seed_thread(story)
+        r = CliRunner().invoke(
+            cli, ["--story", str(story), "plan-resolution", thread_id, "9", "3"], env=_env(path, xdg)
+        )
+        assert r.exit_code == 0, r.output
+        assert "invalid window" in _strip_ansi(r.output)
+        assert "\x1b[33m" in r.output  # yellow
+    finally:
+        os.unlink(path)
+
+
+def test_plan_reveal_valid_window_reports_success(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        secret_id = _seed_secret(story)
+        r = CliRunner().invoke(
+            cli, ["--story", str(story), "plan-reveal", secret_id, "2", "4"], env=_env(path, xdg)
+        )
+        assert r.exit_code == 0, r.output
+        assert "reveal window ch2-4 planned" in _strip_ansi(r.output)
+        assert "\x1b[32m" in r.output  # green
+    finally:
+        os.unlink(path)
+
+
+def test_plan_reveal_unknown_secret_reports_rejection(tmp_path):
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    story = _seeded_story(tmp_path)
+    try:
+        r = CliRunner().invoke(
+            cli, ["--story", str(story), "plan-reveal", "nonexistent", "2", "4"], env=_env(path, xdg)
+        )
+        assert r.exit_code == 0, r.output
+        assert "no such secret" in _strip_ansi(r.output)
+        assert "\x1b[33m" in r.output  # yellow
     finally:
         os.unlink(path)

@@ -1,10 +1,14 @@
 from __future__ import annotations
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
-from novelizer.brain.context import causal_flags_note, chapter_map_note, known_secrets_note, stale_threads_note
+from novelizer.brain.context import (
+    causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
+    stale_threads_note,
+)
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, InspirationHandConsumed
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.events import ChapterRevised
 from novelizer.muse.prompts import AI_TELL_BAN_NOTE, casting_pool_note, inspiration_note
@@ -14,6 +18,7 @@ AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write 
 You receive world lore, active characters, previous chapter summaries, and director notes.
 Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
+You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly.
 """ + AI_TELL_BAN_NOTE
 
 _RETRIEVAL_NOTE_PREFIX = (
@@ -50,6 +55,8 @@ def _summarize(
     brain = stale_threads_note(ctx["threads"], ctx["chapters"], threshold=staleness_threshold_chapters)
     secrets = known_secrets_note(ctx["secrets"], ctx["characters"], ctx["knowledge_matrix"])
     causal = causal_flags_note(ctx["causal_edges"], [c.id for c in ctx["chapters"]])
+    ledger = ledger_note(ctx.get("promises", []), ctx["chapters"])
+    pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
     pool = casting_pool_note(ctx.get("hand"))
     sparks = inspiration_note(ctx.get("hand"))
     if pull_mode:
@@ -59,7 +66,8 @@ def _summarize(
         chapters_block = f"Previous chapters:\n{prev}"
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
-        f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}\n\nWrite the next chapter."
+        f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}"
+        f"{ledger}{pacing_plan}\n\nWrite the next chapter."
     )
 
 
@@ -116,6 +124,7 @@ class Author(BaseAgent):
             "themes": await self._read.list_themes(),
             "causal_edges": await self._read.list_causal_edges(),
             "hand": await self._read.get_active_hand(),
+            "promises": await self._read.list_promises(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -164,6 +173,12 @@ class Author(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter_id)
+        active_promise_ids = {
+            p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
+        }
+        await self._commit_promise_intents(
+            draft.promise_intents, active_promise_ids, active_thread_ids, chapter_id=chapter_id
+        )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter_id)
         active_secret_ids = {s.id for s in ctx["secrets"]}

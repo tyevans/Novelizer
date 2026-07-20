@@ -1,9 +1,15 @@
 from __future__ import annotations
 import logging
-from novelizer.canon.events import EventType, InspirationHandSuperseded
+from novelizer.canon.events import (
+    EventType,
+    InspirationHandSuperseded,
+    SecretRevealPlanned,
+    ThreadResolutionPlanned,
+)
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatus
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.proposal_service import ProposalService
+from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.muse.report import muse_status_report
 from novelizer.settings.story_dir import StoryDirectory
 from novelizer.store.models import DirectorSignal, SignalKind
@@ -43,6 +49,42 @@ def resume(scheduler, agent_name: str) -> None:
 
 async def autonomy(events, state: AutonomyState) -> None:
     await events.append(EventType.AUTONOMY_CHANGED, "singleton", state)
+
+
+async def plan_thread_resolution(
+    events, read, thread_id: str, window_lo: int, window_hi: int, note: str = ""
+) -> str:
+    thread = await read.get_thread(thread_id)
+    if thread is None:
+        return f"no such thread: {thread_id}"
+    if thread.state.value in TERMINAL_STATES:
+        return f"thread {thread_id} is already {thread.state.value}"
+    if not ((window_lo == 0 and window_hi == 0) or (1 <= window_lo <= window_hi)):
+        return f"invalid window {window_lo}-{window_hi} (need 1 <= lo <= hi, or 0 0 to clear)"
+    await events.append(
+        EventType.THREAD_RESOLUTION_PLANNED,
+        thread_id,
+        ThreadResolutionPlanned(
+            id=thread_id, window_lo=window_lo, window_hi=window_hi, planned_payoff_note=note
+        ),
+    )
+    return f"resolution window ch{window_lo}-{window_hi} planned for '{thread.name}'"
+
+
+async def plan_secret_reveal(events, read, secret_id: str, window_lo: int, window_hi: int) -> str:
+    secret = await read.get_secret(secret_id)
+    if secret is None:
+        return f"no such secret: {secret_id}"
+    if secret.revealed:
+        return f"secret {secret_id} is already revealed"
+    if not ((window_lo == 0 and window_hi == 0) or (1 <= window_lo <= window_hi)):
+        return f"invalid window {window_lo}-{window_hi} (need 1 <= lo <= hi, or 0 0 to clear)"
+    await events.append(
+        EventType.SECRET_REVEAL_PLANNED,
+        secret_id,
+        SecretRevealPlanned(id=secret_id, window_lo=window_lo, window_hi=window_hi),
+    )
+    return f"reveal window ch{window_lo}-{window_hi} planned for '{secret.title}'"
 
 
 async def approve(proposals: ProposalService, read, proposal_id: str) -> str:

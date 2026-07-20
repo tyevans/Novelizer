@@ -2,17 +2,19 @@ from __future__ import annotations
 from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
-from novelizer.brain.context import causal_flags_note, pacing_flags_note
+from novelizer.brain.context import causal_flags_note, ledger_note, pacing_flags_note, resolution_pacing_note
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest, RetconStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
-notes: if revising, specific actionable feedback; if approving, brief praise."""
+notes: if revising, specific actionable feedback; if approving, brief praise.
+You may declare promise intents when the chapter plants or pays off a setup: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly."""
 
 VOICE_SOURCE_TAG = "[source: voice_drift]"
 
@@ -47,6 +49,7 @@ class Editor(BaseAgent):
             "causal_edges": await self._read.list_causal_edges(),
             "themes": await self._read.list_themes(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "promises": await self._read.list_promises(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -73,6 +76,8 @@ class Editor(BaseAgent):
         pacing = pacing_flags_note(ctx["scores"], delta=self._sag_spike_delta)
         chapter_order = [c.id for c in ctx["chapters"]]
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
+        ledger = ledger_note(ctx.get("promises", []), ctx["chapters"])
+        pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
         # Citation aid, not knowledge-state injection (that is Author-only per
         # Locked decision #7): knowledge_intents must cite an existing secret
         # id or be dropped at commit time, so the Editor needs the id list in
@@ -101,7 +106,10 @@ class Editor(BaseAgent):
         if drift_filed:
             listing = "\n".join(f"- {d}" for d in drift_filed[:20])
             drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
-        msg = f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}{secret_ids}{drift}"
+        msg = (
+            f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
+            f"{secret_ids}{drift}{ledger}{pacing_plan}"
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 
@@ -119,6 +127,12 @@ class Editor(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_promise_ids = {
+            p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
+        }
+        await self._commit_promise_intents(
+            verdict.promise_intents, active_promise_ids, active_thread_ids, chapter_id=ch.id
+        )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}

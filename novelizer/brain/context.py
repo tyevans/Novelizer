@@ -1,10 +1,13 @@
 from __future__ import annotations
+from novelizer.brain.ledger import due_promises, overdue_promises
 from novelizer.brain.paradoxes import find_paradoxes
+from novelizer.brain.resolution_pacing import congested_windows, overdue_resolutions, overdue_reveals
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, stale_threads
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
-    CausalEdgeRecord, Chapter, Character, RetconRequest, SecretRecord, StructureScore, ThreadRecord,
+    CausalEdgeRecord, Chapter, Character, PromiseRecord, RetconRequest, SecretRecord, StructureScore,
+    ThreadRecord,
 )
 
 
@@ -91,6 +94,47 @@ def chapter_map_note(chapters: list[Chapter]) -> str:
         f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'}"
         for c in chapters
     )
+
+
+def ledger_note(promises: list[PromiseRecord], chapters: list[Chapter]) -> str:
+    """Build the Author-facing prompt block naming every promise the ledger
+    considers overdue or due, with the exact id the Author must cite to pay
+    or release it. Overdue promises are listed first. Empty string when
+    neither list has anything, so the prompt stays byte-identical whenever
+    the ledger has nothing to say.
+    """
+    overdue = overdue_promises(promises, chapters)
+    due = due_promises(promises, chapters)
+    if not overdue and not due:
+        return ""
+    lines = [f"- {p.name} (id:{p.id}) — OVERDUE — window closed ch {p.window_hi}" for p in overdue]
+    lines += [f"- {p.name} (id:{p.id}) — due ch {p.window_lo}-{p.window_hi}" for p in due]
+    return "\n\nPromise ledger (pay or release these, citing ids exactly):\n" + "\n".join(lines)
+
+
+def resolution_pacing_note(
+    threads: list[ThreadRecord], secrets: list[SecretRecord], chapters: list[Chapter],
+) -> str:
+    """Build the prompt block naming overdue thread resolutions, overdue
+    secret reveals, and congestion warnings for windows carrying too many
+    resolutions at once. Empty string when the pacing faculty has nothing
+    to flag, so the prompt stays byte-identical when quiet.
+    """
+    overdue_threads = overdue_resolutions(threads, chapters)
+    overdue_secrets = overdue_reveals(secrets, chapters)
+    spans = congested_windows(threads, secrets)
+    if not overdue_threads and not overdue_secrets and not spans:
+        return ""
+    lines = [f"- {t.name} (id:{t.id}) — OVERDUE — window closed ch {t.window_hi}" for t in overdue_threads]
+    lines += [
+        f"- {s.title} (id:{s.id}) — reveal OVERDUE — window closed ch {s.reveal_window_hi}"
+        for s in overdue_secrets
+    ]
+    lines += [
+        f"- {count} resolutions must resolve in the same window (ch {lo}-{hi})"
+        for lo, hi, count in spans
+    ]
+    return "\n\nResolution pacing:\n" + "\n".join(lines)
 
 
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:

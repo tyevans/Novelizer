@@ -4,11 +4,13 @@ from novelizer.canon.events import (
     EventType, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
     ThemeIntroduced, ThemeDeveloped,
+    PromiseMade, PromiseProgressed, PromisePaid, PromiseReleased,
 )
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
 from novelizer.canon.themes import slugify_theme_name
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.canon.promises import slugify_promise_name
+from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent
 from novelizer.store.models import RetconRequest, RetconStatus
 
 logger = logging.getLogger(__name__)
@@ -321,3 +323,99 @@ async def commit_causal_intents(
                 source=source,
             ),
         )
+
+
+_PROMISE_EVENT_BY_ACTION = {
+    "progress": (PromiseProgressed, EventType.PROMISE_PROGRESSED),
+    "pay": (PromisePaid, EventType.PROMISE_PAID),
+    "release": (PromiseReleased, EventType.PROMISE_RELEASED),
+}
+
+
+async def commit_promise_intents(
+    committer,
+    agent_name: str,
+    intents: list[PromiseIntent],
+    active_promise_ids: set[str],
+    active_thread_ids: set[str],
+    chapter_id: str = "",
+    source: str = "declared",
+) -> None:
+    """Turn agent-declared PromiseIntent entries into promise.* commits.
+
+    `make` mints a new id via slugify_promise_name(intent.name) and is
+    dropped only if the name is blank; a make colliding with an id
+    already in `active_promise_ids` downgrades to promise.progressed
+    (same pattern as thread plant collisions). `make` may optionally
+    cite a `thread_id`; a thread_id not present in `active_thread_ids`
+    is dropped (logged) but does not block the promise commit.
+    `progress`/`pay`/`release` must cite an id present in
+    `active_promise_ids` -- an intent naming an unknown or already-
+    terminal id is dropped with a logged warning and no event is
+    committed. `make` may also optionally carry a target payoff window
+    (`window_lo`/`window_hi`, 1-based chapter ordinals); an invalid
+    window (not `lo==hi==0` and not `1 <= lo <= hi`) is dropped with a
+    logged warning and zeroed rather than blocking the commit -- an
+    invalid window must never enter canon. No-op on an empty list.
+    """
+    for intent in intents:
+        if intent.action == "make":
+            if not intent.name.strip():
+                logger.warning("%s: dropped promise make with blank name", agent_name)
+                continue
+            promise_id = slugify_promise_name(intent.name)
+            if promise_id in active_promise_ids:
+                # A promise id is minted exactly once, at promise.made. This
+                # make collides with an id that's already live, so the agent
+                # clearly means "this promise is live" — downgrade to a
+                # progress instead of committing a made event the projection
+                # would just no-op.
+                logger.info(
+                    "%s: make %r collides with active promise id %r, downgrading to progress",
+                    agent_name, intent.name, promise_id,
+                )
+                await committer.commit(
+                    agent_name, EventType.PROMISE_PROGRESSED, promise_id,
+                    PromiseProgressed(id=promise_id, chapter_id=chapter_id, note=intent.note, source=source),
+                )
+                continue
+            thread_id = _normalize_id(intent.thread_id)
+            if thread_id and thread_id not in active_thread_ids:
+                logger.warning(
+                    "%s: promise '%s' cited unknown thread %r — link dropped", agent_name, promise_id, thread_id
+                )
+                thread_id = ""
+            window_lo, window_hi = intent.window_lo, intent.window_hi
+            if not (window_lo == window_hi == 0 or 1 <= window_lo <= window_hi):
+                logger.warning(
+                    "%s: promise '%s' declared invalid window %r-%r, zeroing",
+                    agent_name, promise_id, window_lo, window_hi,
+                )
+                window_lo, window_hi = 0, 0
+            logger.warning(
+                "%s: make %r mints id %r; if this id already exists (unknown to the "
+                "caller) the commit will be a projection no-op",
+                agent_name, intent.name, promise_id,
+            )
+            await committer.commit(
+                agent_name, EventType.PROMISE_MADE, promise_id,
+                PromiseMade(
+                    id=promise_id, name=intent.name.strip(), description=intent.description,
+                    kind=intent.kind, chapter_id=chapter_id, thread_id=thread_id,
+                    window_lo=window_lo, window_hi=window_hi,
+                    note=intent.note, source=source,
+                ),
+            )
+            continue
+        promise_id = _normalize_id(intent.id)
+        if promise_id not in active_promise_ids:
+            logger.warning(
+                "%s: dropped promise %s citing unknown/terminal id %r", agent_name, intent.action, intent.id
+            )
+            continue
+        payload_cls, event_type = _PROMISE_EVENT_BY_ACTION[intent.action]
+        if payload_cls is PromiseReleased:
+            payload = PromiseReleased(id=promise_id, reason=intent.note, chapter_id=chapter_id, source=source)
+        else:
+            payload = payload_cls(id=promise_id, chapter_id=chapter_id, note=intent.note, source=source)
+        await committer.commit(agent_name, event_type, promise_id, payload)

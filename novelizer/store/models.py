@@ -100,6 +100,36 @@ class ThreadRecord(BaseModel):
     touch_count: int = 0
     last_note: str = ""
     last_chapter_id: str = ""
+    window_lo: int = 0
+    window_hi: int = 0
+    planned_payoff_note: str = ""
+
+
+class PromiseState(StrEnum):
+    open = "open"
+    paid = "paid"
+    released = "released"
+
+
+class PromiseRecord(BaseModel):
+    """Read-side row for a ledger promise, built and rebuilt by the Projector
+    from the promise.* event log. Promise events after the first carry only
+    deltas (id + note), so fields accumulate across events. `paid` and
+    `released` are absorbing (see canon.promises.TERMINAL_PROMISE_STATES);
+    released is the alarm-free exit for red herrings."""
+
+    id: str
+    name: str
+    description: str = ""
+    kind: str = "foreshadow"
+    state: PromiseState = PromiseState.open
+    thread_id: str = ""
+    setup_chapter_id: str = ""
+    window_lo: int = 0
+    window_hi: int = 0
+    progress_count: int = 0
+    last_note: str = ""
+    last_chapter_id: str = ""
 
 
 class ThemeRecord(BaseModel):
@@ -128,6 +158,8 @@ class SecretRecord(BaseModel):
     id: str
     title: str
     revealed: bool = False
+    reveal_window_lo: int = 0
+    reveal_window_hi: int = 0
 
 
 class CausalEdgeRecord(BaseModel):

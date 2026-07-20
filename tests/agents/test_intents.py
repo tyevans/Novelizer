@@ -1,8 +1,9 @@
 import pytest
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
+    commit_promise_intents,
 )
-from novelizer.agents.schemas import ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent
+from novelizer.agents.schemas import ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent
 from novelizer.canon.events import EventType
 
 
@@ -88,3 +89,115 @@ async def test_causal_drops_self_edge_and_unknown_ids():
     )
     assert len(c.commits) == 1
     assert c.commits[0][1] == EventType.CAUSAL_EDGE_DECLARED
+
+
+@pytest.mark.asyncio
+async def test_make_mints_slug_and_commits_promise_made():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="make", name="The Sealed Letter", kind="plant", thread_id="t1")],
+        active_promise_ids=set(), active_thread_ids={"t1"},
+        chapter_id="ch1",
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type) == ("author", EventType.PROMISE_MADE)
+    assert payload.id == "the-sealed-letter"
+    assert payload.kind == "plant"
+    assert payload.thread_id == "t1"
+    assert payload.chapter_id == "ch1"
+
+
+@pytest.mark.asyncio
+async def test_make_with_unknown_thread_id_drops_the_link_but_keeps_the_promise():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="make", name="The Sealed Letter", thread_id="ghost")],
+        active_promise_ids=set(), active_thread_ids=set(),
+    )
+    assert len(c.commits) == 1
+    assert c.commits[0][1] == EventType.PROMISE_MADE
+    assert c.commits[0][3].thread_id == ""
+
+
+@pytest.mark.asyncio
+async def test_make_collision_downgrades_to_progress():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="make", name="The Sealed Letter")],
+        active_promise_ids={"the-sealed-letter"}, active_thread_ids=set(),
+    )
+    assert len(c.commits) == 1
+    assert c.commits[0][1] == EventType.PROMISE_PROGRESSED
+
+
+@pytest.mark.asyncio
+async def test_make_with_window_carries_lo_hi_through_to_promise_made():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="make", name="The Sealed Letter", window_lo=5, window_hi=9)],
+        active_promise_ids=set(), active_thread_ids=set(),
+    )
+    assert len(c.commits) == 1
+    payload = c.commits[0][3]
+    assert payload.window_lo == 5
+    assert payload.window_hi == 9
+
+
+@pytest.mark.asyncio
+async def test_make_with_inverted_window_is_committed_zeroed_with_warning(caplog):
+    c = FakeCommitter()
+    with caplog.at_level("WARNING"):
+        await commit_promise_intents(
+            c, "author",
+            [PromiseIntent(action="make", name="The Sealed Letter", window_lo=9, window_hi=5)],
+            active_promise_ids=set(), active_thread_ids=set(),
+        )
+    assert len(c.commits) == 1
+    payload = c.commits[0][3]
+    assert payload.window_lo == 0
+    assert payload.window_hi == 0
+    assert any("invalid window" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_citing_actions_drop_unknown_ids_with_no_commit():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="progress", id="ghost"),
+         PromiseIntent(action="pay", id="ghost"),
+         PromiseIntent(action="release", id="ghost")],
+        active_promise_ids=set(), active_thread_ids=set(),
+    )
+    assert len(c.commits) == 0
+
+
+@pytest.mark.asyncio
+async def test_pay_and_release_commit_terminal_events():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="pay", id="the-sealed-letter"),
+         PromiseIntent(action="release", id="the-sealed-letter", note="red herring")],
+        active_promise_ids={"the-sealed-letter"}, active_thread_ids=set(),
+    )
+    assert len(c.commits) == 2
+    assert c.commits[0][1] == EventType.PROMISE_PAID
+    assert c.commits[1][1] == EventType.PROMISE_RELEASED
+    assert c.commits[1][3].reason == "red herring"
+
+
+@pytest.mark.asyncio
+async def test_blank_name_make_is_dropped():
+    c = FakeCommitter()
+    await commit_promise_intents(
+        c, "author",
+        [PromiseIntent(action="make", name="")],
+        active_promise_ids=set(), active_thread_ids=set(),
+    )
+    assert len(c.commits) == 0

@@ -5,7 +5,7 @@ from novelizer.canon import db
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
-    InspirationHandRecord, InspirationUptakeRecord,
+    InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -104,6 +104,15 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (thread_id,))
         row = await cur.fetchone()
         return ThreadRecord.model_validate_json(row[0]) if row else None
+
+    async def list_promises(self) -> list[PromiseRecord]:
+        cur = await self._conn.execute("SELECT data FROM promises ORDER BY rowid")
+        return [PromiseRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_promise(self, promise_id: str) -> Optional[PromiseRecord]:
+        cur = await self._conn.execute("SELECT data FROM promises WHERE id=?", (promise_id,))
+        row = await cur.fetchone()
+        return PromiseRecord.model_validate_json(row[0]) if row else None
 
     async def list_themes(self) -> list[ThemeRecord]:
         cur = await self._conn.execute("SELECT data FROM themes ORDER BY rowid")

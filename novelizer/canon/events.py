@@ -40,6 +40,12 @@ class EventType:
     INSPIRATION_HAND_CONSUMED = "inspiration.hand_consumed"
     INSPIRATION_HAND_SUPERSEDED = "inspiration.hand_superseded"
     INSPIRATION_UPTAKE_RECORDED = "inspiration.uptake_recorded"
+    PROMISE_MADE = "promise.made"
+    PROMISE_PROGRESSED = "promise.progressed"
+    PROMISE_PAID = "promise.paid"
+    PROMISE_RELEASED = "promise.released"
+    THREAD_RESOLUTION_PLANNED = "thread.resolution_planned"
+    SECRET_REVEAL_PLANNED = "secret.reveal_planned"
 
 
 class StoredEvent(BaseModel):
@@ -346,3 +352,88 @@ class InspirationUptakeRecorded(BaseModel):
     kind: str
     item: str
     chapter_id: str = ""
+
+
+class PromiseMade(BaseModel):
+    """Payload for promise.made — mints a new promise's identity.
+
+    A promise is a discrete planted expectation (Chekhov's gun, foreshadowed
+    image, red herring) with a discrete payoff — below thread scale. `id` is
+    the slug minted from `name` (see novelizer.canon.promises
+    .slugify_promise_name) at make time; every later promise.* event must
+    cite this id, never re-derive it (Locked decision #1: first-make-wins,
+    same as threads).
+
+    `window_lo`/`window_hi` are 1-based chapter ordinals bounding the target
+    payoff window; 0 means unset. `kind` is one of foreshadow|plant|
+    red_herring — red herrings exit via promise.released without alarm.
+    """
+
+    id: str
+    name: str
+    description: str = ""
+    kind: str = "foreshadow"
+    chapter_id: str = ""
+    thread_id: str = ""
+    window_lo: int = 0
+    window_hi: int = 0
+    note: str = ""
+    source: str = "declared"
+
+
+class PromiseProgressed(BaseModel):
+    """Payload for promise.progressed — an existing promise advances, cited
+    by id. Progress on a terminal promise is a no-op in projection."""
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+    source: str = "declared"
+
+
+class PromisePaid(BaseModel):
+    """Payload for promise.paid — the planted expectation is fulfilled,
+    cited by id. Terminal: the PromisesProjection treats this id as
+    absorbing thereafter (Locked decision #2)."""
+
+    id: str
+    chapter_id: str = ""
+    note: str = ""
+    source: str = "declared"
+
+
+class PromiseReleased(BaseModel):
+    """Payload for promise.released — the sanctioned exit for red herrings
+    and deliberate abandonment, cited by id. Terminal and absorbing, like
+    promise.paid; released promises never alarm."""
+
+    id: str
+    reason: str = ""
+    chapter_id: str = ""
+    source: str = "declared"
+
+
+class ThreadResolutionPlanned(BaseModel):
+    """Payload for thread.resolution_planned — pins a target resolution
+    window on an existing, non-terminal thread, cited by id.
+
+    Re-emission supersedes (Locked decision: the event history IS the record
+    of schedule slips). Unknown or terminal thread ids are projection no-ops.
+    `window_lo`/`window_hi` are 1-based chapter ordinals; 0 clears the plan.
+    """
+
+    id: str
+    window_lo: int = 0
+    window_hi: int = 0
+    planned_payoff_note: str = ""
+
+
+class SecretRevealPlanned(BaseModel):
+    """Payload for secret.reveal_planned — pins a target reveal window on an
+    existing, unrevealed secret, cited by id. Re-emission supersedes; unknown
+    or already-revealed secret ids are projection no-ops. Windows are 1-based
+    chapter ordinals; 0 clears the plan."""
+
+    id: str
+    window_lo: int = 0
+    window_hi: int = 0

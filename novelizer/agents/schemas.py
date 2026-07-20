@@ -68,6 +68,25 @@ class ThreadIntent(BaseModel):
     note: str = ""
 
 
+class PromiseIntent(BaseModel):
+    """One agent-declared ledger-promise action from structured output.
+
+    `make` mints (name required); progress/pay/release cite an existing id
+    exactly. `release` is the red-herring exit. `window_lo`/`window_hi` are
+    an optional target payoff window, 1-based chapter ordinals; 0 = unset.
+    """
+
+    action: Literal["make", "progress", "pay", "release"]
+    name: str = ""
+    id: str = ""
+    kind: Literal["foreshadow", "plant", "red_herring"] = "foreshadow"
+    description: str = ""
+    thread_id: str = ""
+    window_lo: int = 0
+    window_hi: int = 0
+    note: str = ""
+
+
 class ThemeIntent(BaseModel):
     """One agent-declared theme action from structured output.
 
@@ -160,6 +179,7 @@ class EditorVerdict(BaseModel):
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     voice_drift_flags: list[VoiceDriftFlag] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
 
 
 class ContinuityOutput(BaseModel):

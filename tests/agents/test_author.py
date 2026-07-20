@@ -7,8 +7,9 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, ThemeIntroduced
 from novelizer.agents.author import Author, ChapterDraft
-from novelizer.agents.schemas import ThreadIntent, ThemeIntent
+from novelizer.agents.schemas import ThreadIntent, ThemeIntent, PromiseIntent
 from novelizer.store.models import Chapter, DirectorSignal, SignalKind
+from novelizer.brain.ledger import overdue_promises
 
 
 class FakeRunner:
@@ -253,6 +254,33 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_promise_with_window_surfaces_as_overdue_after_window_passes(stack):
+    # Pins the M7 acceptance loop's first hop: a PromiseIntent's window
+    # survives commit -> projection -> the ledger's overdue faculty.
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="One", prose="P",
+        promise_intents=[
+            PromiseIntent(action="make", name="The Sealed Letter", window_lo=1, window_hi=1),
+        ],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    # Chapter 1 exists (window_hi=1), still within window: not overdue yet.
+    promises = await read.list_promises()
+    chapters = await read.list_chapters()
+    assert overdue_promises(promises, chapters) == []
+    # A second chapter passes; now = 2 > window_hi=1: overdue.
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await proj.catch_up()
+    promises = await read.list_promises()
+    chapters = await read.list_chapters()
+    overdue = overdue_promises(promises, chapters)
+    assert len(overdue) == 1
+    assert overdue[0].name == "The Sealed Letter"
 
 
 async def test_author_commits_theme_introduce_intent(stack):
@@ -689,3 +717,54 @@ def test_retrieval_note_pinned_and_base_split():
         "in full before writing. "
         + suffix
     )
+
+
+async def test_author_commits_promise_intents_with_validation(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import PromiseIntent
+    draft = ChapterDraft(
+        title="T", prose="P",
+        promise_intents=[
+            PromiseIntent(action="make", name="The Sealed Letter", kind="plant"),
+            PromiseIntent(action="pay", id="never-made"),
+        ],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    promises = await read.list_promises()
+    assert [p.id for p in promises] == ["the-sealed-letter"]
+    assert promises[0].state.value == "open"
+
+
+async def test_author_system_prompt_mentions_promises():
+    from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
+    assert "promise" in AUTHOR_SYSTEM_PROMPT.lower()
+
+
+async def test_author_prompt_includes_ledger_note_when_promise_overdue(stack):
+    from novelizer.canon.events import PromiseMade
+
+    events, proj, read, committer = stack
+    await events.append(EventType.PROMISE_MADE, "the-sealed-letter",
+                        PromiseMade(id="the-sealed-letter", name="The Sealed Letter", window_hi=1))
+    for i in range(2):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Promise ledger" in sent
+    assert "The Sealed Letter" in sent and "the-sealed-letter" in sent
+
+
+async def test_author_prompt_omits_ledger_note_when_no_promises(stack):
+    events, proj, read, committer = stack
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[0]["messages"][0]["content"]
+    assert "Promise ledger" not in sent

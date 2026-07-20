@@ -292,7 +292,7 @@ def test_threads_tab_alarm_count_matches_alarm_lines_and_stale_pinned_first(stat
     assert alarm_flags == sorted(alarm_flags, reverse=True)
 
 
-from novelizer.store.models import CausalEdgeRecord, Character, SecretRecord
+from novelizer.store.models import CausalEdgeRecord, Character, PromiseRecord, PromiseState, SecretRecord
 from novelizer.tui.widgets.brain_model import (
     CELL_GLYPHS,
     CAUSEWAY_EMPTY,
@@ -306,6 +306,180 @@ from novelizer.tui.widgets.brain_model import (
     secrets_tab,
     spread_meter,
 )
+
+
+# --- M7: window badges + ledger section + alarms -------------------------
+
+
+def test_thread_line_due_badge_before_window_is_dim():
+    chs = _chapters("One", "Two")   # now = 2, window 3-5: before window
+    t = ThreadRecord(id="t", name="Beacon", state=ThreadState.touched,
+                      last_chapter_id="c1", window_lo=3, window_hi=5)
+    line = thread_line(t, chs)
+    assert line.plain.endswith("· due ch3-5")
+    badge_start = line.plain.index("due ch3-5")
+    assert ("due ch3-5", "dim") in [
+        (line.plain[s.start:s.end], str(s.style)) for s in line.spans
+        if s.start == badge_start
+    ]
+
+
+def test_thread_line_due_badge_inside_window_is_dim():
+    chs = _chapters("One", "Two", "Three", "Four")  # now = 4, window 3-5: inside
+    t = ThreadRecord(id="t", name="Beacon", state=ThreadState.touched,
+                      last_chapter_id="c1", window_lo=3, window_hi=5)
+    line = thread_line(t, chs)
+    assert line.plain.endswith("· due ch3-5")
+
+
+def test_thread_line_overdue_badge_past_window_hi_is_alarm_styled():
+    chs = _chapters("One", "Two", "Three", "Four", "Five", "Six")  # now = 6 > 5
+    t = ThreadRecord(id="t", name="Beacon", state=ThreadState.touched,
+                      last_chapter_id="c1", window_lo=3, window_hi=5)
+    line = thread_line(t, chs)
+    assert line.plain.endswith("· OVERDUE ch5")
+    assert str(line.style) == ALARM_STYLE
+
+
+def test_thread_line_no_badge_when_window_unset():
+    chs = _chapters("One")
+    t = ThreadRecord(id="t", name="Beacon", state=ThreadState.touched, last_chapter_id="c1")
+    line = thread_line(t, chs)
+    assert "due" not in line.plain and "OVERDUE" not in line.plain
+
+
+def _promise(id, name, kind="foreshadow", state=PromiseState.open, **kw):
+    return PromiseRecord(id=id, name=name, kind=kind, state=state, **kw)
+
+
+def test_threads_tab_ledger_section_absent_when_no_open_promises():
+    chs = _chapters("One")
+    tab = threads_tab([], chs, promises=[], secrets=[])
+    assert "Ledger" not in [line.plain for line in tab.lines]
+
+
+def test_threads_tab_ledger_header_and_open_promise_line():
+    chs = _chapters("One", "Two")
+    promises = [_promise("p1", "The Locket's Origin")]
+    tab = threads_tab([], chs, promises=promises, secrets=[])
+    plains = [line.plain for line in tab.lines]
+    assert "Ledger" in plains
+    idx = plains.index("Ledger")
+    assert plains[idx + 1] == "◇ The Locket's Origin"
+
+
+def test_threads_tab_ledger_red_herring_tag():
+    chs = _chapters("One")
+    promises = [_promise("p1", "The Wrong Trail", kind="red_herring")]
+    tab = threads_tab([], chs, promises=promises, secrets=[])
+    plains = [line.plain for line in tab.lines]
+    assert "◇ The Wrong Trail (red herring)" in plains
+
+
+def test_threads_tab_ledger_window_badges_match_thread_rules():
+    chs = _chapters("One", "Two", "Three", "Four", "Five", "Six")  # now = 6
+    promises = [
+        _promise("due", "Due One", window_lo=3, window_hi=8),
+        _promise("over", "Over One", window_lo=1, window_hi=4),
+    ]
+    tab = threads_tab([], chs, promises=promises, secrets=[])
+    plains = [line.plain for line in tab.lines]
+    assert "◇ Over One · OVERDUE ch4" in plains
+    assert "◇ Due One · due ch3-8" in plains
+
+
+def test_threads_tab_ledger_overdue_pinned_first_in_alarm_style():
+    chs = _chapters("One", "Two", "Three", "Four", "Five")  # now = 5
+    promises = [
+        _promise("a", "Fresh A", window_lo=1, window_hi=10),
+        _promise("b", "Late B", window_lo=1, window_hi=2),
+    ]
+    tab = threads_tab([], chs, promises=promises, secrets=[])
+    ledger_lines = [line for line in tab.lines if line.plain.startswith("◇")]
+    assert ledger_lines[0].plain == "◇ Late B · OVERDUE ch2"
+    assert str(ledger_lines[0].style) == ALARM_STYLE
+    assert ledger_lines[1].plain == "◇ Fresh A · due ch1-10"
+
+
+def test_threads_tab_ledger_folds_paid_and_released_promises():
+    chs = _chapters("One")
+    promises = [
+        _promise("a", "Paid A", state=PromiseState.paid),
+        _promise("b", "Paid B", state=PromiseState.paid),
+        _promise("c", "Released C", state=PromiseState.released),
+        _promise("d", "Open D"),
+    ]
+    tab = threads_tab([], chs, promises=promises, secrets=[])
+    plains = [line.plain for line in tab.lines]
+    assert "✓ 2 paid · 1 released" in plains
+    fold_line = tab.lines[plains.index("✓ 2 paid · 1 released")]
+    assert str(fold_line.style) == "dim"
+
+
+def test_threads_tab_congestion_warning_line_and_alarm_contribution():
+    chs = _chapters(*[f"C{i}" for i in range(1, 6)])  # now = 5
+    threads = [
+        ThreadRecord(id="a", name="A", state=ThreadState.touched, last_chapter_id="c1",
+                     window_lo=19, window_hi=21),
+        ThreadRecord(id="b", name="B", state=ThreadState.touched, last_chapter_id="c1",
+                     window_lo=19, window_hi=21),
+        ThreadRecord(id="c", name="C", state=ThreadState.touched, last_chapter_id="c1",
+                     window_lo=19, window_hi=21),
+    ]
+    tab = threads_tab(threads, chs, promises=[], secrets=[])
+    warn_lines = [line for line in tab.lines if line.plain.startswith("⚠ ")]
+    assert any(l.plain == "⚠ 3 resolutions target ch19-21" for l in warn_lines)
+    congestion_line = next(l for l in warn_lines if l.plain == "⚠ 3 resolutions target ch19-21")
+    assert str(congestion_line.style) == WARN_STYLE
+
+
+def test_threads_tab_alarm_count_sums_all_sources():
+    chs = _chapters("One", "Two", "Three", "Four", "Five", "Six")  # now = 6
+    threads = [
+        # stale (untouched 6 chapters >= threshold 3)
+        ThreadRecord(id="s", name="Stale", state=ThreadState.planted, last_chapter_id=""),
+        # overdue resolution, but recently touched so not also stale (window_hi=4 < now)
+        ThreadRecord(id="o", name="Overdue", state=ThreadState.touched, last_chapter_id="c5",
+                     window_lo=1, window_hi=4),
+    ]
+    promises = [
+        # overdue promise (window_hi=3 < now)
+        _promise("p", "Late Promise", window_lo=1, window_hi=3),
+    ]
+    tab = threads_tab(threads, chs, promises=promises, secrets=[])
+    # 1 stale + 1 overdue resolution + 1 overdue promise + 0 congestion spans
+    assert tab.alarm_count == 3
+
+
+def test_threads_tab_empty_state_unchanged_when_no_threads_and_no_promises():
+    tab = threads_tab([], [], promises=[], secrets=[])
+    assert [line.plain for line in tab.lines] == [THREADS_EMPTY]
+    assert tab.alarm_count == 0
+
+
+def test_threads_tab_renders_a_line_per_overdue_reveal():
+    chs = _chapters("One", "Two", "Three")  # now = 3
+    secrets = [SecretRecord(id="s", title="The Forged Letter", reveal_window_lo=1, reveal_window_hi=2)]
+    tab = threads_tab([], chs, promises=[], secrets=secrets)
+    plains = [line.plain for line in tab.lines]
+    assert any(l.startswith("⚠ reveal overdue: 'The Forged Letter'") and "ch2" in l for l in plains)
+    overdue_line = next(l for l in tab.lines if l.plain.startswith("⚠ reveal overdue:"))
+    assert str(overdue_line.style) == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_threads_tab_secrets_only_story_with_congested_reveal_windows_shows_warning_not_empty_state():
+    chs = _chapters(*[f"C{i}" for i in range(1, 6)])  # now = 5
+    secrets = [
+        SecretRecord(id="a", title="A", reveal_window_lo=19, reveal_window_hi=21),
+        SecretRecord(id="b", title="B", reveal_window_lo=19, reveal_window_hi=21),
+        SecretRecord(id="c", title="C", reveal_window_lo=19, reveal_window_hi=21),
+    ]
+    tab = threads_tab([], chs, promises=[], secrets=secrets)
+    plains = [line.plain for line in tab.lines]
+    assert THREADS_EMPTY not in plains
+    assert "⚠ 3 resolutions target ch19-21" in plains
+    assert tab.alarm_count == 1
 
 
 def test_cell_glyphs_cover_exactly_the_real_cell_states():

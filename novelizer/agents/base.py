@@ -5,7 +5,7 @@ import uuid
 from typing import Protocol
 from pydantic import BaseModel, Field
 from novelizer.canon.events import EventType, AgentRemark
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent
 from novelizer.agents import intents as intent_helpers
 from novelizer.run_context import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
@@ -38,6 +38,7 @@ class ChapterDraft(BaseModel):
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):
@@ -213,4 +214,17 @@ class BaseAgent:
     ) -> None:
         await intent_helpers.commit_causal_intents(
             self._committer, self.name, intents, valid_chapter_ids, source=source
+        )
+
+    async def _commit_promise_intents(
+        self,
+        intents: list[PromiseIntent],
+        active_promise_ids: set[str],
+        active_thread_ids: set[str],
+        chapter_id: str = "",
+        source: str = "declared",
+    ) -> None:
+        await intent_helpers.commit_promise_intents(
+            self._committer, self.name, intents, active_promise_ids, active_thread_ids,
+            chapter_id=chapter_id, source=source,
         )

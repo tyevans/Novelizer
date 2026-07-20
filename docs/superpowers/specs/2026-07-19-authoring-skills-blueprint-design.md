@@ -440,10 +440,12 @@ sequencing, "done when" acceptance, and status. Mapping:
   own value slice — long-book coherence improves before any planning exists).
 - **M7 — The Ledger**: promise events + `thread.resolution_planned` +
   `secret.reveal_planned`, projections, `ledger.py` + `resolution_pacing.py`,
-  Threads-tab extensions. The Author gains `PromiseIntent` (it plants and
-  pays off in prose); the ContinuityChecker gains both intents via mining;
-  resolution windows come from Director signals until the Plotter exists in
-  M8. Needs only intents — can run in parallel with M6.
+  Threads-tab extensions. The Author and Editor gain `PromiseIntent` (they
+  plant and pay off in prose/review); resolution windows come from the
+  Director's `plan-resolution`/`plan-reveal` CLI commands until the Plotter
+  exists in M8. *Delivered 2026-07-19; deferred to M8: ContinuityChecker
+  prose-mining of promises, `/promises/` canon_fs rendering, `search_canon`
+  promise kind.*
 - **M8 — The Blueprint**: blueprint/beat/brief aggregates, the Plotter agent,
   Author brief consumption, `beat_drift.py` + `tension_target.py`, Outline
   board tab, OutlineBackend. Requires M6.
