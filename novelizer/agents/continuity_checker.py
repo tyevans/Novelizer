@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
 )
@@ -411,7 +411,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
             model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
             backend=backend, tools=tools,
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

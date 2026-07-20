@@ -732,4 +732,4 @@ def test_build_editor_runner_with_backend_bounds_recursion():
 
     backend = CanonBackend(read_store=None)
     runner = build_editor_runner(_FakeSettings(), backend=backend, tools=[])
-    assert runner.config.get("recursion_limit") == 50
+    assert runner.config.get("recursion_limit") == 100

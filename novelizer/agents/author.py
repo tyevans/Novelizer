@@ -1,5 +1,5 @@
 from __future__ import annotations
-from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
+from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.brain.context import causal_flags_note, chapter_map_note, known_secrets_note, stale_threads_note
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
@@ -196,7 +196,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
             backend=backend, tools=tools,
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

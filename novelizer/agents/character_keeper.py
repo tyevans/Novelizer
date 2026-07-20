@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import open_retcons_note
@@ -178,7 +178,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
             backend=backend, tools=tools,
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)

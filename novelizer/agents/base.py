@@ -14,6 +14,10 @@ from novelizer.telemetry.events import (
 
 logger = logging.getLogger(__name__)
 
+# Tool-heavy passes (canon pulls + edits) can exceed LangGraph's default of 25;
+# 50 still tripped in practice, so give agent graphs generous headroom.
+GRAPH_RECURSION_LIMIT = 100
+
 # An agent that ran on fresh material but explicitly chose not to act steps
 # back for this many intervals instead of one, freeing dispatch slots.
 PASS_BACKOFF_MULTIPLIER = 3

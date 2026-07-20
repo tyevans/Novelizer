@@ -1,5 +1,5 @@
 from __future__ import annotations
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import WorldEntriesDraft
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -81,7 +81,7 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
             model=model, system_prompt=system_prompt, response_format=WorldEntriesDraft,
             backend=backend, tools=tools,
         )
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)
