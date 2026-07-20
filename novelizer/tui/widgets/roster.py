@@ -112,6 +112,7 @@ PLACEHOLDER_HINTS: tuple[str, ...] = (
     ":focus the storm that never lands",
     ":pause author — let the room breathe",
     ":autonomy gated_canon — take the wheel yourself",
+    ":retarget 30 — the book is running long",
 )
 
 

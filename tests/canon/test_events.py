@@ -211,3 +211,17 @@ def test_arc_event_payloads_construct_with_defaults():
     assert EventType.ARC_PIVOT_PLANNED == "arc.pivot_planned"
     assert EventType.ARC_ADVANCED == "arc.advanced"
     assert EventType.ARC_RESOLVED == "arc.resolved"
+
+
+def test_book_completed_payload_defaults_and_constant():
+    from novelizer.canon.events import EventType, BookCompleted
+
+    completed = BookCompleted(blueprint_id="bp1")
+    assert completed.chapter_id == ""
+    assert completed.note == ""
+
+    full = BookCompleted(blueprint_id="bp1", chapter_id="c9", note="landed")
+    assert full.chapter_id == "c9"
+    assert full.note == "landed"
+
+    assert EventType.BOOK_COMPLETED == "book.completed"

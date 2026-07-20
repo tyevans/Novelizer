@@ -213,6 +213,27 @@ async def test_run_once_blueprint_plan_creates_gated_proposal_and_approval_yield
     assert len(beats) == 6
 
 
+async def test_run_once_retarget_intent_projects_new_target(stack):
+    from novelizer.canon.events import BlueprintAdopted
+    from novelizer.agents.schemas import RetargetIntent
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(blueprint_id="bp1", framework="six-position", target_chapter_count=12, beats=[]),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput(retarget_intent=RetargetIntent(target_chapter_count=20, reason="running long"))
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+
+
 async def test_run_once_brief_draft_projects_open_brief(stack):
     from novelizer.canon.events import BlueprintAdopted
 
@@ -445,6 +466,71 @@ async def test_prompt_includes_tension_target_note_when_deviated(stack):
     assert "ch 20" in sent
 
 
+async def test_prompt_includes_finale_convergence_note_inside_window(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    for i in range(8):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Opening" in sent
+    assert "chapter" in sent.lower()
+
+
+async def test_prompt_omits_finale_convergence_note_before_window(stack):
+    from novelizer.canon.events import BlueprintAdopted, PromiseMade
+
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                # A late ideal_pct keeps the finale window (and therefore
+                # finale_convergence_note) far ahead of chapter 3.
+                {
+                    "beat_id": "bp1-climax", "slug": "climax", "name": "Climax",
+                    "ideal_pct": 0.9, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    # A second open blocker category (an unwindowed promise) keeps
+    # completion_note quiet too (it only fires for exactly one blocker
+    # category) -- this test is specifically about finale_convergence_note's
+    # window gating, not completion_note's near-complete steering.
+    await events.append(
+        EventType.PROMISE_MADE, "p1", PromiseMade(id="p1", name="The Locket"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Finale convergence:" not in sent
+    assert "Steer the remaining" not in sent
+
+
 class _FakeSettings:
     agent_model = "gpt-4o-mini"
     llm_base_url = None
@@ -492,6 +578,62 @@ def test_build_plotter_runner_without_backend_stays_constructible():
 
     runner = build_plotter_runner(_FakeSettings())
     assert runner is not None
+
+
+async def test_prompt_includes_completion_message_when_blueprint_satisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted, BeatFulfilled
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await events.append(
+        EventType.BEAT_FULFILLED, "bp1-open",
+        BeatFulfilled(beat_id="bp1-open", chapter_id="c0"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Write the ending" in sent
+
+
+async def test_prompt_omits_completion_message_when_blueprint_unsatisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c0", Chapter(id="c0", title="0", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Write the ending" not in sent
 
 
 def test_build_plotter_runner_with_backend_uses_retrieval_note_base():
@@ -579,3 +721,98 @@ def test_build_plotter_runner_with_real_composite_backend_is_constructible():
     )
     runner = build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner is not None
+
+
+# --- book.completed emission ---
+
+async def _adopt_satisfied_blueprint(events, proj):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec, BeatFulfilled, PromiseMade, PromisePaid
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=1,
+            beats=[BeatSpec(beat_id="bp1-inciting", slug="inciting", name="Inciting", ideal_pct=0.1, tolerance_pct=0.9)],
+        ),
+    )
+    await events.append(
+        EventType.BEAT_FULFILLED, "bp1-inciting",
+        BeatFulfilled(beat_id="bp1-inciting", chapter_id="c1"),
+    )
+    await events.append(EventType.PROMISE_MADE, "pr1", PromiseMade(id="pr1", name="a gun on the mantle"))
+    await events.append(EventType.PROMISE_PAID, "pr1", PromisePaid(id="pr1", chapter_id="c1"))
+    await proj.catch_up()
+
+
+async def test_run_once_emits_book_completed_when_story_satisfied(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    out = PlotterOutput(feed_note="the shape is closed")
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["blueprint_id"] == "bp1"
+    assert completed[0].payload["chapter_id"] == "c1"
+    assert completed[0].payload["note"] == "the shape is closed"
+
+    active = await read.get_active_blueprint()
+    assert active.completed is True
+
+
+async def test_run_once_twice_emits_book_completed_only_once(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    out = PlotterOutput()
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+
+
+async def test_run_once_emits_book_completed_even_when_llm_returns_none(stack):
+    events, proj, read, committer = stack
+    await _adopt_satisfied_blueprint(events, proj)
+
+    plotter = Plotter(FakeRunner(None), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert len(completed) == 1
+    assert completed[0].payload["note"] == ""
+
+
+async def test_run_once_no_book_completed_when_unsatisfied(stack):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=1,
+            beats=[BeatSpec(beat_id="bp1-inciting", slug="inciting", name="Inciting", ideal_pct=0.1, tolerance_pct=0.9)],
+        ),
+    )
+    await proj.catch_up()
+
+    out = PlotterOutput()
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
+    assert completed == []

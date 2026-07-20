@@ -1,16 +1,16 @@
 import pytest
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
-    commit_promise_intents, commit_blueprint_plan, commit_brief_intents, commit_beat_intents,
-    commit_resolution_plan_intents, commit_arc_intents,
+    commit_promise_intents, commit_blueprint_plan, commit_retarget_intent, commit_brief_intents,
+    commit_beat_intents, commit_resolution_plan_intents, commit_arc_intents,
 )
 from novelizer.agents.schemas import (
     ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
+    BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.canon.events import EventType
 from novelizer.canon.beat_templates import BEAT_TEMPLATES
-from novelizer.store.models import ChapterBriefRecord, BriefStatus
+from novelizer.store.models import ChapterBriefRecord, BriefStatus, BlueprintRecord
 
 
 class FakeCommitter:
@@ -250,6 +250,53 @@ async def test_blueprint_plan_happy_path_mints_beats():
         assert beat.beat_id == f"{payload.blueprint_id}-{template.slug}"
         assert beat.slug == template.slug
         assert beat.name == template.name
+
+
+# --- retarget ---
+
+@pytest.mark.asyncio
+async def test_retarget_intent_none_is_noop():
+    c = FakeCommitter()
+    await commit_retarget_intent(c, "plotter", None, BlueprintRecord(id="b1", framework="six-position", target_chapter_count=20))
+    assert len(c.commits) == 0
+
+
+@pytest.mark.asyncio
+async def test_retarget_intent_no_active_blueprint_dropped(caplog):
+    c = FakeCommitter()
+    await commit_retarget_intent(c, "plotter", RetargetIntent(target_chapter_count=30), None)
+    assert len(c.commits) == 0
+    assert any("no active blueprint" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_retarget_intent_tiny_count_dropped(caplog):
+    c = FakeCommitter()
+    blueprint = BlueprintRecord(id="b1", framework="six-position", target_chapter_count=20)
+    await commit_retarget_intent(c, "plotter", RetargetIntent(target_chapter_count=2), blueprint)
+    assert len(c.commits) == 0
+    assert any("target_chapter_count" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_retarget_intent_no_change_dropped(caplog):
+    c = FakeCommitter()
+    blueprint = BlueprintRecord(id="b1", framework="six-position", target_chapter_count=20)
+    await commit_retarget_intent(c, "plotter", RetargetIntent(target_chapter_count=20), blueprint)
+    assert len(c.commits) == 0
+    assert any("matches the current blueprint" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_retarget_intent_happy_path_commits():
+    c = FakeCommitter()
+    blueprint = BlueprintRecord(id="b1", framework="six-position", target_chapter_count=20)
+    await commit_retarget_intent(c, "plotter", RetargetIntent(target_chapter_count=30, reason="running long"), blueprint)
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type, agg) == ("plotter", EventType.BLUEPRINT_RETARGETED, "b1")
+    assert payload.blueprint_id == "b1"
+    assert payload.target_chapter_count == 30
 
 
 # --- brief draft / supersede ---

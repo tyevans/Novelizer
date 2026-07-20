@@ -560,6 +560,29 @@ class Projector:
                     (updated.id, updated.model_dump_json(), 1),
                 )
             # else: unknown or superseded blueprint id -- no-op, no error raised.
+        elif t == EventType.BOOK_COMPLETED:
+            # One-shot per active blueprint: fold only if it is still the
+            # active row and not already completed. BLUEPRINT_ADOPTED builds
+            # a fresh BlueprintRecord on adoption, so a new blueprint always
+            # starts uncompleted -- no explicit reset needed here.
+            cur = await self._conn.execute(
+                "SELECT data, active FROM blueprints WHERE id=?", (p["blueprint_id"],)
+            )
+            row = await cur.fetchone()
+            if row is not None and row[1]:
+                record = BlueprintRecord.model_validate_json(row[0])
+                if not record.completed:
+                    updated = record.model_copy(update={
+                        "completed": True,
+                        "completed_chapter_id": p.get("chapter_id", ""),
+                        "completed_note": p.get("note", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), 1),
+                    )
+                # else: already completed -- repeat is a projection no-op.
+            # else: unknown or superseded blueprint id -- no-op, no error raised.
         elif t == EventType.BEAT_FULFILLED:
             cur = await self._conn.execute("SELECT data FROM beats WHERE id=?", (p["beat_id"],))
             row = await cur.fetchone()

@@ -192,6 +192,21 @@ async def test_brief_fulfilled_refreshes_vector_with_terminal_status(stack):
     assert "status: fulfilled" in doc
 
 
+async def test_unknown_kind_is_skipped_with_warning_not_crash(stack, caplog):
+    # A future event-type prefix that isn't mapped to a known kind must not
+    # be silently treated as an arc by a trailing catch-all `else`; it
+    # should be logged and skipped instead of raising.
+    events, proj, read, store, indexer = stack
+    import novelizer.store.indexer as indexer_module
+    indexer_module._PREFIX_TO_KIND["bogus"] = "bogus"
+    try:
+        with caplog.at_level("WARNING"):
+            await indexer._index_one("bogus.something_happened", "x1")
+    finally:
+        del indexer_module._PREFIX_TO_KIND["bogus"]
+    assert "bogus" in caplog.text.lower() or "unknown" in caplog.text.lower()
+
+
 async def test_arc_resolved_refreshes_vector_with_outcome(stack):
     events, proj, read, store, indexer = stack
     await seed(events, proj)

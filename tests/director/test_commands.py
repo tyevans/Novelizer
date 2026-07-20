@@ -137,6 +137,25 @@ async def test_dispatch_routes_autonomy_and_approve_reject(stack):
     assert "approved" in result3.lower()
 
 
+async def test_dispatch_routes_retarget(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import BlueprintAdopted
+    rt = FakeRuntime(events, FakeScheduler())
+    rt.read = read
+
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "b1",
+        BlueprintAdopted(blueprint_id="b1", framework="six-position", target_chapter_count=20, beats=[]),
+    )
+    await proj.catch_up()
+
+    result = await commands.dispatch(rt, "retarget 30")
+    await proj.catch_up()
+    assert "30" in result
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 30
+
+
 async def test_plan_thread_resolution_appends_event_and_projects_window(stack):
     events, proj, read = stack
     from novelizer.store.models import ThreadRecord
@@ -191,6 +210,71 @@ async def test_plan_thread_resolution_rejects_inverted_window(stack):
     assert thread.window_hi == 0
 
 
+async def test_retarget_blueprint_appends_event_and_projects(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import BlueprintAdopted
+
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "b1",
+        BlueprintAdopted(blueprint_id="b1", framework="six-position", target_chapter_count=20, beats=[]),
+    )
+    await proj.catch_up()
+
+    result = await commands.retarget_blueprint(events, read, 30)
+    await proj.catch_up()
+
+    assert "30" in result and result.startswith("blueprint retargeted")
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 30
+
+
+async def test_retarget_blueprint_rejects_no_active_blueprint(stack):
+    events, proj, read = stack
+    result = await commands.retarget_blueprint(events, read, 30)
+    assert "no active blueprint" in result.lower()
+
+
+async def test_retarget_blueprint_rejects_too_small_count(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import BlueprintAdopted
+
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "b1",
+        BlueprintAdopted(blueprint_id="b1", framework="six-position", target_chapter_count=20, beats=[]),
+    )
+    await proj.catch_up()
+
+    result = await commands.retarget_blueprint(events, read, 2)
+    await proj.catch_up()
+    assert "invalid" in result.lower() or "3" in result
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+
+
+async def test_retarget_blueprint_no_op_when_target_unchanged(stack):
+    events, proj, read = stack
+    from novelizer.canon.events import BlueprintAdopted
+
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "b1",
+        BlueprintAdopted(blueprint_id="b1", framework="six-position", target_chapter_count=20, beats=[]),
+    )
+    await proj.catch_up()
+
+    result = await commands.retarget_blueprint(events, read, 20)
+    await proj.catch_up()
+
+    assert "already" in result.lower() or "no change" in result.lower()
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+    # No new blueprint.retargeted event should have been appended.
+    tail = await events.events_tail(50)
+    retargeted = [e for e in tail if e.event_type == EventType.BLUEPRINT_RETARGETED]
+    assert retargeted == []
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
+
+
 async def test_plan_secret_reveal_appends_and_rejects_revealed(stack):
     events, proj, read = stack
     from novelizer.canon.events import SecretCreated, SecretRevealed
@@ -236,3 +320,46 @@ async def test_seed_story_dir_appends_seed_event_without_runtime(tmp_path):
     assert stored[0].event_type == EventType.DIRECTOR_SIGNAL_CREATED
     assert stored[0].payload["kind"] == SignalKind.seed.value
     assert stored[0].payload["body"] == "a tired thief takes one last job"
+
+
+async def test_adopt_blueprint_story_dir_appends_and_projects(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.canon.beat_templates import BEAT_TEMPLATES
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    await adopt_blueprint_story_dir(sd, "six-position", 24, genre="noir")
+
+    path = str(sd.db_path)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    try:
+        await proj.catch_up()
+        blueprint = await read.get_active_blueprint()
+        assert blueprint is not None
+        assert blueprint.framework == "six-position"
+        assert blueprint.target_chapter_count == 24
+        assert blueprint.genre == "noir"
+        beats = await read.list_beats()
+        assert [b.slug for b in beats] == [tb.slug for tb in BEAT_TEMPLATES["six-position"]]
+    finally:
+        await read.close(); await proj.close(); await events.close()
+
+
+async def test_adopt_blueprint_story_dir_rejects_unknown_framework(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    with pytest.raises(ValueError):
+        await adopt_blueprint_story_dir(sd, "not-a-real-framework", 24)
+
+
+async def test_adopt_blueprint_story_dir_rejects_short_target(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    with pytest.raises(ValueError):
+        await adopt_blueprint_story_dir(sd, "six-position", 2)

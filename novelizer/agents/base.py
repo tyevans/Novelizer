@@ -248,6 +248,9 @@ class BaseAgent:
     async def _commit_blueprint_plan(self, plan: BlueprintPlan | None) -> None:
         await intent_helpers.commit_blueprint_plan(self._committer, self.name, plan)
 
+    async def _commit_retarget_intent(self, intent, blueprint) -> None:
+        await intent_helpers.commit_retarget_intent(self._committer, self.name, intent, blueprint)
+
     async def _commit_brief_intents(
         self,
         intents: list[BriefIntent],

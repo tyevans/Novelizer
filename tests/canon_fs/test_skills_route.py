@@ -96,6 +96,19 @@ async def test_skills_ls_hides_packaging_artifacts(stack):
     assert "__pycache__" not in names
 
 
+async def test_skills_glob_hides_nested_pycache_files(stack):
+    """The hidden-entry filter must match on ANY path segment, not just the
+    basename -- otherwise aglob("**/*", ...) still surfaces compiled files
+    living inside a nested __pycache__/ directory (e.g.
+    /skills/outlining/__pycache__/foo.cpython-313.pyc), whose basename is
+    the .pyc filename, not "__pycache__"."""
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.aglob("**/*.pyc", "/skills")
+    assert result.matches == []
+
+
 async def test_skills_download_files_delegates_to_inner(stack):
     """adownload_files is a bulk READ (SkillsMiddleware uses it to fetch
     every candidate SKILL.md) and must be delegated, not refused like

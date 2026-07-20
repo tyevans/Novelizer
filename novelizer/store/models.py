@@ -171,6 +171,9 @@ class BlueprintRecord(BaseModel):
     obligatory_scenes: list[str] = Field(default_factory=list)
     active: bool = True
     note: str = ""
+    completed: bool = False
+    completed_chapter_id: str = ""
+    completed_note: str = ""
 
 
 class ChapterBriefRecord(BaseModel):

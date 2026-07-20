@@ -46,6 +46,7 @@ from novelizer.tui.widgets.feed_model import ALARM_STYLE
 DIM = "dim"
 
 WARN_STYLE = "yellow"
+SUCCESS_STYLE = "bold green"
 
 SPARK_LEVELS = "▁▂▃▄▅▆▇█"
 SHAPE_GUTTER = "tension  "  # the marker row indents by this much to align under the spark
@@ -544,10 +545,16 @@ def outline_tab(
     if blueprint is None:
         return OutlineTab([Text(OUTLINE_EMPTY, style=DIM)], 0)
 
-    header_text = f"{blueprint.framework} · target {blueprint.target_chapter_count} ch"
+    header_text = f"{blueprint.framework} · ch {len(chapters)}/{blueprint.target_chapter_count}"
     if blueprint.genre:
         header_text += f" · {blueprint.genre}"
-    lines: list[Text] = [Text(header_text, style=DIM)]
+    if blueprint.completed:
+        header_line = Text()
+        header_line.append("✓ COMPLETE · ", style=SUCCESS_STYLE)
+        header_line.append(header_text, style=DIM)
+    else:
+        header_line = Text(header_text, style=DIM)
+    lines: list[Text] = [header_line]
 
     drifts_by_id = {d.beat_id: d for d in beat_drifts(blueprint, beats, chapters)}
     late_count = 0

@@ -756,9 +756,30 @@ def test_outline_tab_empty_state_no_blueprint():
 
 def test_outline_tab_header_line():
     blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20, genre="mystery")
-    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(20)]))
-    assert tab.lines[0].plain == "three_act · target 20 ch · mystery"
+    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(12)]))
+    assert tab.lines[0].plain == "three_act · ch 12/20 · mystery"
     assert str(tab.lines[0].style) == "dim"
+
+
+def test_outline_tab_header_line_no_genre():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(12)]))
+    assert tab.lines[0].plain == "three_act · ch 12/20"
+
+
+def test_outline_tab_header_line_complete_blueprint():
+    blueprint = BlueprintRecord(
+        id="b1", framework="three_act", target_chapter_count=20, genre="mystery", completed=True,
+    )
+    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(20)]))
+    assert tab.lines[0].plain == "✓ COMPLETE · three_act · ch 20/20 · mystery"
+    assert str(tab.lines[0].style) != "dim"
+
+
+def test_outline_tab_header_line_not_complete_no_check():
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    tab = outline_tab(blueprint, [], [], [], _chapters(*[f"C{i}" for i in range(20)]))
+    assert "✓ COMPLETE" not in tab.lines[0].plain
 
 
 def test_outline_tab_beat_strip_one_of_each_glyph():

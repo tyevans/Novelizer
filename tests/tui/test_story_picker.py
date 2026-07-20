@@ -158,6 +158,104 @@ async def test_profile_select_repopulates_when_pack_changes(tmp_path):
         app.exit(None)
 
 
+async def _read_blueprint(root):
+    from novelizer.canon.projector import Projector
+    from novelizer.canon.read_store import ReadStore
+
+    path = str(StoryDirectory(root=root).db_path)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    try:
+        await proj.catch_up()
+        return await read.get_active_blueprint()
+    finally:
+        await read.close(); await proj.close(); await events.close()
+
+
+async def test_frame_fields_present_on_new_story_form(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        assert app.query_one("#new_framework", Select) is not None
+        assert app.query_one("#new_target_chapters", Input) is not None
+        assert app.query_one("#new_genre", Input) is not None
+        app.exit(None)
+
+
+async def test_create_with_framing_adopts_blueprint(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Framed Tale"
+        app.query_one("#new_framework", Select).value = "six-position"
+        app.query_one("#new_target_chapters", Input).value = "30"
+        app.query_one("#new_genre", Input).value = "noir"
+        await app._create()
+    root = app.return_value
+    assert root is not None
+    blueprint = await _read_blueprint(root)
+    assert blueprint is not None
+    assert blueprint.framework == "six-position"
+    assert blueprint.target_chapter_count == 30
+    assert blueprint.genre == "noir"
+
+
+async def test_create_without_framing_has_no_blueprint(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Unframed Tale"
+        await app._create()
+    root = app.return_value
+    assert root is not None
+    blueprint = await _read_blueprint(root)
+    assert blueprint is None
+
+
+async def test_create_with_unparseable_target_shows_error_and_stays_open(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Bad Target"
+        app.query_one("#new_framework", Select).value = "six-position"
+        app.query_one("#new_target_chapters", Input).value = "not-a-number"
+        await app._create()
+        assert "target chapters must be a number" in str(
+            app.query_one("#picker_error", Static).renderable
+        )
+        app.exit(None)
+    assert app.return_value is None
+
+
+async def test_unparseable_target_leaves_no_story_dir_so_retry_succeeds(tmp_path):
+    app = StoryPickerApp([], stories_dir=tmp_path)
+    async with app.run_test(size=(80, 50)) as pilot:
+        app.query_one("#stories", OptionList).highlighted = 0
+        await pilot.press("enter")
+        app.query_one("#new_name", Input).value = "Retry Tale"
+        app.query_one("#new_framework", Select).value = "six-position"
+        app.query_one("#new_target_chapters", Input).value = "24 ch"
+        await app._create()
+        assert "target chapters must be a number" in str(
+            app.query_one("#picker_error", Static).renderable
+        )
+        # The story must not have been created on the failed attempt, so a
+        # retry with a corrected target doesn't hit the root.exists() guard.
+        assert not (tmp_path / "retry-tale").exists()
+        app.query_one("#new_target_chapters", Input).value = "24"
+        await app._create()
+    root = app.return_value
+    assert root is not None
+    blueprint = await _read_blueprint(root)
+    assert blueprint is not None
+    assert blueprint.target_chapter_count == 24
+
+
 async def test_cancel_button_and_escape_collapse_the_form(tmp_path):
     app = StoryPickerApp([], stories_dir=tmp_path)
     async with app.run_test(size=(80, 50)) as pilot:

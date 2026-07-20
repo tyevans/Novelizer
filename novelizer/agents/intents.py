@@ -6,7 +6,7 @@ from novelizer.canon.events import (
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
     ThemeIntroduced, ThemeDeveloped,
     PromiseMade, PromiseProgressed, PromisePaid, PromiseReleased,
-    BeatSpec, BlueprintAdopted, BeatFulfilled, ChapterBriefDrafted, ChapterBriefSuperseded,
+    BeatSpec, BlueprintAdopted, BlueprintRetargeted, BeatFulfilled, ChapterBriefDrafted, ChapterBriefSuperseded,
     ThreadResolutionPlanned, SecretRevealPlanned,
     ArcDeclared, ArcPivotPlanned, ArcAdvanced, ArcResolved,
 )
@@ -17,7 +17,7 @@ from novelizer.canon.promises import slugify_promise_name
 from novelizer.canon.beat_templates import BEAT_TEMPLATES
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
+    BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.store.models import RetconRequest, RetconStatus, ChapterBriefRecord
 
@@ -480,6 +480,22 @@ async def commit_blueprint_plan(committer, agent_name: str, plan: BlueprintPlan 
             agent_name, plan.target_chapter_count,
         )
         return
+    payload = mint_blueprint(
+        plan.framework, plan.target_chapter_count, plan.genre,
+        obligatory_scenes=list(plan.obligatory_scenes), note=plan.note,
+    )
+    await committer.commit(agent_name, EventType.BLUEPRINT_ADOPTED, payload.blueprint_id, payload)
+
+
+def mint_blueprint(
+    framework: str, target_chapter_count: int, genre: str = "",
+    obligatory_scenes: list[str] | None = None, note: str = "",
+) -> BlueprintAdopted:
+    """Mint a fresh BlueprintAdopted payload: a new blueprint_id and a BeatSpec
+    for every TemplateBeat in the framework's template, with
+    `beat_id = f"{blueprint_id}-{template_beat.slug}"`. Caller validates
+    `framework` and `target_chapter_count` -- this assumes both are already
+    sound (KeyError on an unknown framework)."""
     blueprint_id = str(uuid.uuid4())
     beats = [
         BeatSpec(
@@ -490,15 +506,51 @@ async def commit_blueprint_plan(committer, agent_name: str, plan: BlueprintPlan 
             tolerance_pct=template_beat.tolerance_pct,
             expected_polarity=template_beat.expected_polarity,
         )
-        for template_beat in BEAT_TEMPLATES[plan.framework]
+        for template_beat in BEAT_TEMPLATES[framework]
     ]
+    return BlueprintAdopted(
+        blueprint_id=blueprint_id, framework=framework,
+        target_chapter_count=target_chapter_count, genre=genre,
+        beats=beats, obligatory_scenes=list(obligatory_scenes or []), note=note,
+    )
+
+
+async def commit_retarget_intent(
+    committer, agent_name: str, intent: RetargetIntent | None, blueprint,
+) -> None:
+    """Turn an agent-declared RetargetIntent into a blueprint.retargeted commit.
+
+    None is a no-op, as is the absence of an active blueprint. Dropped with
+    a logged warning when target_chapter_count < 3 (too few chapters to
+    place a beat sequence meaningfully -- mirrors commit_blueprint_plan's
+    guard), or when it equals the blueprint's current target_chapter_count
+    (the no-change guard against churn). blueprint.retargeted is
+    _NEVER_GATED (see canon/policy.py), so this commits directly regardless
+    of autonomy level.
+    """
+    if intent is None:
+        return
+    if blueprint is None:
+        logger.warning(
+            "%s: dropped retarget intent (target_chapter_count=%r) -- no active blueprint",
+            agent_name, intent.target_chapter_count,
+        )
+        return
+    if intent.target_chapter_count < 3:
+        logger.warning(
+            "%s: dropped retarget intent with target_chapter_count %r (< 3)",
+            agent_name, intent.target_chapter_count,
+        )
+        return
+    if intent.target_chapter_count == blueprint.target_chapter_count:
+        logger.warning(
+            "%s: dropped retarget intent -- target_chapter_count %r matches the current blueprint",
+            agent_name, intent.target_chapter_count,
+        )
+        return
     await committer.commit(
-        agent_name, EventType.BLUEPRINT_ADOPTED, blueprint_id,
-        BlueprintAdopted(
-            blueprint_id=blueprint_id, framework=plan.framework,
-            target_chapter_count=plan.target_chapter_count, genre=plan.genre,
-            beats=beats, obligatory_scenes=list(plan.obligatory_scenes), note=plan.note,
-        ),
+        agent_name, EventType.BLUEPRINT_RETARGETED, blueprint.id,
+        BlueprintRetargeted(blueprint_id=blueprint.id, target_chapter_count=intent.target_chapter_count),
     )
 
 

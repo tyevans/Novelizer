@@ -353,6 +353,21 @@ def plan_resolution(ctx, thread_id: str, window_lo: int, window_hi: int, note: s
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
 
 
+@cli.command("retarget")
+@click.argument("target_chapters", type=int)
+@click.pass_context
+def retarget(ctx, target_chapters: int):
+    """Retarget the active blueprint's chapter count."""
+    async def _run(rt: Runtime):
+        result = await commands.retarget_blueprint(rt.events, rt.read, target_chapters)
+        # commands.retarget_blueprint has no ok/error return type -- its
+        # success strings always start with "blueprint retargeted" (see
+        # novelizer/director/commands.py), everything else is a rejection.
+        color = "green" if result.startswith("blueprint retargeted") else "yellow"
+        console.print(f"[{color}]{result}[/{color}]")
+    asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
 @cli.command("plan-reveal")
 @click.argument("secret_id")
 @click.argument("window_lo", type=int)

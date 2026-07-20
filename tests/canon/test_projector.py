@@ -974,3 +974,93 @@ async def test_arc_resolved_absorbs_later_events(wired):
     assert arc.pivots == []
     assert arc.active is True  # resolved leaves active as-is
     await read.close()
+
+
+async def test_book_completed_folds_only_active_and_only_once(wired):
+    from novelizer.canon.events import BlueprintAdopted, BookCompleted
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20, beats=[],
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.BOOK_COMPLETED, "A", BookCompleted(
+        blueprint_id="A", chapter_id="c20", note="the room declares it done",
+    ))
+    await proj.catch_up()
+
+    active = await read.get_active_blueprint()
+    assert active is not None
+    assert active.completed is True
+    assert active.completed_chapter_id == "c20"
+    assert active.completed_note == "the room declares it done"
+
+    # Repeat while still active and already completed: no-op (fields unchanged).
+    await events.append(EventType.BOOK_COMPLETED, "A", BookCompleted(
+        blueprint_id="A", chapter_id="c21", note="again",
+    ))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active.completed_chapter_id == "c20"
+    assert active.completed_note == "the room declares it done"
+    await read.close()
+
+
+async def test_book_completed_ignores_non_active_blueprint(wired):
+    from novelizer.canon.events import BlueprintAdopted, BookCompleted
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20, beats=[],
+    ))
+    await proj.catch_up()
+    await events.append(EventType.BLUEPRINT_ADOPTED, "B", BlueprintAdopted(
+        blueprint_id="B", framework="heros_journey", target_chapter_count=24, beats=[],
+    ))
+    await proj.catch_up()
+
+    # A is now superseded -- BOOK_COMPLETED citing it must be a no-op.
+    await events.append(EventType.BOOK_COMPLETED, "A", BookCompleted(blueprint_id="A", chapter_id="c9"))
+    await proj.catch_up()
+
+    cur = await proj._conn.execute("SELECT data FROM blueprints WHERE id='A'")
+    row = await cur.fetchone()
+    assert json.loads(row[0])["completed"] is False
+
+    active = await read.get_active_blueprint()
+    assert active.id == "B"
+    assert active.completed is False
+    await read.close()
+
+
+async def test_book_completed_adopting_new_blueprint_resets_completed(wired):
+    from novelizer.canon.events import BlueprintAdopted, BookCompleted
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20, beats=[],
+    ))
+    await proj.catch_up()
+    await events.append(EventType.BOOK_COMPLETED, "A", BookCompleted(blueprint_id="A", chapter_id="c20"))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active.completed is True
+
+    # Adopting a new blueprint replaces the row entirely -- it starts uncompleted.
+    await events.append(EventType.BLUEPRINT_ADOPTED, "B", BlueprintAdopted(
+        blueprint_id="B", framework="heros_journey", target_chapter_count=24, beats=[],
+    ))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active.id == "B"
+    assert active.completed is False
+    assert active.completed_chapter_id == ""
+    assert active.completed_note == ""
+    await read.close()
