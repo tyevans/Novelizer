@@ -192,3 +192,23 @@ Turning one off reverts that agent to its legacy push-only prompt (no canon tool
 Author/Checker/chat also revert from the chapter-index map to inline prose excerpts). Use
 this if a small local model handles tool-calling poorly. Flag changes take effect on
 restart — mid-session edits are deliberately inert until then.
+
+## 9. Promise ledger & resolution windows
+
+The room keeps a ledger of *promises* — discrete planted setups (a Chekhov's gun, a
+foreshadowed image, a deliberate red herring) that owe the reader a payoff. The Author
+and Editor declare them as they write and review; nothing is required from you. Open
+promises appear in a **Ledger** section on the Threads tab (`2`), with `◇` markers and
+window badges; overdue ones surface in the alarm strip.
+
+You can set target resolution windows yourself (until the Plotter agent arrives in M8):
+
+```bash
+novelizer plan-resolution THREAD_ID 18 20 --note "pay it off at the gate"
+novelizer plan-reveal SECRET_ID 5 9
+```
+
+Windows are 1-based chapter numbers (`lo hi`; `0 0` clears). Threads past their window
+show `OVERDUE` on the board, agents get a "Promise ledger" note nudging them to pay or
+release, and three-plus resolutions targeting the same span raise a congestion warning
+before it happens.
