@@ -47,6 +47,10 @@ _NEVER_GATED = {
     EventType.PROMISE_RELEASED,
     EventType.THREAD_RESOLUTION_PLANNED,
     EventType.SECRET_REVEAL_PLANNED,
+    EventType.ARC_DECLARED,
+    EventType.ARC_PIVOT_PLANNED,
+    EventType.ARC_ADVANCED,
+    EventType.ARC_RESOLVED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

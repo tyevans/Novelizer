@@ -8,6 +8,7 @@ from novelizer.canon.events import (
     PromiseMade, PromiseProgressed, PromisePaid, PromiseReleased,
     BeatSpec, BlueprintAdopted, BeatFulfilled, ChapterBriefDrafted, ChapterBriefSuperseded,
     ThreadResolutionPlanned, SecretRevealPlanned,
+    ArcDeclared, ArcPivotPlanned, ArcAdvanced, ArcResolved,
 )
 from novelizer.canon.threads import slugify_thread_name
 from novelizer.canon.secrets import slugify_secret_name
@@ -16,7 +17,7 @@ from novelizer.canon.promises import slugify_promise_name
 from novelizer.canon.beat_templates import BEAT_TEMPLATES
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.store.models import RetconRequest, RetconStatus, ChapterBriefRecord
 
@@ -651,4 +652,81 @@ async def commit_resolution_plan_intents(
             await committer.commit(
                 agent_name, EventType.SECRET_REVEAL_PLANNED, target_id,
                 SecretRevealPlanned(id=target_id, window_lo=intent.window_lo, window_hi=intent.window_hi),
+            )
+
+
+async def commit_arc_intents(
+    committer,
+    agent_name: str,
+    intents: list[ArcIntent],
+    active_arc_ids: set[str],
+    character_ids: set[str],
+    active_beat_ids: set[str],
+    chapter_id: str = "",
+) -> None:
+    """Turn agent-declared ArcIntent entries into arc.* commits.
+
+    `declare` mints a new id via uuid.uuid4() and requires a `character_id`
+    present in `character_ids` (unknown character dropped, logged) and a
+    non-blank `arc_type` (blank dropped, logged). `plan_pivot` must cite an
+    id in `active_arc_ids` AND a `beat_id` in `active_beat_ids` -- either
+    missing drops the intent (logged), no event committed. `advance` must
+    cite an id in `active_arc_ids`; the commit carries `chapter_id`.
+    `resolve` must cite an id in `active_arc_ids` and a non-blank `outcome`;
+    either missing drops the intent (logged). No-op on an empty list.
+    """
+    for intent in intents:
+        if intent.action == "declare":
+            character_id = _normalize_id(intent.character_id)
+            if character_id not in character_ids:
+                logger.warning(
+                    "%s: dropped arc declare citing unknown character %r", agent_name, intent.character_id
+                )
+                continue
+            if not intent.arc_type:
+                logger.warning(
+                    "%s: dropped arc declare for %r with blank arc_type", agent_name, character_id
+                )
+                continue
+            arc_id = str(uuid.uuid4())
+            await committer.commit(
+                agent_name, EventType.ARC_DECLARED, arc_id,
+                ArcDeclared(
+                    arc_id=arc_id, character_id=character_id, arc_type=intent.arc_type,
+                    ghost=intent.ghost, lie=intent.lie, truth=intent.truth,
+                    want=intent.want, need=intent.need, note=intent.note,
+                ),
+            )
+            continue
+        arc_id = _normalize_id(intent.id)
+        if arc_id not in active_arc_ids:
+            logger.warning(
+                "%s: dropped arc %s citing unknown/inactive id %r", agent_name, intent.action, intent.id
+            )
+            continue
+        if intent.action == "plan_pivot":
+            beat_id = _normalize_id(intent.beat_id)
+            if beat_id not in active_beat_ids:
+                logger.warning(
+                    "%s: dropped arc pivot for %r citing unknown beat %r", agent_name, arc_id, intent.beat_id
+                )
+                continue
+            await committer.commit(
+                agent_name, EventType.ARC_PIVOT_PLANNED, arc_id,
+                ArcPivotPlanned(arc_id=arc_id, beat_id=beat_id, description=intent.note),
+            )
+        elif intent.action == "advance":
+            await committer.commit(
+                agent_name, EventType.ARC_ADVANCED, arc_id,
+                ArcAdvanced(arc_id=arc_id, chapter_id=chapter_id, note=intent.note),
+            )
+        elif intent.action == "resolve":
+            if not intent.outcome:
+                logger.warning(
+                    "%s: dropped arc resolve for %r with blank outcome", agent_name, arc_id
+                )
+                continue
+            await committer.commit(
+                agent_name, EventType.ARC_RESOLVED, arc_id,
+                ArcResolved(arc_id=arc_id, chapter_id=chapter_id, outcome=intent.outcome, note=intent.note),
             )

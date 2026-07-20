@@ -7,8 +7,9 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent
-from novelizer.canon.events import SecretCreated
+from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent, ArcIntent
+from novelizer.agents.character_keeper import SYSTEM_PROMPT
+from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared
 from novelizer.store.models import Character, Chapter, RetconStatus
 from novelizer.agents.base import DEFAULT_PASS_REMARK
 
@@ -449,3 +450,82 @@ def test_build_character_keeper_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+def test_system_prompt_mentions_arc_task():
+    assert "arc" in SYSTEM_PROMPT.lower()
+
+
+async def test_declare_arc_intent_projects_active_arc_for_character(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await proj.catch_up()
+    out = KeeperOutput(
+        arc_intents=[ArcIntent(action="declare", character_id="mara", arc_type="positive", lie="I am alone")],
+    )
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    arcs = await read.list_arcs(active_only=True)
+    assert len(arcs) == 1
+    assert arcs[0].character_id == "mara"
+    assert arcs[0].arc_type == "positive"
+    assert arcs[0].lie == "I am alone"
+
+
+async def test_resolve_arc_intent_citing_unknown_id_is_dropped(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await proj.catch_up()
+    out = KeeperOutput(
+        arc_intents=[ArcIntent(action="resolve", id="nonexistent", outcome="truth_embraced")],
+    )
+    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    await keeper.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type.startswith("arc.")] == []
+
+
+async def test_work_prompt_includes_active_arcs_block(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive", lie="I am alone"),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Mara: positive arc (id:arc1) lie='I am alone' advances=0" in sent
+
+
+async def test_work_prompt_includes_available_beat_ids_when_beats_exist(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(
+        EventType.ARC_DECLARED, "arc1",
+        ArcDeclared(arc_id="arc1", character_id="mara", arc_type="positive"),
+    )
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="six-position", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-midpoint", "slug": "midpoint", "name": "Midpoint",
+                    "ideal_pct": 0.5, "tolerance_pct": 0.1, "expected_polarity": "flip",
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Available beat ids for pivots: bp1-midpoint" in sent

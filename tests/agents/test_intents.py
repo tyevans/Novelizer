@@ -2,11 +2,11 @@ import pytest
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
     commit_promise_intents, commit_blueprint_plan, commit_brief_intents, commit_beat_intents,
-    commit_resolution_plan_intents,
+    commit_resolution_plan_intents, commit_arc_intents,
 )
 from novelizer.agents.schemas import (
     ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.canon.events import EventType
 from novelizer.canon.beat_templates import BEAT_TEMPLATES
@@ -473,3 +473,154 @@ async def test_resolution_plan_unknown_id_dropped(caplog):
     )
     assert len(c.commits) == 0
     assert any("ghost" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_declare_mints_and_commits():
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="declare", character_id="mara", arc_type="positive", lie="I am alone")],
+        active_arc_ids=set(), character_ids={"mara"}, active_beat_ids=set(),
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert (name, event_type) == ("character_keeper", EventType.ARC_DECLARED)
+    assert payload.character_id == "mara"
+    assert payload.arc_type == "positive"
+    assert payload.lie == "I am alone"
+    assert payload.arc_id == agg
+
+
+@pytest.mark.asyncio
+async def test_arc_declare_unknown_character_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="declare", character_id="ghost", arc_type="positive")],
+        active_arc_ids=set(), character_ids=set(), active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("ghost" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_declare_blank_arc_type_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="declare", character_id="mara", arc_type="")],
+        active_arc_ids=set(), character_ids={"mara"}, active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("arc_type" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_plan_pivot_requires_active_arc_and_beat():
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="plan_pivot", id="arc1", beat_id="beat1", note="turns here")],
+        active_arc_ids={"arc1"}, character_ids=set(), active_beat_ids={"beat1"},
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert event_type == EventType.ARC_PIVOT_PLANNED
+    assert payload.arc_id == "arc1"
+    assert payload.beat_id == "beat1"
+    assert payload.description == "turns here"
+
+
+@pytest.mark.asyncio
+async def test_arc_plan_pivot_unknown_arc_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="plan_pivot", id="nope", beat_id="beat1")],
+        active_arc_ids=set(), character_ids=set(), active_beat_ids={"beat1"},
+    )
+    assert len(c.commits) == 0
+    assert any("nope" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_plan_pivot_unknown_beat_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="plan_pivot", id="arc1", beat_id="nope")],
+        active_arc_ids={"arc1"}, character_ids=set(), active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("nope" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_advance_requires_active_arc_and_carries_chapter_id():
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="advance", id="arc1", note="took the leap")],
+        active_arc_ids={"arc1"}, character_ids=set(), active_beat_ids=set(),
+        chapter_id="ch1",
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert event_type == EventType.ARC_ADVANCED
+    assert payload.arc_id == "arc1"
+    assert payload.chapter_id == "ch1"
+    assert payload.note == "took the leap"
+
+
+@pytest.mark.asyncio
+async def test_arc_advance_unknown_arc_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="advance", id="nope")],
+        active_arc_ids=set(), character_ids=set(), active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("nope" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_resolve_requires_active_arc_and_outcome():
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="resolve", id="arc1", outcome="truth_embraced", note="she sees now")],
+        active_arc_ids={"arc1"}, character_ids=set(), active_beat_ids=set(),
+        chapter_id="ch2",
+    )
+    assert len(c.commits) == 1
+    name, event_type, agg, payload = c.commits[0]
+    assert event_type == EventType.ARC_RESOLVED
+    assert payload.arc_id == "arc1"
+    assert payload.outcome == "truth_embraced"
+    assert payload.chapter_id == "ch2"
+
+
+@pytest.mark.asyncio
+async def test_arc_resolve_blank_outcome_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="resolve", id="arc1", outcome="")],
+        active_arc_ids={"arc1"}, character_ids=set(), active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("outcome" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_arc_resolve_unknown_arc_dropped(caplog):
+    c = FakeCommitter()
+    await commit_arc_intents(
+        c, "character_keeper",
+        [ArcIntent(action="resolve", id="nope", outcome="truth_embraced")],
+        active_arc_ids=set(), character_ids=set(), active_beat_ids=set(),
+    )
+    assert len(c.commits) == 0
+    assert any("nope" in r.message for r in caplog.records)

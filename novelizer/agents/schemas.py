@@ -201,6 +201,24 @@ class ResolutionPlanIntent(BaseModel):
     note: str = ""
 
 
+class ArcIntent(BaseModel):
+    """One agent-declared character-arc action. `declare` mints (character_id
+    required; system mints the arc id); plan_pivot/advance/resolve cite an
+    existing ACTIVE arc id exactly."""
+    action: Literal["declare", "plan_pivot", "advance", "resolve"]
+    character_id: str = ""
+    id: str = ""
+    arc_type: Literal["", "positive", "flat", "disillusionment", "fall", "corruption"] = ""
+    ghost: str = ""
+    lie: str = ""
+    truth: str = ""
+    want: str = ""
+    need: str = ""
+    beat_id: str = ""
+    outcome: Literal["", "truth_embraced", "lie_embraced", "truth_tragic", "world_changed"] = ""
+    note: str = ""
+
+
 class RetconDraft(BaseModel):
     description: str
     conflicting_entry_ids: list[str] = Field(default_factory=list)
@@ -212,6 +230,7 @@ class KeeperOutput(BaseModel):
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     retcon_requests: list[RetconDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    arc_intents: list[ArcIntent] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 
