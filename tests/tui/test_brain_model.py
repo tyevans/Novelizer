@@ -731,15 +731,19 @@ def test_causeway_normal_edge_arrow_is_dim():
 
 
 def test_alarm_strip_matches_spec_format():
-    assert alarm_strip(1, 2, 0, 1, 0).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline"
+    assert alarm_strip(1, 2, 0, 1, 0, 0).plain == "Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs"
 
 
 def test_alarm_strip_quiet_shows_bare_labels():
-    assert alarm_strip(0, 0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause · Outline"
+    assert alarm_strip(0, 0, 0, 0, 0, 0).plain == "Shape · Threads · Secrets · Cause · Outline · Arcs"
 
 
 def test_alarm_strip_outline_segment_shows_count():
-    assert alarm_strip(0, 0, 0, 0, 3).plain == "Shape · Threads · Secrets · Cause · Outline ⚠3"
+    assert alarm_strip(0, 0, 0, 0, 3, 0).plain == "Shape · Threads · Secrets · Cause · Outline ⚠3 · Arcs"
+
+
+def test_alarm_strip_arcs_segment_shows_count():
+    assert alarm_strip(0, 0, 0, 0, 0, 2).plain == "Shape · Threads · Secrets · Cause · Outline · Arcs ⚠2"
 
 
 def test_outline_tab_empty_state_no_blueprint():
@@ -868,6 +872,121 @@ def test_outline_tab_ignores_superseded_and_fulfilled_briefs():
 
 
 def test_alarm_strip_alarm_segments_are_alarm_styled():
-    strip = alarm_strip(1, 0, 0, 0, 0)
+    strip = alarm_strip(1, 0, 0, 0, 0, 0)
     spans = [(strip.plain[s.start:s.end], str(s.style)) for s in strip.spans]
     assert (" ⚠1", ALARM_STYLE) in spans
+
+
+from novelizer.store.models import ArcPivot, ArcRecord
+from novelizer.tui.widgets.brain_model import ARCS_EMPTY, DIM, ArcsTab, arcs_tab
+
+
+def test_arcs_tab_empty_state():
+    tab = arcs_tab([], [], [], [], None)
+    assert [t.plain for t in tab.lines] == [ARCS_EMPTY]
+    assert tab.lines[0].style == DIM
+    assert tab.alarm_count == 0
+
+
+def test_arcs_tab_healthy_arc_glyph_and_detail_line():
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters("One", "Two")
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", lie="I am unworthy",
+        truth="I belong", active=True, resolved=False, advance_count=2, last_chapter_id="c2",
+    )
+    tab = arcs_tab([arc], chars, chs, [], None)
+    assert tab.lines[0].plain == "· Elara · positive"
+    assert tab.lines[1].plain == "lie 'I am unworthy' → truth 'I belong' · advances 2 · last ch 2 \"Two\""
+    assert tab.lines[1].style == DIM
+    assert tab.alarm_count == 0
+
+
+def test_arcs_tab_stagnant_arc_alarm_glyph():
+    from novelizer.brain.arc_alignment import STAGNATION_CHAPTERS
+
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters(*[f"Ch{i}" for i in range(STAGNATION_CHAPTERS)])
+    arc = ArcRecord(id="a1", character_id="ch1", arc_type="positive", active=True, resolved=False)
+    tab = arcs_tab([arc], chars, chs, [], None)
+    assert tab.lines[0].plain == "! Elara · positive"
+    assert tab.lines[0].style == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_arcs_tab_resolved_contradiction_full_and_alarm():
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters("One")
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", outcome="lie_embraced",
+        active=False, resolved=True,
+    )
+    tab = arcs_tab([arc], chars, chs, [], None)
+    assert tab.lines[0].plain == "⚠ Elara · positive"
+    assert tab.lines[0].style == ALARM_STYLE
+    assert tab.alarm_count == 1
+
+
+def test_arcs_tab_resolved_consistent_folds_to_one_dim_line():
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters("One")
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", outcome="truth_embraced",
+        active=False, resolved=True,
+    )
+    tab = arcs_tab([arc], chars, chs, [], None)
+    assert len(tab.lines) == 1
+    assert tab.lines[0].plain == "✓ Elara · positive"
+    assert tab.lines[0].style == DIM
+    assert tab.alarm_count == 0
+
+
+def test_arcs_tab_pivot_lines_missed_fulfilled_pending():
+    chars = [Character(id="ch1", name="Elara")]
+    chs = _chapters(*[f"Ch{i}" for i in range(1, 12)])
+    blueprint = BlueprintRecord(id="b1", framework="three_act", target_chapter_count=20)
+    beats = [
+        BeatRecord(id="beat_missed", blueprint_id="b1", slug="missed", name="Missed Beat",
+                   ideal_pct=0.35, tolerance_pct=0.05),
+        BeatRecord(id="beat_fulfilled", blueprint_id="b1", slug="fulfilled", name="Fulfilled Beat",
+                   ideal_pct=0.1, tolerance_pct=0.05, fulfilled_by_chapter_id="c2"),
+        BeatRecord(id="beat_pending", blueprint_id="b1", slug="pending", name="Pending Beat",
+                   ideal_pct=0.9, tolerance_pct=0.05),
+    ]
+    arc = ArcRecord(
+        id="a1", character_id="ch1", arc_type="positive", active=True, resolved=False,
+        last_chapter_id="c4",
+        pivots=[
+            ArcPivot(beat_id="beat_missed"),
+            ArcPivot(beat_id="beat_fulfilled"),
+            ArcPivot(beat_id="beat_pending"),
+        ],
+    )
+    tab = arcs_tab([arc], chars, chs, beats, blueprint)
+    pivot_lines = {line.plain.split("@ch")[0].strip(): line for line in tab.lines[2:]}
+    missed = [l for l in tab.lines if "Missed Beat" in l.plain][0]
+    fulfilled = [l for l in tab.lines if "Fulfilled Beat" in l.plain][0]
+    pending = [l for l in tab.lines if "Pending Beat" in l.plain][0]
+    assert missed.plain.endswith("missed")
+    assert missed.style == ALARM_STYLE
+    assert fulfilled.plain.endswith("✓")
+    assert pending.plain.endswith("pending")
+    assert pending.style == DIM
+    assert tab.alarm_count == 2  # stagnant (7 chapters since last advance) + missed pivot
+
+
+def test_arcs_tab_alarm_count_equals_len_of_arc_findings():
+    from novelizer.brain.arc_alignment import arc_findings
+
+    chars = [Character(id="ch1", name="Elara"), Character(id="ch2", name="Bram")]
+    chs = _chapters(*[f"Ch{i}" for i in range(1, 6)])
+    arcs = [
+        ArcRecord(id="a1", character_id="ch1", arc_type="positive", active=True, resolved=False),
+        ArcRecord(
+            id="a2", character_id="ch2", arc_type="fall", outcome="truth_embraced",
+            active=False, resolved=True,
+        ),
+    ]
+    tab = arcs_tab(arcs, chars, chs, [], None)
+    assert tab.alarm_count == len(arc_findings(arcs, chars, chs, [], None))
+    assert tab.alarm_count > 0
