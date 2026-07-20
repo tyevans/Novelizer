@@ -247,6 +247,8 @@ async def test_retarget_blueprint_rejects_too_small_count(stack):
     result = await commands.retarget_blueprint(events, read, 2)
     await proj.catch_up()
     assert "invalid" in result.lower() or "3" in result
+    blueprint = await read.get_active_blueprint()
+    assert blueprint.target_chapter_count == 20
 
 
 async def test_retarget_blueprint_no_op_when_target_unchanged(stack):
