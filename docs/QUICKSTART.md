@@ -239,3 +239,17 @@ draft. The Shape tab (`1`) now overlays the blueprint's target tension curve (th
 `plan` row) under the actual sparkline — divergence raises "tension off-plan" callouts.
 Agents can read the whole plan themselves under `/outline/` (blueprint.md, beats.md,
 briefs/, threads-plan.md, ledger.md) through their canon file tools.
+
+## 11. Character arcs
+
+The Character Keeper now declares each significant character's **planned arc**: the lie
+they believe, what they want versus what they need, and one of five arc types (positive,
+flat, disillusionment, fall, corruption). Pivots pin to blueprint beats; advances record
+evidence the arc moved; resolution declares how it settled. The **Arcs board** (Brain tab
+`6`) shows each active arc's lane — lie → truth, advances, pivots with their beat windows —
+and alarms when an arc goes stagnant, misses a pivot window, or resolves against its
+declared type (a fall arc that ends in `truth_embraced` is flagged for you to adjudicate,
+not auto-corrected: the story may have earned it). The Plotter reads the same findings and
+routes stagnant characters into upcoming chapter briefs; it also wakes early when a beat
+goes late. The freeform `arc_status` line on each character remains the Keeper's observed
+snapshot — the arc aggregate is the plan it's measured against.
