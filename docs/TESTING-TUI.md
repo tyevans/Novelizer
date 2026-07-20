@@ -86,6 +86,20 @@ regression:
    load-immune — green there plus base-parity on the pilot failures is enough to
    clear a rendering-only change; re-run the pilot suite when the box is quiet.
 
+**Compare identical scopes, and count the load you are generating yourself
+(2026-07-20).** Two traps caught a full agent-prompt merge for half an hour:
+
+- *Your own background runs are the load.* Several concurrent `pytest` runs from
+  one Claude session reproduce the symptom exactly — 8 pilot failures at
+  `tests/tui` in 273s, then 275/275 green in 133s once the others finished, same
+  commit. Wall-clock roughly doubling versus a known-good run is the tell. Wait
+  for your own runs to drain before believing a red pilot suite.
+- *Scope must match on both sides.* Running four files at base (16 tests, green)
+  against the whole `tests/tui` directory on the branch (275 tests, 8 red) looks
+  like a regression and is not a comparison. Run the same path at both commits;
+  a single pilot test also passes alone while failing in a directory run, so
+  isolation proves nothing either way.
+
 ## Pilot-test conventions worth keeping
 
 - Widget visibility asserts via the `display` property work whether visibility is set
