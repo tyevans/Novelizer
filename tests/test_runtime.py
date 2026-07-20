@@ -123,13 +123,14 @@ async def test_full_pipeline_runs_under_runtime(settings):
         "continuity_checker": ScriptedRunner(ContinuityOutput()),
         "retconner": ScriptedRunner(RetconAmendments()),
         "structure_analyst": _FakeAgentRunner(),
+        "plotter": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
     try:
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor", "continuity_checker",
-            "retconner", "structure_analyst", "muse",
+            "retconner", "structure_analyst", "muse", "plotter",
         }
         # Drive each agent once directly (deterministic), projecting between.
         for name in ["world_architect", "author", "editor"]:
@@ -264,7 +265,7 @@ def _all_fake_runners():
         name: _FakeAgentRunner()
         for name in (
             "author", "world_architect", "character_keeper", "editor",
-            "continuity_checker", "retconner", "structure_analyst",
+            "continuity_checker", "retconner", "structure_analyst", "plotter",
         )
     }
 
@@ -281,6 +282,7 @@ async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor",
             "continuity_checker", "retconner", "structure_analyst", "muse",
+            "plotter",
         }
         assert rt.structure_analyst is not None
         assert rt.structure_analyst._committer is rt.committer
@@ -621,6 +623,7 @@ _PHASE_B_AGENTS = [
     ("editor", "editor_tools_enabled", "novelizer.runtime.build_editor_runner"),
     ("retconner", "retconner_tools_enabled", "novelizer.runtime.build_retconner_runner"),
     ("structure_analyst", "structure_analyst_tools_enabled", "novelizer.runtime.build_structure_analyst_runner"),
+    ("plotter", "plotter_tools_enabled", "novelizer.runtime.build_plotter_runner"),
 ]
 
 

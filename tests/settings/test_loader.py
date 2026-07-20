@@ -99,6 +99,7 @@ def test_precedence_property(global_d, story_d, env_d):
     "editor_tools_enabled",
     "retconner_tools_enabled",
     "structure_analyst_tools_enabled",
+    "plotter_tools_enabled",
 ])
 def test_phase_b_agent_tools_enabled_precedence(flag_name):
     """Phase-B per-agent tools_enabled flags follow env > story > global > default precedence."""

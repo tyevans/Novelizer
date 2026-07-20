@@ -130,6 +130,7 @@ def test_parse_story_accepts_chat_tools_enabled():
     "editor_tools_enabled",
     "retconner_tools_enabled",
     "structure_analyst_tools_enabled",
+    "plotter_tools_enabled",
 ])
 def test_parse_story_accepts_phase_b_agent_tools_enabled(flag_name):
     """Phase-B per-agent tools_enabled flags can be set in story.toml."""

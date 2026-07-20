@@ -10,7 +10,7 @@ class _R:
 def _runners():
     names = [
         "author", "world_architect", "character_keeper", "editor",
-        "continuity_checker", "retconner", "structure_analyst",
+        "continuity_checker", "retconner", "structure_analyst", "plotter",
     ]
     return {n: _R() for n in names}
 
@@ -32,6 +32,15 @@ async def test_cadence_applies_live(tmp_path):
     assert set(result["applied"]) == {"author_interval", "default_agent_interval"}
     assert result["restart_required"] == []
     assert rt.settings.author_interval == 30
+    await rt.close()
+
+
+async def test_plotter_interval_applies_live(tmp_path):
+    rt = await _started_runtime(tmp_path, plotter_interval=240)
+    result = rt.apply_settings(rt.settings.model_copy(update={"plotter_interval": 30}))
+    assert rt.plotter.interval == 30
+    assert "plotter_interval" in result["applied"]
+    assert rt.settings.plotter_interval == 30
     await rt.close()
 
 
@@ -182,9 +191,40 @@ async def test_rebuild_keeps_world_architect_tooled_when_flags_on(tmp_path, monk
     monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
     monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
     monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_plotter_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
 
     # Simulate a live flag flip without a restart -- pinning must ignore it.
     rt.settings = rt.settings.model_copy(update={"world_architect_tools_enabled": False})
+    rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is rt._canon_backend
+    assert seen_kwargs[0]["tools"] is rt._canon_tools
+    await rt.close()
+
+
+async def test_rebuild_keeps_plotter_tooled_when_flags_on(tmp_path, monkeypatch):
+    """CPT-M8a: apply_settings' agent_temperature rebuild path must keep the
+    Plotter's tooling pinned at start(), same as the other phase-b agents."""
+    rt = await _started_runtime(tmp_path, agent_temperature=0.8, plotter_tools_enabled=True)
+    rt._runners = None
+    rt._runner = None
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _R()
+
+    monkeypatch.setattr("novelizer.runtime.build_world_architect_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_plotter_runner", _spy_build_plotter_runner)
+
     rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
 
     assert len(seen_kwargs) == 1

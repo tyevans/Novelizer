@@ -93,9 +93,16 @@ def test_chat_tools_enabled_default():
     "editor_tools_enabled",
     "retconner_tools_enabled",
     "structure_analyst_tools_enabled",
+    "plotter_tools_enabled",
 ])
 def test_phase_b_agent_tools_enabled_defaults(flag_name):
     """Phase-B per-agent tools_enabled flags default to True and are story-overridable."""
     s = EffectiveSettings()
     assert getattr(s, flag_name) is True
     assert flag_name in STORY_OVERRIDABLE_KEYS
+
+
+def test_plotter_interval_default_is_240():
+    s = EffectiveSettings()
+    assert s.plotter_interval == 240
+    assert "plotter_interval" in STORY_OVERRIDABLE_KEYS

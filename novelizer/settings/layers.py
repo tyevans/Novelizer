@@ -37,6 +37,7 @@ class GlobalConfig(BaseModel):
     default_agent_interval: int | None = None
     continuity_interval: int | None = None
     structure_analyst_interval: int | None = None
+    plotter_interval: int | None = None
     muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
@@ -54,6 +55,7 @@ class GlobalConfig(BaseModel):
     editor_tools_enabled: bool | None = None
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
+    plotter_tools_enabled: bool | None = None
 
 
 class StoryConfig(BaseModel):
@@ -72,6 +74,7 @@ class StoryConfig(BaseModel):
     default_agent_interval: int | None = None
     continuity_interval: int | None = None
     structure_analyst_interval: int | None = None
+    plotter_interval: int | None = None
     muse_interval: int | None = None
     projector_interval: float | None = None
     prior_chapter_summary_chars: int | None = None
@@ -88,6 +91,7 @@ class StoryConfig(BaseModel):
     editor_tools_enabled: bool | None = None
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
+    plotter_tools_enabled: bool | None = None
 
 
 def global_config_path() -> Path:
