@@ -6,7 +6,6 @@ from novelizer.runtime import Runtime
 from novelizer.canon.events import EventType, SecretCreated
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.chat.schemas import ChatReply
-from novelizer.chat.service import ChatService
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent
 from novelizer.store.models import Chapter
 
@@ -125,44 +124,40 @@ async def test_gated_intent_becomes_proposal(db_path):
 
 
 @pytest.mark.asyncio
-async def test_story_context_pull_mode_false_keeps_prose_excerpts(db_path):
+async def test_story_context_default_mode_uses_recent_chapter_excerpts(db_path):
     rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    # Legacy mode under test: CPT-M5's runtime wiring flips pull_mode on by
+    # default (chat_tools_enabled=True), so pin it off explicitly here.
+    rt.chat.pull_mode = False
     try:
         await rt.events.append(
             EventType.CHAPTER_CREATED, "c1",
-            Chapter(id="c1", title="One", prose="secret prose text like a grudge"),
+            Chapter(id="c1", title="The Salt Road", prose="Once the tide receded, the road appeared."),
         )
         await rt.projector.catch_up()
-        service = ChatService(
-            rt.events, rt.read, rt.committer, rt._chat_runner_for,
-            lambda name: rt.voice_pack.agent_personalities.get(name, ""),
-        )
-        context = await service._story_context()
-        assert "secret prose text" in context
+        context = await rt.chat._story_context()
+        assert "Recent chapters:" in context
         assert "Chapter index:" not in context
+        assert "The Salt Road" in context
     finally:
         await rt.close()
 
 
 @pytest.mark.asyncio
-async def test_story_context_pull_mode_true_replaces_prose_with_chapter_map(db_path):
+async def test_story_context_pull_mode_uses_chapter_index_no_prose_leak(db_path):
     rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = True
     try:
         await rt.events.append(
             EventType.CHAPTER_CREATED, "c1",
-            Chapter(id="c1", title="One", prose="secret prose text like a grudge"),
+            Chapter(id="c1", title="The Salt Road", prose="SECRET-PROSE-TEXT should not leak."),
         )
         await rt.projector.catch_up()
-        service = ChatService(
-            rt.events, rt.read, rt.committer, rt._chat_runner_for,
-            lambda name: rt.voice_pack.agent_personalities.get(name, ""),
-            pull_mode=True,
-        )
-        context = await service._story_context()
-        assert "secret prose text" not in context
+        context = await rt.chat._story_context()
         assert "Chapter index:" in context
-        # map line shape pinned by brain.context.chapter_map_note
-        assert "cast:" in context
+        assert "Recent chapters:" not in context
+        assert "- [c1] 'The Salt Road' (draft) cast: none" in context
+        assert "SECRET-PROSE-TEXT" not in context
     finally:
         await rt.close()
 

@@ -81,3 +81,40 @@ async def test_commit_emits_remark_when_feed_note_present(stack):
     assert len(remarks) == 1
     assert remarks[0].payload["agent_name"] == "world_architect"
     assert remarks[0].payload["note"] == "Another corner of the map, filled in."
+
+
+class _FakeSettings:
+    agent_model = "gpt-4o-mini"
+    llm_base_url = None
+    llm_api_key = "test-key"
+    agent_temperature = 0.7
+    llm_max_tokens = None
+
+
+def test_build_world_architect_runner_without_backend_stays_constructible():
+    from novelizer.agents.world_architect import build_world_architect_runner
+
+    runner = build_world_architect_runner(_FakeSettings())
+    assert runner is not None
+
+
+def test_build_world_architect_runner_with_backend_uses_retrieval_note_base():
+    from novelizer.agents.world_architect import build_world_architect_runner, SYSTEM_PROMPT
+    from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_world_architect_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner is not None
+    assert RETRIEVAL_NOTE_BASE.strip() != ""
+    assert "chapter list below" not in RETRIEVAL_NOTE_BASE
+    assert (SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE).endswith(RETRIEVAL_NOTE_BASE)
+
+
+def test_build_world_architect_runner_with_backend_bounds_recursion():
+    from novelizer.agents.world_architect import build_world_architect_runner
+    from novelizer.canon_fs.backend import CanonBackend
+
+    backend = CanonBackend(read_store=None)
+    runner = build_world_architect_runner(_FakeSettings(), backend=backend, tools=[])
+    assert runner.config.get("recursion_limit") == 50

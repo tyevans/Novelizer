@@ -81,7 +81,21 @@ def test_author_and_checker_tools_enabled_defaults():
     assert "checker_tools_enabled" in STORY_OVERRIDABLE_KEYS
 
 
-def test_chat_tools_enabled_defaults_true_and_is_story_overridable():
+def test_chat_tools_enabled_default():
     s = EffectiveSettings()
     assert s.chat_tools_enabled is True
     assert "chat_tools_enabled" in STORY_OVERRIDABLE_KEYS
+
+
+@pytest.mark.parametrize("flag_name", [
+    "world_architect_tools_enabled",
+    "character_keeper_tools_enabled",
+    "editor_tools_enabled",
+    "retconner_tools_enabled",
+    "structure_analyst_tools_enabled",
+])
+def test_phase_b_agent_tools_enabled_defaults(flag_name):
+    """Phase-B per-agent tools_enabled flags default to True and are story-overridable."""
+    s = EffectiveSettings()
+    assert getattr(s, flag_name) is True
+    assert flag_name in STORY_OVERRIDABLE_KEYS

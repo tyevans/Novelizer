@@ -119,6 +119,20 @@ def test_parse_story_accepts_author_and_checker_tools_enabled():
     assert cfg.checker_tools_enabled is False
 
 
-def test_chat_tools_enabled_flows_through_layers():
-    assert GlobalConfig(chat_tools_enabled=False).chat_tools_enabled is False
-    assert StoryConfig(chat_tools_enabled=False).chat_tools_enabled is False
+def test_parse_story_accepts_chat_tools_enabled():
+    cfg = parse_story({"chat_tools_enabled": False}, source="s.toml")
+    assert cfg.chat_tools_enabled is False
+
+
+@pytest.mark.parametrize("flag_name", [
+    "world_architect_tools_enabled",
+    "character_keeper_tools_enabled",
+    "editor_tools_enabled",
+    "retconner_tools_enabled",
+    "structure_analyst_tools_enabled",
+])
+def test_parse_story_accepts_phase_b_agent_tools_enabled(flag_name):
+    """Phase-B per-agent tools_enabled flags can be set in story.toml."""
+    cfg = parse_story({flag_name: False}, source="s.toml")
+    assert getattr(cfg, flag_name) is False
+    assert flag_name in STORY_OVERRIDABLE_KEYS

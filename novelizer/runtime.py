@@ -115,15 +115,16 @@ class Runtime:
         if self._runners is not None and key in self._runners:
             return self._runners[key]
         if key not in self._chat_runner_cache:
-            if self.settings.chat_tools_enabled:
+            backend = getattr(self, "_canon_backend", None)
+            tools = getattr(self, "_canon_tools", None)
+            pull_mode = self.chat is not None and self.chat.pull_mode
+            if pull_mode and backend is not None and tools is not None:
                 self._chat_runner_cache[key] = build_chat_runner(
                     self.settings, agent_name, callbacks=self._llm_callbacks,
-                    backend=self._canon_backend, tools=self._canon_tools,
+                    backend=backend, tools=tools,
                 )
             else:
-                self._chat_runner_cache[key] = build_chat_runner(
-                    self.settings, agent_name, callbacks=self._llm_callbacks,
-                )
+                self._chat_runner_cache[key] = build_chat_runner(self.settings, agent_name)
         return self._chat_runner_cache[key]
 
     async def start(self) -> None:
@@ -153,6 +154,13 @@ class Runtime:
         personalities = self.voice_pack.agent_personalities
         s = self.settings
         self._canon_backend, self._canon_tools = self._phase_a_toolkit()
+        self._tooling_pinned = {
+            "world_architect": s.world_architect_tools_enabled,
+            "character_keeper": s.character_keeper_tools_enabled,
+            "editor": s.editor_tools_enabled,
+            "retconner": s.retconner_tools_enabled,
+            "structure_analyst": s.structure_analyst_tools_enabled,
+        }
         provenance = {
             "model": s.author_model,
             "temperature": s.author_temperature,
@@ -168,17 +176,20 @@ class Runtime:
             staleness_threshold_chapters=s.staleness_threshold_chapters,
             pull_mode=s.author_tools_enabled,
         )
+        world_architect_builder = self._tooled(build_world_architect_runner, s.world_architect_tools_enabled)
         self.world_architect = WorldArchitect(
-            self._runner_for("world_architect", build_world_architect_runner), self.read, self.committer,
+            self._runner_for("world_architect", world_architect_builder), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("world_architect", ""),
         )
+        character_keeper_builder = self._tooled(build_character_keeper_runner, s.character_keeper_tools_enabled)
         self.character_keeper = CharacterKeeper(
-            self._runner_for("character_keeper", build_character_keeper_runner), self.read, self.committer,
+            self._runner_for("character_keeper", character_keeper_builder), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("character_keeper", ""),
             prose_chars=s.keeper_prose_chars,
         )
+        editor_builder = self._tooled(build_editor_runner, s.editor_tools_enabled)
         self.editor = Editor(
-            self._runner_for("editor", build_editor_runner), self.read, self.committer,
+            self._runner_for("editor", editor_builder), self.read, self.committer,
             interval=s.default_agent_interval, casting_note=casting_note, personality=personalities.get("editor", ""),
             sag_spike_delta=s.sag_spike_delta,
         )
@@ -190,12 +201,14 @@ class Runtime:
             interval=s.continuity_interval, personality=personalities.get("continuity_checker", ""),
             pull_mode=s.checker_tools_enabled,
         )
+        retconner_builder = self._tooled(build_retconner_runner, s.retconner_tools_enabled)
         self.retconner = Retconner(
-            self._runner_for("retconner", build_retconner_runner), self.read, self.committer,
+            self._runner_for("retconner", retconner_builder), self.read, self.committer,
             interval=s.default_agent_interval, personality=personalities.get("retconner", ""),
         )
+        structure_analyst_builder = self._tooled(build_structure_analyst_runner, s.structure_analyst_tools_enabled)
         self.structure_analyst = StructureAnalyst(
-            self._runner_for("structure_analyst", build_structure_analyst_runner), self.read, self.committer,
+            self._runner_for("structure_analyst", structure_analyst_builder), self.read, self.committer,
             interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
         )
         self.muse = Muse(
@@ -261,11 +274,6 @@ class Runtime:
         errors: list[str] = []
         stored = new.model_copy(update={k: getattr(old, k) for k in restart}) if restart else new
 
-        if "chat_tools_enabled" in changed:
-            self._chat_runner_cache.clear()
-            if self.chat is not None:
-                self.chat._pull_mode = stored.chat_tools_enabled
-
         if "voice_pack" in changed or "prose_profile" in changed:
             try:
                 new_pack = load_voice_pack(new.voice_pack)
@@ -295,14 +303,22 @@ class Runtime:
             author_builder = self._tooled(build_author_runner, self.author.pull_mode)
             self.author._runner = author_builder(stored, callbacks=self._llm_callbacks)
         if "agent_temperature" in changed and rebuild:
-            self.world_architect._runner = build_world_architect_runner(stored, callbacks=self._llm_callbacks)
-            self.character_keeper._runner = build_character_keeper_runner(stored, callbacks=self._llm_callbacks)
-            self.editor._runner = build_editor_runner(stored, callbacks=self._llm_callbacks)
+            world_architect_builder = self._tooled(
+                build_world_architect_runner, self._tooling_pinned["world_architect"])
+            self.world_architect._runner = world_architect_builder(stored, callbacks=self._llm_callbacks)
+            character_keeper_builder = self._tooled(
+                build_character_keeper_runner, self._tooling_pinned["character_keeper"])
+            self.character_keeper._runner = character_keeper_builder(stored, callbacks=self._llm_callbacks)
+            editor_builder = self._tooled(build_editor_runner, self._tooling_pinned["editor"])
+            self.editor._runner = editor_builder(stored, callbacks=self._llm_callbacks)
             checker_builder = self._tooled(build_continuity_checker_runner, self.continuity_checker.pull_mode)
             self.continuity_checker._runner = checker_builder(stored, callbacks=self._llm_callbacks)
             self.continuity_checker._mining_runner = build_continuity_mining_runner(stored, callbacks=self._llm_callbacks)
-            self.retconner._runner = build_retconner_runner(stored, callbacks=self._llm_callbacks)
-            self.structure_analyst._runner = build_structure_analyst_runner(stored, callbacks=self._llm_callbacks)
+            retconner_builder = self._tooled(build_retconner_runner, self._tooling_pinned["retconner"])
+            self.retconner._runner = retconner_builder(stored, callbacks=self._llm_callbacks)
+            structure_analyst_builder = self._tooled(
+                build_structure_analyst_runner, self._tooling_pinned["structure_analyst"])
+            self.structure_analyst._runner = structure_analyst_builder(stored, callbacks=self._llm_callbacks)
         if ("agent_temperature" in changed or "author_temperature" in changed) and rebuild:
             self._chat_runner_cache.clear()
 

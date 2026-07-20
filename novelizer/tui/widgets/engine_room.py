@@ -6,6 +6,7 @@ streamed token on its own line.
 """
 from __future__ import annotations
 import time
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Static
@@ -20,12 +21,16 @@ class EngineRoom(Vertical):
     _rendered_body: str = ""
 
     def compose(self) -> ComposeResult:
-        yield Static("idle — waiting for the scheduler", id="er_vitals")
+        # markup=False throughout: these panes show raw prompts, token streams,
+        # and payload text — untrusted content full of "[...]" sequences that
+        # Textual's markup parser rejects (MarkupError crashes the telemetry
+        # loops otherwise).
+        yield Static("idle — waiting for the scheduler", id="er_vitals", markup=False)
         with VerticalScroll(id="er_stream_scroll"):
-            yield Static("", id="er_stream")
-        yield Static("", id="er_prompt")
+            yield Static("", id="er_stream", markup=False)
+        yield Static("", id="er_prompt", markup=False)
         yield DataTable(id="er_trace", cursor_type="row")
-        yield Static("", id="er_detail")
+        yield Static("", id="er_detail", markup=False)
 
     def on_mount(self) -> None:
         self.query_one("#er_prompt", Static).display = False
@@ -60,7 +65,9 @@ class EngineRoom(Vertical):
         table = self.query_one("#er_trace", DataTable)
         table.clear()
         for key, line in rows:
-            table.add_row(line, key=key)
+            # DataTable runs str cells through Text.from_markup; trace lines
+            # carry untrusted text (tool summaries, error messages), so escape.
+            table.add_row(escape(line), key=key)
 
     def show_detail(self, text: str) -> None:
         detail = self.query_one("#er_detail", Static)

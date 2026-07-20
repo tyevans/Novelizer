@@ -16,12 +16,22 @@ Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
 """ + AI_TELL_BAN_NOTE
 
-RETRIEVAL_NOTE = (
+_RETRIEVAL_NOTE_PREFIX = (
     "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-    "semantic search (search_canon). The chapter list below is an index — read any "
-    "chapter or canon file you need in full before writing. Cite ids exactly as shown "
+    "semantic search (search_canon). "
+)
+_RETRIEVAL_NOTE_MAP_SENTENCE = (
+    "The chapter list below is an index — read any "
+    "chapter or canon file you need in full before writing. "
+)
+_RETRIEVAL_NOTE_SUFFIX = (
+    "Cite ids exactly as shown "
     "in frontmatter or search results."
 )
+
+RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
+
+RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
 
 
 def _summarize(

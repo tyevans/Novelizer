@@ -5,12 +5,12 @@ import uuid
 from typing import Callable
 from novelizer.canon.events import EventType, ChatUserMessaged, ChatAgentReplied
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.brain.context import chapter_map_note
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
 )
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
+from novelizer.brain.context import chapter_map_note
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,18 @@ class ChatService:
     immediately after send() can never miss its own user message to
     projection lag."""
 
-    def __init__(self, events, read, committer, runner_for: Callable,
-                 personality_for: Callable[[str], str], pull_mode: bool = False) -> None:
+    def __init__(
+        self, events, read, committer, runner_for: Callable, personality_for: Callable[[str], str],
+        pull_mode: bool = False,
+    ) -> None:
         self._events = events
         self._read = read
         self._committer = committer
         self._runner_for = runner_for
         self._personality_for = personality_for
-        self._pull_mode = pull_mode
         self._locks: dict[str, asyncio.Lock] = {}
         self._pending: dict[str, int] = {}
+        self.pull_mode = pull_mode
 
     def pending(self, agent_name: str) -> bool:
         return self._pending.get(agent_name, 0) > 0
@@ -106,19 +108,16 @@ class ChatService:
         themes = await self._read.list_themes()
         w = "\n".join(f"- {e.title}: {e.body[:150]}" for e in world[:10]) or "None yet."
         c = "\n".join(f"- {ch.name}: {ch.traits}" for ch in characters[:8]) or "None yet."
-        if self._pull_mode:
-            prev = None
-        else:
-            prev = "\n".join(f"- '{ch.title}': {ch.prose[:200]}" for ch in chapters[-3:]) or "None yet."
         t = "\n".join(f"- [{th.state.value}] {th.id}: {th.name}" for th in threads) or "None."
         s = "\n".join(
             f"- {sec.id}: {sec.title}" + (" (revealed)" if sec.revealed else "") for sec in secrets
         ) or "None."
         tm = "\n".join(f"- {th.id}: {th.title}" for th in themes) or "None."
-        chapters_block = (
-            f"Chapter index:\n{chapter_map_note(chapters)}" if self._pull_mode
-            else f"Recent chapters:\n{prev}"
-        )
+        if self.pull_mode:
+            chapters_block = f"Chapter index:\n{chapter_map_note(chapters)}"
+        else:
+            prev = "\n".join(f"- '{ch.title}': {ch.prose[:200]}" for ch in chapters[-3:]) or "None yet."
+            chapters_block = f"Recent chapters:\n{prev}"
         return (
             f"Story context.\nWorld lore:\n{w}\n\nCharacters:\n{c}\n\n{chapters_block}"
             f"\n\nThreads:\n{t}\n\nSecrets:\n{s}\n\nThemes:\n{tm}"

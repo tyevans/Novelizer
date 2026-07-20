@@ -160,6 +160,39 @@ async def test_rebuild_keeps_checker_tooled_when_flags_on(tmp_path, monkeypatch)
     await rt.close()
 
 
+async def test_rebuild_keeps_world_architect_tooled_when_flags_on(tmp_path, monkeypatch):
+    """CPT-M6: apply_settings' agent_temperature rebuild path must keep the
+    phase-b agents' tooling pinned at start(), same as author/checker --
+    a mid-session flag flip must not change what's rebuilt (M5-documented
+    inert-until-restart contract)."""
+    rt = await _started_runtime(tmp_path, agent_temperature=0.8, world_architect_tools_enabled=True)
+    rt._runners = None
+    rt._runner = None
+
+    seen_kwargs: list[dict] = []
+
+    def _spy_build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
+        seen_kwargs.append({"backend": backend, "tools": tools})
+        return _R()
+
+    monkeypatch.setattr("novelizer.runtime.build_world_architect_runner", _spy_build_world_architect_runner)
+    monkeypatch.setattr("novelizer.runtime.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+    monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None: _R())
+
+    # Simulate a live flag flip without a restart -- pinning must ignore it.
+    rt.settings = rt.settings.model_copy(update={"world_architect_tools_enabled": False})
+    rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
+
+    assert len(seen_kwargs) == 1
+    assert seen_kwargs[0]["backend"] is rt._canon_backend
+    assert seen_kwargs[0]["tools"] is rt._canon_tools
+    await rt.close()
+
+
 async def test_invalid_voice_pack_reports_error_and_other_changes_still_apply(tmp_path):
     """Fix 2: a bad voice_pack path must not wedge apply_settings — other
     changes in the same apply should still land, and the failure should be

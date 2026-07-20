@@ -80,3 +80,13 @@ forever. Two rules follow:
 - Bindings under a modal: `App.query_one` resolves against the default screen, so
   refresh loops keep working while a modal is up; guard modal-opening actions with
   `self.screen is not self.default_screen`.
+- Untrusted text vs. markup parsing: Textual `Static` widgets parse content markup by
+  default, and `DataTable` runs plain-`str` cells through rich's `Text.from_markup`.
+  Any pane that displays LLM prompts, token streams, tool summaries, or error messages
+  will eventually receive text like `[system] ... key=value ...` or `path=[/x/y]` and
+  raise `MarkupError` ("Expected markup value" / "closing tag ... doesn't match") —
+  which, inside a refresh loop, spams the feed with a worker error every cycle.
+  Construct such Statics with `markup=False`; `rich.markup.escape()` strings headed
+  for DataTable cells. Red test: feed the widget real hostile text (see the
+  `_HOSTILE` prompt in `tests/tui/test_engine_room.py`) and assert no
+  "telemetry … error" lines land in `app.messages`.
