@@ -115,7 +115,15 @@ class Runtime:
         if self._runners is not None and key in self._runners:
             return self._runners[key]
         if key not in self._chat_runner_cache:
-            self._chat_runner_cache[key] = build_chat_runner(self.settings, agent_name)
+            if self.settings.chat_tools_enabled:
+                self._chat_runner_cache[key] = build_chat_runner(
+                    self.settings, agent_name, callbacks=self._llm_callbacks,
+                    backend=self._canon_backend, tools=self._canon_tools,
+                )
+            else:
+                self._chat_runner_cache[key] = build_chat_runner(
+                    self.settings, agent_name, callbacks=self._llm_callbacks,
+                )
         return self._chat_runner_cache[key]
 
     async def start(self) -> None:
@@ -208,6 +216,7 @@ class Runtime:
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
+            pull_mode=s.chat_tools_enabled,
         )
 
     def apply_settings(self, new: EffectiveSettings) -> dict:

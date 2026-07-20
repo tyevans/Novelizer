@@ -504,3 +504,54 @@ async def test_runtime_start_completes_with_flags_on_and_no_fake_author(settings
         assert rt.author.pull_mode is True
     finally:
         await rt.close()
+
+
+async def test_runtime_chat_flag_on_wires_pull_mode_chat(settings, monkeypatch):
+    captured = {}
+
+    def fake_build_chat_runner(s, agent_name, callbacks=None, backend=None, tools=None):
+        captured[agent_name] = {"callbacks": callbacks, "backend": backend, "tools": tools}
+        class G:
+            async def ainvoke(self, *_a, **_k): return {}
+        return G()
+
+    monkeypatch.setattr("novelizer.runtime.build_chat_runner", fake_build_chat_runner)
+    settings = settings.model_copy(update={
+        "author_tools_enabled": True, "checker_tools_enabled": True,
+    })
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        rt._chat_runner_for("editor")
+        assert captured["editor"]["backend"] is rt._canon_backend
+        assert captured["editor"]["tools"] is rt._canon_tools
+        assert captured["editor"]["callbacks"] == rt._llm_callbacks
+        assert rt.chat._pull_mode is True
+    finally:
+        await rt.close()
+
+
+async def test_runtime_chat_flag_off_builds_bare_chat_runner(settings, monkeypatch):
+    captured = {}
+
+    def fake_build_chat_runner(s, agent_name, callbacks=None, backend=None, tools=None):
+        captured[agent_name] = {"callbacks": callbacks, "backend": backend, "tools": tools}
+        class G:
+            async def ainvoke(self, *_a, **_k): return {}
+        return G()
+
+    monkeypatch.setattr("novelizer.runtime.build_chat_runner", fake_build_chat_runner)
+    settings = settings.model_copy(update={
+        "author_tools_enabled": True, "checker_tools_enabled": True,
+        "chat_tools_enabled": False,
+    })
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        rt._chat_runner_for("editor")
+        assert captured["editor"]["backend"] is None
+        assert captured["editor"]["tools"] is None
+        assert captured["editor"]["callbacks"] == rt._llm_callbacks
+        assert rt.chat._pull_mode is False
+    finally:
+        await rt.close()
