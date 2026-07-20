@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/chat/personas.py
+# hypothesis_version: 6.151.5
+
+['analyst', 'architect', 'author', 'character_keeper', 'continuity', 'continuity_checker', 'editor', 'frozen', 'keeper', 'learn', 'plant', 'retcon', 'retconner', 'reveal', 'structure', 'structure_analyst', 'uses', 'world_architect']

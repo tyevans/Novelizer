@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/telemetry/callbacks.py
+# hypothesis_version: 6.156.6
+
+[300, 'agent_name', 'call_index', 'chunks', 'kwargs', 'message', 'model', 'model_name', 'name', 'novelizer_run_id', 'output_tokens', 'started', 'tool_name', 'usage_metadata']

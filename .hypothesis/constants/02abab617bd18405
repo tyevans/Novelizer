@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/store/indexer.py
+# hypothesis_version: 6.156.6
+
+['.', '.tmp', 'chapter', 'character', 'last_sequence', 'secret', 'supersedes_id', 'theme', 'thread', 'world', 'world_entries', 'world_entry']

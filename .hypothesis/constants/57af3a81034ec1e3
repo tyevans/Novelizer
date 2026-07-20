@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/settings/story_dir.py
+# hypothesis_version: 6.156.6
+
+['chroma', 'default', 'story.toml', 'title', 'world.db']

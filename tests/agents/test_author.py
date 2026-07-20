@@ -693,30 +693,20 @@ def test_build_author_runner_binds_callbacks_at_graph_scope_not_model():
     assert handler in (runner.config.get("callbacks") or [])
 
 
-def test_retrieval_note_pinned_and_base_split():
+def test_retrieval_note_base_split():
+    """Author re-exports the shared notes; the map variant is the base variant
+    plus one index sentence. Wording is pinned in tests/agents/test_prompts.py."""
     from novelizer.agents.author import RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE
+    from novelizer.agents import prompts
 
-    assert RETRIEVAL_NOTE == (
-        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-        "semantic search (search_canon). The chapter list below is an index — read any "
-        "chapter or canon file you need in full before writing. Cite ids exactly as shown "
-        "in frontmatter or search results."
-    )
+    assert RETRIEVAL_NOTE is prompts.RETRIEVAL_NOTE
+    assert RETRIEVAL_NOTE_BASE is prompts.RETRIEVAL_NOTE_BASE
     assert "chapter list below" not in RETRIEVAL_NOTE_BASE
-    prefix = (
-        "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-        "semantic search (search_canon). "
-    )
-    assert RETRIEVAL_NOTE_BASE.startswith(prefix)
-    assert RETRIEVAL_NOTE.startswith(prefix)
-    suffix = RETRIEVAL_NOTE_BASE[len(prefix):]
+    assert "chapter list below" in RETRIEVAL_NOTE
+    prefix = prompts._RETRIEVAL_NOTE_PREFIX
+    suffix = prompts._RETRIEVAL_NOTE_SUFFIX
     assert RETRIEVAL_NOTE_BASE == prefix + suffix
-    assert RETRIEVAL_NOTE == (
-        prefix
-        + "The chapter list below is an index — read any chapter or canon file you need "
-        "in full before writing. "
-        + suffix
-    )
+    assert RETRIEVAL_NOTE == prefix + prompts._RETRIEVAL_NOTE_MAP_SENTENCE + suffix
 
 
 async def test_author_commits_promise_intents_with_validation(stack):

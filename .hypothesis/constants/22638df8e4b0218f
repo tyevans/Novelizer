@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/structure_analyst.py
+# hypothesis_version: 6.151.5
+
+[0.0, 1.0, 180, 'In character', 'callbacks', 'content', 'messages', 'recursion_limit', 'role', 'structure_analyst', 'structured_response', 'unscored', 'user', 'write_todos']

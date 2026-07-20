@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/telemetry/__init__.py
+# hypothesis_version: 6.151.5
+
+['TelemetryBus', 'TelemetryEventType', 'TelemetryRecorder', 'TokenDelta']

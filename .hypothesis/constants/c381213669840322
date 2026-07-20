@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/world_architect.py
+# hypothesis_version: 6.151.5
+
+[0.2, 1.0, 120, 'In character', 'None.', 'The world is empty.', 'callbacks', 'content', 'entries', 'hand', 'messages', 'recursion_limit', 'role', 'signals', 'structured_response', 'user', 'world_architect', 'write_todos']

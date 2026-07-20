@@ -1,4 +1,5 @@
 from __future__ import annotations
+from novelizer.agents import prompts
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
 from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
@@ -22,22 +23,10 @@ You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun
 When a chapter brief is present it is your assignment: honor it, or deviate deliberately and explain the deviation in your feed note.
 """ + AI_TELL_BAN_NOTE
 
-_RETRIEVAL_NOTE_PREFIX = (
-    "\n\nYou have file tools over the story canon (ls, read_file, grep, glob) and "
-    "semantic search (search_canon). "
-)
-_RETRIEVAL_NOTE_MAP_SENTENCE = (
-    "The chapter list below is an index — read any "
-    "chapter or canon file you need in full before writing. "
-)
-_RETRIEVAL_NOTE_SUFFIX = (
-    "Cite ids exactly as shown "
-    "in frontmatter or search results."
-)
-
-RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
-
-RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
+# Re-exported from novelizer.agents.prompts, which is the real home: six sibling
+# agents still import these through here. Migrate those imports, then drop this.
+RETRIEVAL_NOTE_BASE = prompts.RETRIEVAL_NOTE_BASE
+RETRIEVAL_NOTE = prompts.RETRIEVAL_NOTE
 
 
 def _summarize(

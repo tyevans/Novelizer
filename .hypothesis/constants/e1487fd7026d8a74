@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/settings/models.py
+# hypothesis_version: 6.151.5
+
+[0.3, 0.5, 0.7, 0.8, 120, 180, 200, 240, 300, 900, 4096, 6000, 'agent_model', 'agent_temperature', 'author_interval', 'author_model', 'author_temperature', 'author_tools_enabled', 'chat_tools_enabled', 'continuity_interval', 'default.toml', 'editor_tools_enabled', 'embed_model', 'keeper_prose_chars', 'llm_api_key', 'local-model', 'modern', 'muse_era', 'muse_exclusion_hands', 'muse_interval', 'nomic-embed-text', 'not-needed', 'novelizer.voices', 'plain', 'plotter_interval', 'projector_interval', 'prose_profile', 'sag_spike_delta', 'stories', 'stories/chroma', 'stories/world.db', 'voice_pack']

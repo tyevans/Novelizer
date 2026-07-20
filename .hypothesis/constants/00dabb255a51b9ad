@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/widgets/feed_model.py
+# hypothesis_version: 6.156.6
+
+[0.0, ' …', '.', '[drift]', '[leak]', '[mined]', '[paradox]', '\\*\\*(.+?)\\*\\*', 'agent_name', 'annotation', 'author', 'body', 'bold', 'bold red', 'causal_edge', 'cause', 'character_keeper', 'description', 'dim', 'dim italic', 'director', 'director_signal', 'editor', 'lore', 'name', 'note', 'retconner', 'shape', 'signal', 'structure_analyst', 'system', 'tension', 'text', 'title', 'world_architect', 'world_entry', '💬 ', '💬 replied: ']

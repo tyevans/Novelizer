@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/settings/view_model.py
+# hypothesis_version: 6.156.6
+
+['0', '1', 'agent_model', 'author_model', 'chroma_path', 'db_path', 'default', 'embed_model', 'env', 'false', 'global', 'last_opened_story', 'llm_api_key', 'llm_base_url', 'llm_max_tokens', 'story', 'story_title', 'true', '••••••']

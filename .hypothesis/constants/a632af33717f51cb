@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/agents/intents.py
+# hypothesis_version: 6.151.5
+
+['abandon', 'advance', 'declare', 'declared', 'draft', 'get_theme', 'introduce', 'learn', 'make', 'pay', 'pay_off', 'plan_pivot', 'plant', 'progress', 'release', 'resolve', 'reveal', 'thread', 'touch', 'uses']

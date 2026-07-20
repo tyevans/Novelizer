@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/tui/identity.py
+# hypothesis_version: 6.156.6
+
+['-', 'A', 'Analyst', 'Architect', 'Author', 'C', 'Continuity', 'D', 'Director', 'E', 'Editor', 'K', 'Keeper', 'P', 'Plotter', 'R', 'Retconner', 'S', 'System', 'W', '_', 'author', 'bold', 'character_keeper', 'continuity_checker', 'dark_cyan', 'dark_orange', 'dim', 'director', 'editor', 'gold3', 'green3', 'hot_pink3', 'medium_purple', 'plotter', 'retconner', 'steel_blue', 'structure_analyst', 'system', 'turquoise2', 'world_architect', '§', '·', '↺', '∿', '⌂', '⌖', '★', '♥', '⚖', '✎']

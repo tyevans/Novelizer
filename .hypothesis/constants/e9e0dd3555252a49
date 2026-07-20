@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/scheduler.py
+# hypothesis_version: 6.156.6
+
+[0.0, 1.0, 'interval not elapsed', 'last_completed', 'last_error', 'name', 'next_ready_in', 'paused', 'readiness 0', 'ready', 'run_count', 'running', 'seconds_until_ready']

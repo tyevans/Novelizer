@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/run_context.py
+# hypothesis_version: 6.151.5
+
+['current_agent_name', 'current_run_id']

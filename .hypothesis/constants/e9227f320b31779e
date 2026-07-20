@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/runtime.py
+# hypothesis_version: 6.156.6
+
+['/outline/', '_canon_backend', '_canon_tools', 'agent_temperature', 'applied', 'author', 'author_interval', 'author_temperature', 'character_keeper', 'continuity_checker', 'continuity_interval', 'editor', 'embed_cursor.json', 'embeddings', 'errors', 'model', 'muse', 'muse_era', 'muse_exclusion_hands', 'muse_interval', 'plotter', 'plotter_interval', 'prose_profile', 'restart_required', 'retconner', 'structure_analyst', 'telemetry.db', 'temperature', 'voice_pack', 'world_architect']

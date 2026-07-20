@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/store/models.py
+# hypothesis_version: 6.151.5
+
+[0.0, 1.0, 'abandoned', 'active', 'consumed', 'contested', 'draft', 'final', 'focus', 'foreshadow', 'fulfilled', 'historical', 'metaphysical', 'note', 'open', 'other', 'override', 'paid', 'paid_off', 'physical', 'planted', 'rejected', 'released', 'resolved', 'reviewed', 'revise', 'seed', 'social', 'superseded', 'touched']

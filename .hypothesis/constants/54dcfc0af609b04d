@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/telemetry/events.py
+# hypothesis_version: 6.151.5
+
+['agent.run_failed', 'agent.run_finished', 'agent.run_started', 'llm.call_failed', 'llm.call_finished', 'llm.call_started', 'scheduler.picked', 'tool.call_failed', 'tool.call_finished', 'tool.call_started']

@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/canon/read_store.py
+# hypothesis_version: 6.151.5
+
+[200, ' ORDER BY rowid', ' WHERE hand_id=?', ' WHERE secret_id=?', 'known_by', 'revealed']

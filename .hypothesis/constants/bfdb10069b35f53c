@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/settings/setup_core.py
+# hypothesis_version: 6.156.6
+
+[5.0, 200, '/', 'Authorization', 'agent_model', 'author_model', 'data', 'default_stories_dir', 'embed_model', 'id', 'llm_api_key', 'llm_base_url', 'not-needed']

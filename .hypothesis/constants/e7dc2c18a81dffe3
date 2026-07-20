@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/canon/beat_templates.py
+# hypothesis_version: 6.151.5
+
+[0.05, 0.08, 0.1, 0.25, 0.4, 0.5, 0.75, 0.8, 0.9, 0.95, 'Catalyst', 'Climax', 'Final Turn', 'Ketsu', 'Ki', 'Low Point', 'Midpoint', 'Sho', 'Ten', 'Threshold', 'catalyst', 'climax', 'down', 'final-turn', 'flip', 'ketsu', 'ki', 'kishotenketsu', 'low-point', 'midpoint', 'sho', 'six-position', 'ten', 'threshold', 'up']

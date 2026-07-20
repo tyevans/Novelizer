@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/settings/loader.py
+# hypothesis_version: 6.156.6
+
+['.env', 'NOVELIZER_', 'chroma_path', 'db_path', 'ignore', 'title']

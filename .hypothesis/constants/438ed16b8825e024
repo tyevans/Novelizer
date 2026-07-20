@@ -1,0 +1,4 @@
+# file: /home/ty/workspace/novelizer/.claude/worktrees/agent-prompt-research/novelizer/canon/characters.py
+# hypothesis_version: 6.151.5
+
+['-', '[^a-z0-9]+', 'character']
