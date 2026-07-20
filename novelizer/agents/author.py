@@ -39,6 +39,8 @@ RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
 
 RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
 
+AUTHOR_SKILLS = ["/skills/scene-sequel", "/skills/pacing"]
+
 
 def _summarize(
     ctx: dict,
@@ -232,7 +234,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=AUTHOR_SKILLS,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

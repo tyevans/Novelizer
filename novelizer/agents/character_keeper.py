@@ -31,6 +31,8 @@ traits/motivations/backstory/voice), and retcon_requests (description, conflicti
 proposed_resolution). You may also be shown retcon requests already filed and still open:
 do not re-report those issues, even reworded.""" + PASS_PROMPT_INSTRUCTION
 
+KEEPER_SKILLS = ["/skills/character-arcs"]
+
 
 class CharacterKeeper(BaseAgent):
     def __init__(
@@ -214,7 +216,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=KEEPER_SKILLS,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

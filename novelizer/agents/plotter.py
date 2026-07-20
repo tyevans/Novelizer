@@ -28,6 +28,8 @@ toward overdue payoffs and dark threads over introducing new material."""
 _READINESS_BRIEF_RUNWAY = 2
 _READINESS_BRIEF_LOOKAHEAD = 3
 
+PLOTTER_SKILLS = ["/skills/outlining", "/skills/promise-payoff", "/skills/pacing"]
+
 
 def _summarize(ctx: dict, personality: str = "") -> str:
     chapters = ctx["chapters"]
@@ -261,7 +263,7 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=PLOTTER_SKILLS,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

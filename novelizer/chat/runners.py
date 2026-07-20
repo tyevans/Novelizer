@@ -12,6 +12,11 @@ conversation genuinely warrants a real change to the story record; otherwise lea
 intent list empty. Never invent ids — cite ids shown in the story context, or use the
 minting action (plant/introduce) with a name."""
 
+CHAT_SKILLS = [
+    "/skills/outlining", "/skills/promise-payoff", "/skills/pacing",
+    "/skills/scene-sequel", "/skills/character-arcs",
+]
+
 
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
@@ -29,7 +34,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
         system_prompt = system_prompt + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChatReply,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, skills=CHAT_SKILLS,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
