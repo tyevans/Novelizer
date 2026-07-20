@@ -155,12 +155,12 @@ class Editor(BaseAgent):
 def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
-    model = build_chat_model(
-        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
-        settings.agent_temperature, max_tokens=settings.llm_max_tokens,
-        callbacks=None, streaming=callbacks is not None,
-    )
     if backend is not None:
+        model = build_chat_model(
+            settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+            settings.agent_temperature, max_tokens=settings.llm_max_tokens,
+            callbacks=None, streaming=callbacks is not None,
+        )
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=EditorVerdict,
@@ -170,7 +170,5 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
         if callbacks:
             config["callbacks"] = callbacks
         return graph.with_config(config)
-    graph = create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=EditorVerdict)
-    if callbacks:
-        return graph.with_config({"callbacks": callbacks})
-    return graph
+    model = build_chat_model(settings.agent_model, settings.llm_base_url, settings.llm_api_key, settings.agent_temperature, max_tokens=settings.llm_max_tokens, callbacks=callbacks)
+    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=EditorVerdict)
