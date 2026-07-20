@@ -191,12 +191,13 @@ async def test_story_brain_threads_and_shape_tabs_populate():
             from textual.widgets import Static
             await pilot.pause(0.5)
             threads_text = str(app.query_one("#threads_body", Static).renderable)
-            shape_text = str(app.query_one("#shape_body", Static).renderable)
+            shape_rows = app.query_one("#shape_body", Static).renderable.renderables
             assert "The Locket" in threads_text
             assert "the-locket" not in threads_text          # no ids on the dashboard
-            assert shape_text.splitlines()[0] == "tension  ▅"   # 0.6 → level 4 of 8
-            assert "pacing: rising" in shape_text
-            assert "c1" not in shape_text                    # no ids on the dashboard
+            assert shape_rows[0].plain == "tension  ▅"   # 0.6 → level 4 of 8
+            assert shape_rows[0].no_wrap               # the render-site contract: flags survive to the screen
+            assert any("pacing: rising" in r.plain for r in shape_rows)
+            assert all("c1" not in r.plain for r in shape_rows)   # no ids on the dashboard
     finally:
         await rt.close(); os.unlink(path)
 

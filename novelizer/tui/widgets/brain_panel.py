@@ -8,6 +8,7 @@ selection/targeting inside tabs (Phase 3).
 """
 from __future__ import annotations
 
+from rich.console import Group
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -57,7 +58,7 @@ class BrainPanel(Vertical):
         cause = causeway_tab(await read.list_causal_edges(), chapters)
 
         shape_rows = [r for r in (shape.spark, shape.markers, shape.meta) if r is not None]
-        self.query_one("#shape_body", Static).update(_joined([*shape_rows, *shape.callouts]))
+        self.query_one("#shape_body", Static).update(Group(*shape_rows, *shape.callouts))
         self.query_one("#threads_body", Static).update(_joined(threads.lines))
         self.query_one("#secrets_body", Static).update(_joined(secrets.lines))
         self.query_one("#causeway_body", Static).update(_joined(cause.lines))

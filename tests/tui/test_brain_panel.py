@@ -69,7 +69,8 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
     try:
         async with app.run_test() as pilot:
             await pilot.pause(0.5)  # first _brain_loop refresh
-            assert str(app.query_one("#shape_body", Static).renderable) == SHAPE_EMPTY
+            shape_body = app.query_one("#shape_body", Static).renderable
+            assert [t.plain for t in shape_body.renderables] == [SHAPE_EMPTY]
             assert str(app.query_one("#threads_body", Static).renderable) == THREADS_EMPTY
             assert str(app.query_one("#secrets_body", Static).renderable) == SECRETS_EMPTY
             assert str(app.query_one("#causeway_body", Static).renderable) == CAUSEWAY_EMPTY
