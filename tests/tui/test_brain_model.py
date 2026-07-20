@@ -746,6 +746,23 @@ def test_alarm_strip_arcs_segment_shows_count():
     assert alarm_strip(0, 0, 0, 0, 0, 2).plain == "Shape · Threads · Secrets · Cause · Outline · Arcs ⚠2"
 
 
+def test_alarm_strip_zero_lag_shows_no_index_segment():
+    assert alarm_strip(0, 0, 0, 0, 0, 0, lag=0).plain == "Shape · Threads · Secrets · Cause · Outline · Arcs"
+
+
+def test_alarm_strip_nonzero_lag_appends_index_segment():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, lag=12).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠12 behind"
+    )
+
+
+def test_alarm_strip_lag_segment_is_alarm_styled():
+    strip = alarm_strip(0, 0, 0, 0, 0, 0, lag=3)
+    spans = [(strip.plain[s.start:s.end], str(s.style)) for s in strip.spans]
+    assert (" ⚠3 behind", ALARM_STYLE) in spans
+
+
 def test_outline_tab_empty_state_no_blueprint():
     tab = outline_tab(None, [], [], [], [])
     assert len(tab.lines) == 1
