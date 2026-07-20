@@ -196,6 +196,37 @@ class ChapterBriefRecord(BaseModel):
     fulfilled_by_chapter_id: str = ""
 
 
+class ArcPivot(BaseModel):
+    beat_id: str
+    description: str = ""
+
+
+class ArcRecord(BaseModel):
+    """Read-side row for a character's planned arc, built and rebuilt by the
+    Projector from the arc.* event log. Delta-accumulating like ThreadRecord;
+    arcs capture the character's internal growth, conflicts, and resolution
+    across the story. `active` flips on per-character supersession; `resolved`
+    is absorbing. Pivots track key beat moments aligned to the arc.
+    """
+
+    id: str
+    character_id: str
+    arc_type: str
+    ghost: str = ""
+    lie: str = ""
+    truth: str = ""
+    want: str = ""
+    need: str = ""
+    active: bool = True
+    resolved: bool = False
+    outcome: str = ""
+    resolved_chapter_id: str = ""
+    advance_count: int = 0
+    last_note: str = ""
+    last_chapter_id: str = ""
+    pivots: list[ArcPivot] = Field(default_factory=list)
+
+
 class ThemeRecord(BaseModel):
     """Read-side row for a theme/motif, built and rebuilt by the Projector
     from the theme.* event log (see novelizer/canon/projector.py). Unlike
