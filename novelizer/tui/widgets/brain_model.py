@@ -74,11 +74,12 @@ class ShapeTab:
 def shape_tab(
     scores: list[StructureScore], chapters: list[Chapter], delta: float = SAG_SPIKE_DELTA
 ) -> ShapeTab:
-    """The Shape tab: tension-by-chapter sparkline data plus sag/spike
-    callouts naming chapter TITLES. Flags come from detect_sag_spike over the
-    raw score list — never re-derived here. `delta` arrives from
-    settings.sag_spike_delta via the app's _brain_loop (M5.3 single-sourcing);
-    the default is the imported constant, never a re-typed literal."""
+    """The Shape tab: a rendered tension-by-chapter spark row (rich.text.Text,
+    not raw sparkline data) plus sag/spike callouts naming chapter TITLES.
+    Flags come from detect_sag_spike over the raw score list — never
+    re-derived here. `delta` arrives from settings.sag_spike_delta via the
+    app's _brain_loop (M5.3 single-sourcing); the default is the imported
+    constant, never a re-typed literal."""
     if not scores:
         return ShapeTab([], None, None, Text(SHAPE_EMPTY, style=DIM), [], 0)
     by_chapter = {s.chapter_id: s for s in scores}  # last score per chapter wins
@@ -87,12 +88,17 @@ def shape_tab(
     ordered += [s for cid, s in by_chapter.items() if cid not in chapter_ids]
     tensions = [s.tension for s in ordered]
     flags = detect_sag_spike(scores, delta)
-    spark = Text(SHAPE_GUTTER, style=DIM)
+    # no_wrap + ellipsis: spark and markers are two aligned rows keyed by
+    # chapter index. Rich's default word-wrap would wrap each row
+    # independently on overflow, desyncing the ⚠ markers from their
+    # chapters — crop instead.
+    spark = Text(no_wrap=True, overflow="ellipsis")
+    spark.append(SHAPE_GUTTER, style=DIM)  # only the gutter is dim; glyphs carry the signal
     for s in ordered:
         spark.append(spark_char(s.tension))
     markers: Text | None = None
     if any(s.chapter_id in flags for s in ordered):
-        markers = Text(" " * len(SHAPE_GUTTER))
+        markers = Text(" " * len(SHAPE_GUTTER), no_wrap=True, overflow="ellipsis")
         for s in ordered:
             if s.chapter_id in flags:
                 markers.append("⚠", style=ALARM_STYLE)
@@ -117,7 +123,7 @@ WARN_FRACTION = 0.6  # bar warms to WARN_STYLE at this fraction of the staleness
 def age_bar(elapsed: int, threshold: int) -> Text:
     """Thread-age heat bar: fill and color scale with elapsed/threshold, so
     staleness is a visible gradient, not a binary flip. Clamped at full."""
-    ratio = min(elapsed / max(threshold, 1), 1.0)
+    ratio = 1.0 if elapsed >= threshold else elapsed / threshold
     filled = round(ratio * AGE_BAR_CELLS)
     glyphs = "▰" * filled + "▱" * (AGE_BAR_CELLS - filled)
     if ratio >= 1.0:

@@ -251,7 +251,10 @@ Three shippable slices, each with its own implementation plan:
   to what existing data serves and move the projections to P3.
 - **P3 — Pulse.** Chapter-snapshot projection, `insights.py` voice library, the
   Pulse tab + delta line + health header, change-emphasis ticks, Pulse-card →
-  evidence jumps.
+  evidence jumps. P3 must also extract the leak-proximity predicate (currently
+  embedded in `spread_meter`) into `novelizer.brain` so the Pulse card and the
+  meter share one derivation instead of the card importing a TUI rendering
+  module.
 
 P1 has no dependency on projections; nothing blocks it.
 

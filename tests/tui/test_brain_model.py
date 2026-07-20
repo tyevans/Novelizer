@@ -136,6 +136,11 @@ def test_shape_tab_spark_is_one_cell_per_chapter_after_the_gutter():
     tab = shape_tab(scores, chs)
     assert tab.spark.plain == SHAPE_GUTTER + "▃▅▆"
     assert tab.markers is None                    # quiet story: no marker row
+    assert (SHAPE_GUTTER, "dim") in [
+        (tab.spark.plain[s.start:s.end], str(s.style)) for s in tab.spark.spans
+    ]
+    glyph_start = len(SHAPE_GUTTER)
+    assert not any(s.end > glyph_start for s in tab.spark.spans)  # glyphs carry no style span
 
 
 def test_shape_tab_marker_row_aligns_alarm_glyphs_under_flagged_chapters():
@@ -163,6 +168,7 @@ def test_shape_tab_keeps_every_point_and_alarm_count_matches_callouts(tensions):
     assert len(tab.tensions) == len(tensions)
     assert tab.alarm_count == len(tab.callouts)
     assert len(tab.spark.plain) == len(SHAPE_GUTTER) + len(tensions)
+    assert tab.markers is None or len(tab.markers.plain) == len(tab.spark.plain)
 
 
 def test_age_bar_scales_fill_and_heat_with_elapsed_over_threshold():
@@ -174,7 +180,8 @@ def test_age_bar_scales_fill_and_heat_with_elapsed_over_threshold():
     assert age_bar(3, 3).plain == "▰▰▰▰▰"
     assert str(age_bar(3, 3).style) == ALARM_STYLE
     assert age_bar(9, 3).plain == "▰▰▰▰▰"          # clamped past threshold
-    assert age_bar(0, 0).plain == "▱▱▱▱▱"          # degenerate threshold guarded
+    assert age_bar(0, 0).plain == "▰▰▰▰▰"          # degenerate threshold: elapsed >= threshold, full
+    assert str(age_bar(0, 0).style) == ALARM_STYLE
 
 
 def test_thread_line_stale_names_last_touched_chapter_and_gap():

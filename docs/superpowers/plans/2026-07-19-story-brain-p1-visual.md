@@ -55,10 +55,10 @@ def test_shape_tab_spark_is_one_cell_per_chapter_after_the_gutter():
     chs = _chapters("One", "Two", "Three")
     scores = [
         StructureScore(chapter_id=f"c{i + 1}", tension=t, pacing_label="")
-        for i, t in enumerate([0.2, 0.5, 0.9])
+        for i, t in enumerate([0.3, 0.5, 0.7])  # (not [0.2, 0.5, 0.9] — that triggers sag/spike flags)
     ]
     tab = shape_tab(scores, chs)
-    assert tab.spark.plain == SHAPE_GUTTER + "▂▅█"
+    assert tab.spark.plain == SHAPE_GUTTER + "▃▅▆"
     assert tab.markers is None                    # quiet story: no marker row
 
 
