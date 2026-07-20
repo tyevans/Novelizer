@@ -277,3 +277,23 @@ Semantic search now covers promises, chapter briefs, and character arcs alongsid
 characters, world entries, threads, secrets, and themes — and closed records (paid promises,
 superseded briefs, resolved arcs) carry their status in the index, so a search hit never
 reads as live guidance when it isn't.
+
+## 13. Framing a story, and finishing one
+
+When you create a story you can **frame** it: pick a structural framework
+(`six-position` or `kishotenketsu`), a target chapter count, and a genre. The story
+starts with a blueprint already adopted — beats minted with target windows, the Plotter
+planning briefs against them from the first tick. Leave the framework blank and the story
+begins exactly as before, bottom-up, with the Plotter proposing a shape once there's
+enough world to frame.
+
+If the book outgrows (or undershoots) its target, retarget it — `novelizer retarget 32`
+from the CLI, `:retarget 32` in Mission Control, or leave it to the Plotter, which may
+retarget when the story clearly needs a different length. Beat windows recompute from the
+new count everywhere.
+
+A story is **complete** when its blueprint is satisfied: every beat fulfilled, every
+promise paid or released, every active arc resolved. The room declares it (`book.completed`)
+and the Outline board — now the view Mission Control opens on — shows `✓ COMPLETE` beside
+your chapter count. Completion is a statement, not a stop: the agents quiet down on their
+own as there's nothing left to plan, and you decide when the story is closed.

@@ -40,13 +40,36 @@ measurably better book than the milestone before.
 | M8 | **The Blueprint** | Blueprint/beat/brief aggregates, the Plotter agent (rolling briefs 1–3 ahead), Author drafts against briefs, `beat_drift.py` + `tension_target.py`, Outline board tab (threads × chapters grid with beat markers), `OutlineBackend` (`/outline/`) | The Director approves a proposed blueprint; briefs march ahead of the draft on the Outline board; a "midpoint late" alarm fires and the Plotter visibly re-plans the next briefs | ✅ complete (checker prose-mining of promises + `search_canon` promise/brief kinds remain deferred — tracked for M9/M10) |
 | M9 | **Arcs** | Character arc aggregate (ghost/lie/want/need, five types), `ArcIntent` for the CharacterKeeper, `arc_alignment.py`, Arcs tab with pivots pinned to beats | A declared fall arc that resolves `truth_embraced` raises a contradiction alarm for the Director to adjudicate; a stagnant arc surfaces and the Plotter routes its character into the next brief | ✅ complete (relationship arcs + per-advance pivot history deferred; checker promise-mining, search kinds, and the orphaned-pivot re-pin finding all delivered in M10) |
 | M10 | **Craft** | SKILL.md craft packs (outlining, promise-payoff, character-arcs, scene-sequel, pacing) with progressive disclosure, writable `/workspace/` (StateBackend) for think-in-files deliberation, chat personas get craft access | The Engine Room shows a skill activate and a beat-table reference pulled mid-plan; the Director asks a persona "how should I pace this reveal?" and gets an answer grounded in the ledger and the adopted framework | ✅ complete (pending review; live skill-activation + /workspace/ write smoke require a running agent graph — deferred to the acceptance run) |
-| M11 | **Landing** | Endgame steering: completion criteria over the blueprint (beats fulfilled ∧ promises paid/released ∧ arcs resolved), `blueprint.retargeted` flow when the book runs long/short, finale-window convergence notes, `book.completed`, Frame step in the setup wizard (blueprint adoption at story start), Outline board as the home Brain tab | A seeded story runs to a **finished** novel and the system declares it done; a stranger reads a book with a beginning, a middle, and an *ending* | planned |
+| M11 | **Landing** | Endgame steering: completion criteria over the blueprint (beats fulfilled ∧ promises paid/released ∧ arcs resolved), `blueprint.retargeted` flow when the book runs long/short, finale-window convergence notes, `book.completed`, Frame step in the setup wizard (blueprint adoption at story start), Outline board as the home Brain tab | A seeded story runs to a **finished** novel and the system declares it done; a stranger reads a book with a beginning, a middle, and an *ending* | ✅ complete (pending review; the day-long live acceptance run remains with the Director) |
 
 Dependencies: M6 before M8 (the Plotter is born with pull tools); M7 needs
 only intents and can proceed in parallel with M6; M9/M10 build on M8; M11
 caps the phase. A story with no blueprint must keep running exactly as in
 Phase 1 at every step — bottom-up remains a supported mode, it just stops
 being the only one.
+
+### Phase 2 closeout
+
+Phase 2 is complete. The room no longer only writes — it **authors**: it adopts a
+structural shape (with the Director's sign-off), plans the pace of its own payoffs,
+drafts chapters against briefs, tracks what it promised and what it owes, gives its
+characters interiors that are checked against the shape, pulls craft knowledge when a
+task calls for it, and can recognize when the blueprint is satisfied and say so.
+
+What Phase 2 delivered, milestone by milestone: canon-wide retrieval for every agent
+(M6); a promise ledger with payoff windows and resolution pacing (M7); the blueprint,
+the Plotter, rolling chapter briefs, and plan-vs-actual comparators (M8); character
+arcs checked against beats (M9); craft skill packs and a think-in-files workspace
+(M10); and completion criteria, retargeting, story framing at creation, and
+`book.completed` (M11).
+
+Standing deferrals, carried deliberately and recorded here rather than lost: relationship
+arcs as a first-class aggregate; per-advance arc pivot history (the Arcs board shows
+current state, not a per-chapter trail); per-agent skill-pack selectivity (deepagents'
+skills sources are containers, so every tooled agent sees all five packs — cheap under
+progressive disclosure); and the **live acceptance run** — a day-long unattended story
+exercising skill activation, `/workspace/` writes, and a book that finishes, which
+belongs to the Director, not to CI.
 
 ## Standing principles (all milestones)
 
