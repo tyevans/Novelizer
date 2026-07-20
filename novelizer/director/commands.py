@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+from novelizer.canon.beat_templates import BEAT_TEMPLATES
 from novelizer.canon.events import (
     BlueprintRetargeted,
     EventType,
@@ -11,6 +12,7 @@ from novelizer.canon.autonomy import AutonomyLevel, AutonomyState, ProposalStatu
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.agents.intents import mint_blueprint
 from novelizer.muse.report import muse_status_report
 from novelizer.settings.story_dir import StoryDirectory
 from novelizer.store.models import DirectorSignal, SignalKind
@@ -31,6 +33,32 @@ async def seed_story_dir(story: StoryDirectory, text: str) -> None:
     await events.init()
     try:
         await seed(events, text)
+    finally:
+        await events.close()
+
+
+async def adopt_blueprint_story_dir(
+    story: StoryDirectory, framework: str, target_chapter_count: int, genre: str = ""
+) -> None:
+    """Append a blueprint.adopted event directly to a story's event log,
+    without a running Runtime -- sibling of seed_story_dir. Used at
+    story-creation time by the picker's Frame step: the creation form IS
+    the sign-off (see BlueprintAdopted's docstring), so this bypasses the
+    gated commit path deliberately, unlike commit_blueprint_plan.
+
+    Raises ValueError for a framework not in BEAT_TEMPLATES or a
+    target_chapter_count below 3 -- the caller is a form with a Select, so
+    this is a programming-error guard, not a user-facing validation path.
+    """
+    if framework not in BEAT_TEMPLATES:
+        raise ValueError(f"unknown framework: {framework!r}")
+    if target_chapter_count < 3:
+        raise ValueError(f"target_chapter_count must be >= 3, got {target_chapter_count!r}")
+    payload = mint_blueprint(framework, target_chapter_count, genre)
+    events = EventStore(str(story.db_path))
+    await events.init()
+    try:
+        await events.append(EventType.BLUEPRINT_ADOPTED, payload.blueprint_id, payload)
     finally:
         await events.close()
 

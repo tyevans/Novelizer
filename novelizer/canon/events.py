@@ -470,7 +470,14 @@ class BlueprintAdopted(BaseModel):
     Director signs off). One blueprint is active at a time: adoption
     supersedes any prior blueprint in projection (Locked decision #2).
     `blueprint_id` is minted by the proposing side (uuid); beats are minted
-    with it from a template (canon/beat_templates.py)."""
+    with it from a template (canon/beat_templates.py).
+
+    Sanctioned exception: Director-authored adoption at story creation, via
+    the story picker's Frame step (director/commands.adopt_blueprint_story_dir).
+    This runs before any Runtime/GatingCommitter exists -- the creation form
+    IS the sign-off, so it appends directly rather than through a proposal.
+    Agent-proposed adoption remains always-gated; this exception never
+    applies to commit_blueprint_plan's caller."""
 
     blueprint_id: str
     framework: str

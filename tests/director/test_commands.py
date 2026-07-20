@@ -296,3 +296,46 @@ async def test_seed_story_dir_appends_seed_event_without_runtime(tmp_path):
     assert stored[0].event_type == EventType.DIRECTOR_SIGNAL_CREATED
     assert stored[0].payload["kind"] == SignalKind.seed.value
     assert stored[0].payload["body"] == "a tired thief takes one last job"
+
+
+async def test_adopt_blueprint_story_dir_appends_and_projects(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.canon.beat_templates import BEAT_TEMPLATES
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    await adopt_blueprint_story_dir(sd, "six-position", 24, genre="noir")
+
+    path = str(sd.db_path)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    try:
+        await proj.catch_up()
+        blueprint = await read.get_active_blueprint()
+        assert blueprint is not None
+        assert blueprint.framework == "six-position"
+        assert blueprint.target_chapter_count == 24
+        assert blueprint.genre == "noir"
+        beats = await read.list_beats()
+        assert [b.slug for b in beats] == [tb.slug for tb in BEAT_TEMPLATES["six-position"]]
+    finally:
+        await read.close(); await proj.close(); await events.close()
+
+
+async def test_adopt_blueprint_story_dir_rejects_unknown_framework(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    with pytest.raises(ValueError):
+        await adopt_blueprint_story_dir(sd, "not-a-real-framework", 24)
+
+
+async def test_adopt_blueprint_story_dir_rejects_short_target(tmp_path):
+    from novelizer.director.commands import adopt_blueprint_story_dir
+    from novelizer.settings.story_dir import create_story
+
+    sd = create_story(tmp_path / "s", title="S")
+    with pytest.raises(ValueError):
+        await adopt_blueprint_story_dir(sd, "six-position", 2)

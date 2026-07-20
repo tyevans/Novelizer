@@ -16,7 +16,8 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from novelizer.director.commands import seed_story_dir
+from novelizer.canon.beat_templates import BEAT_TEMPLATES
+from novelizer.director.commands import adopt_blueprint_story_dir, seed_story_dir
 from novelizer.settings.discovery import StoryMeta, order_stories, slugify
 from novelizer.settings.models import EffectiveSettings
 from novelizer.settings.story_dir import create_story
@@ -124,6 +125,14 @@ class StoryPickerApp(App[Path | None]):
                 allow_blank=False,
                 value=self._default_profile_for(profiles),
             )
+            yield Select(
+                [(f, f) for f in BEAT_TEMPLATES],
+                id="new_framework",
+                allow_blank=True,
+                prompt="framing (optional)",
+            )
+            yield Input(id="new_target_chapters", placeholder="target chapters, e.g. 24")
+            yield Input(id="new_genre", placeholder="genre (optional)")
             with Horizontal(id="form_buttons"):
                 yield Button("Create", id="create_btn", variant="primary")
                 yield Button("Cancel", id="cancel_btn")
@@ -201,5 +210,22 @@ class StoryPickerApp(App[Path | None]):
                 await seed_story_dir(sd, premise)
             except OSError as e:
                 error.update(f"✗ story created, but seed failed: {e}")
+                return
+        framework = self.query_one("#new_framework", Select).value
+        if framework is not Select.BLANK and framework:
+            target_raw = self.query_one("#new_target_chapters", Input).value.strip()
+            if target_raw:
+                try:
+                    target = int(target_raw)
+                except ValueError:
+                    error.update("✗ target chapters must be a number")
+                    return
+            else:
+                target = 24
+            genre = self.query_one("#new_genre", Input).value.strip()
+            try:
+                await adopt_blueprint_story_dir(sd, str(framework), target, genre)
+            except Exception as e:
+                error.update(f"✗ story created, but framing failed: {e}")
                 return
         self.exit(root)

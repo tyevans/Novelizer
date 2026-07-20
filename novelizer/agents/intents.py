@@ -455,6 +455,22 @@ async def commit_blueprint_plan(committer, agent_name: str, plan: BlueprintPlan 
             agent_name, plan.target_chapter_count,
         )
         return
+    payload = mint_blueprint(
+        plan.framework, plan.target_chapter_count, plan.genre,
+        obligatory_scenes=list(plan.obligatory_scenes), note=plan.note,
+    )
+    await committer.commit(agent_name, EventType.BLUEPRINT_ADOPTED, payload.blueprint_id, payload)
+
+
+def mint_blueprint(
+    framework: str, target_chapter_count: int, genre: str = "",
+    obligatory_scenes: list[str] | None = None, note: str = "",
+) -> BlueprintAdopted:
+    """Mint a fresh BlueprintAdopted payload: a new blueprint_id and a BeatSpec
+    for every TemplateBeat in the framework's template, with
+    `beat_id = f"{blueprint_id}-{template_beat.slug}"`. Caller validates
+    `framework` and `target_chapter_count` -- this assumes both are already
+    sound (KeyError on an unknown framework)."""
     blueprint_id = str(uuid.uuid4())
     beats = [
         BeatSpec(
@@ -465,15 +481,12 @@ async def commit_blueprint_plan(committer, agent_name: str, plan: BlueprintPlan 
             tolerance_pct=template_beat.tolerance_pct,
             expected_polarity=template_beat.expected_polarity,
         )
-        for template_beat in BEAT_TEMPLATES[plan.framework]
+        for template_beat in BEAT_TEMPLATES[framework]
     ]
-    await committer.commit(
-        agent_name, EventType.BLUEPRINT_ADOPTED, blueprint_id,
-        BlueprintAdopted(
-            blueprint_id=blueprint_id, framework=plan.framework,
-            target_chapter_count=plan.target_chapter_count, genre=plan.genre,
-            beats=beats, obligatory_scenes=list(plan.obligatory_scenes), note=plan.note,
-        ),
+    return BlueprintAdopted(
+        blueprint_id=blueprint_id, framework=framework,
+        target_chapter_count=target_chapter_count, genre=genre,
+        beats=beats, obligatory_scenes=list(obligatory_scenes or []), note=note,
     )
 
 
