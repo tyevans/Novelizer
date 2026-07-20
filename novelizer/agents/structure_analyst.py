@@ -9,14 +9,61 @@ from novelizer.canon.events import EventType, AnnotationStructureScored
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are the Structure Analyst for a living fictional world's story.
-You read recent unscored chapters and score each one's narrative tension and pacing.
-For each chapter, return its id, a tension score from 0.0 (slack) to 1.0 (peak intensity),
-and a short pacing_label (e.g. "rising", "climax", "lull", "steady").
-Return one entry per chapter you were given, no more."""
+SYSTEM_PROMPT = """You are the Structure Analyst for a living, continuously-written novel. You are a
+JUDGE: for each chapter handed to you, you assign one tension score and one pacing label. You do not
+rewrite prose, flag craft problems, or manage threads — that is the Editor's work and the story
+brain's.
+
+## Your one job
+Score narrative tension on a fixed 0.0-1.0 scale and name the chapter's pacing. Tension is a
+property of the WHOLE chapter's arc — where its peak sits, what pressure it opens and closes on —
+not of its first paragraph and not of its length. A long, ornate chapter is not tenser than a short,
+spare one: score the pressure, not the word count.
+
+## Tension rubric — anchor every score to this
+- 0.0-0.2  slack / lull: reflection, transition, downtime. No active want is pressed, nothing
+  escalates; the scene could be cut with little plot loss.
+- 0.3-0.4  rising / low: a want or question is on the table; mild friction, setup, small
+  complications. Stakes named but not yet pressing.
+- 0.5-0.6  steady / mid: active conflict in motion; an obstacle meaningfully resists; consequences
+  accumulate. The reader is pulled, but nothing ruptures.
+- 0.7-0.8  high: a decisive confrontation, reversal or revelation lands; something changes that
+  cannot be undone; real cost is paid.
+- 0.9-1.0  climax / peak: the pressure the arc was building toward finally breaks. Maximum,
+  irreversible stakes.
+Pick the band matching the chapter's strongest SUSTAINED pressure, then place it within that band.
+
+## Calibrate across chapters — the hard part
+Your scores are compared against the running average of ALL earlier scores, and any chapter sitting
+far from that average is flagged as a sag or a spike for the Editor. So a 0.6 in chapter 30 must
+mean the same intensity as a 0.6 in chapter 5. Already-scored chapters are listed for you: study
+them, re-read one or two in full, and rate the new chapters against them on the SAME scale. Drift
+between passes manufactures false alarms about chapters nobody wrote badly — inconsistent scaling
+is a real failure, not rounding noise.
+
+## How to work — research first, then score
+Read EACH chapter you are scoring IN FULL before scoring it; never score from a title or an
+excerpt, because tension lives in the whole arc. Re-read the nearest already-scored chapters as
+calibration anchors. Only then emit the structured scores.
+Score EXACTLY the chapters you were given: one entry each, chapter_id matching exactly, no more and
+no fewer. Every chapter gets a score even when slack — a thin chapter scores LOW, it is never
+skipped.
+
+## Pacing label
+Choose the single label that fits the chapter's motion: lull, rising, climax, falling, or steady.
+
+## Feed note
+After scoring, write one short feed_note in your own voice about the SHAPE you saw this pass — a run
+of steady chapters, a spike, a stretch that sags. If the SEQUENCE is going wrong (the same beat
+shape repeating chapter after chapter, or a thread resolving before it earned its payoff), name it
+here as an observation for the team. Stay on the curve and the shape; do not critique individual
+sentences or ask for revisions — that is the Editor's lane."""
 
 _BATCH_SIZE = 5
 _READINESS_DIVISOR = 3
+# Enough of the recent curve to hold a scale against, without replaying every
+# score the story has ever had.
+_CALIBRATION_ANCHORS = 5
 
 
 class StructureAnalyst(BaseAgent):
@@ -27,8 +74,10 @@ class StructureAnalyst(BaseAgent):
         committer: Committer,
         interval: int = 180,
         personality: str = "",
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="structure_analyst", personality=personality)
+        self.pull_mode = pull_mode
 
     async def _unscored_recent_chapters(self) -> list:
         chapters = await self._read.list_chapters()
@@ -43,15 +92,42 @@ class StructureAnalyst(BaseAgent):
         return min(1.0, len(unscored) / _READINESS_DIVISOR)
 
     async def poll(self) -> dict:
-        return {"unscored": await self._unscored_recent_chapters()}
+        return {
+            "unscored": await self._unscored_recent_chapters(),
+            "scores": await self._read.list_structure_scores(),
+            "chapters": await self._read.list_chapters(),
+        }
+
+    def _calibration_note(self, ctx: dict) -> str:
+        """The recent scored curve, so this pass rates against the same scale
+        the earlier passes used. Empty on a first pass -- nothing to anchor to."""
+        scores = ctx.get("scores") or []
+        if not scores:
+            return ""
+        titles = {c.id: c.title for c in ctx.get("chapters", [])}
+        recent = scores[-_CALIBRATION_ANCHORS:]
+        lines = "\n".join(
+            f"- '{titles.get(s.chapter_id, s.chapter_id)}' (id:{s.chapter_id}): "
+            f"tension {s.tension} · {s.pacing_label}"
+            for s in recent
+        )
+        return (
+            "\n\nAlready scored — rate the new chapters on this same scale:\n" + lines
+        )
 
     async def work(self, ctx: dict) -> StructureAnalystOutput | None:
         chapters = ctx["unscored"]
         if not chapters:
             return None
-        listing = "\n\n".join(f"Chapter id:{c.id} '{c.title}': {c.prose[:400]}" for c in chapters)
+        if self.pull_mode:
+            # Tension is a property of the whole arc, so an excerpt is the wrong
+            # unit entirely -- a tooled Analyst reads the chapters instead.
+            listing = "\n".join(f"- Chapter id:{c.id} '{c.title}'" for c in chapters)
+        else:
+            listing = "\n\n".join(f"Chapter id:{c.id} '{c.title}': {c.prose[:400]}" for c in chapters)
         cast = self._guarded_line("In character", self.personality)
-        msg = f"Score these chapters:\n{listing}{cast}"
+        calibration = self._calibration_note(ctx)
+        msg = f"Score these chapters:\n{listing}{calibration}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

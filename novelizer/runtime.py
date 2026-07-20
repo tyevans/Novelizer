@@ -223,6 +223,7 @@ class Runtime:
         self.structure_analyst = StructureAnalyst(
             self._runner_for("structure_analyst", structure_analyst_builder), self.read, self.committer,
             interval=s.structure_analyst_interval, personality=personalities.get("structure_analyst", ""),
+            pull_mode=s.structure_analyst_tools_enabled,
         )
         plotter_builder = self._tooled(build_plotter_runner, s.plotter_tools_enabled)
         self.plotter = Plotter(

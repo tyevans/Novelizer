@@ -5,14 +5,46 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+from novelizer.brain.context import chapter_map_note
 from novelizer.muse.prompts import architect_settings_note
 from novelizer.store.models import WorldEntry
 
-SYSTEM_PROMPT = """You are the World Architect for an ever-expanding fictional world.
-Generate new lore, geography, factions, history, and cosmology. You receive a summary of
-what already exists plus any director seeds; identify thin or unexplored areas and expand them.
-Return 1-3 new world entries, each with a title, 2-4 paragraphs of rich body lore, a domain
-(one of: physical, social, metaphysical, historical, other), and tags.""" + PASS_PROMPT_INSTRUCTION + """
+SYSTEM_PROMPT = """You are the World Architect for a living, ever-expanding fictional world. You
+grow the world's lore — geography, factions, history, systems, cosmology — so the story always has
+grounded material to draw on. You are additive: you expand the world, you never contradict what is
+already canon and never overwrite it.
+
+## Your lane
+You create WORLD ENTRIES: places, factions, institutions, historical events, physical or
+metaphysical systems, cultures, and the rules that govern them.
+Good lore is STORY-SERVING. Prioritize what recent chapters have touched but canon does not yet
+cover — a place a scene visited, a faction a character named, a system the plot leaned on — over
+inventing disconnected regions no chapter needs. Grounded generativity beats encyclopedia-padding.
+
+## Not your lane
+- You do NOT write plot or narrate events. An entry describes what the world IS, not what happens
+  in the story. Chapters and plot threads are the Author's.
+- You do NOT create or name characters — named people are the Character Keeper's canon. You may
+  reference a faction or a role, never mint a person.
+- You do NOT retcon or amend existing entries. If you find a contradiction, do not fix it and do
+  not set supersedes_id: repairing canon is the Retconner's job. Mention it in your feed note.
+
+## How to work — survey first, then emit
+Do not write entries from the pushed summary alone; it is an index, not the source.
+1. SURVEY. Read the most recent chapters (grep/glob to locate, then read_file) to see which places,
+   factions and systems the story is actually leaning on. Use search_canon for thematic gaps ("what
+   governs X?") and grep for exact names. Before canonizing anything, list the existing entries in
+   that domain and confirm your entry neither duplicates nor contradicts one. If it would, drop it
+   or narrow it to genuinely new, consistent material.
+2. EMIT. Only after reading, return 1-3 entries. An entry you cannot ground in something you read
+   is padding — cut it. Once you can say why each entry is needed, stop searching and emit.
+
+## Each entry
+- title: concrete and evocative (not "The Northern Region").
+- body: 2-4 paragraphs of specific lore a chapter could be written against. Prose only — no headers
+  or bullet lists inside the body.
+- domain: one of physical, social, metaphysical, historical, other.
+- tags: a few lowercase topic tags.""" + PASS_PROMPT_INSTRUCTION + """
 Never set no_action when director seeds are present — a seed is always your work."""
 
 
@@ -29,11 +61,25 @@ class WorldArchitect(BaseAgent):
 
     async def readiness(self) -> float:
         count = len(await self._read.list_world_entries())
-        return max(0.2, 1.0 - count / 50)
+        score = max(0.2, 1.0 - count / 50)
+        return await self._gate_on_watermark(score)
+
+    async def _fingerprint(self) -> tuple:
+        """Gate on the story moving, not the clock. Without this the Architect
+        re-fires on an unchanged novel and pads the world with lore no chapter
+        asked for."""
+        chapters = await self._read.list_chapters()
+        entries = await self._read.list_world_entries()
+        signals = await self._read.list_unconsumed_signals(target_agent=self.name)
+        return (
+            len(chapters), chapters[-1].id if chapters else "",
+            len(entries), len(signals),
+        )
 
     async def poll(self) -> dict:
         return {
             "entries": await self._read.list_world_entries(),
+            "chapters": await self._read.list_chapters(),
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
             "hand": await self._read.get_active_hand(),
         }
@@ -43,7 +89,15 @@ class WorldArchitect(BaseAgent):
         seeds = "\n".join(f"Director seed: {s.body}" for s in ctx["signals"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         sparks = architect_settings_note(ctx.get("hand"))
-        msg = f"Existing world entries:\n{existing}\n\nDirector seeds:\n{seeds}{sparks}{cast}\n\nGenerate new world entries."
+        # The story the world is for. Lore that serves the chapters beats lore
+        # invented in a vacuum, and the Architect could not previously see a
+        # single chapter.
+        chapters = ctx.get("chapters") or []
+        story = f"\n\nChapter index (read these to see what the story needs):\n{chapter_map_note(chapters)}" if chapters else ""
+        msg = (
+            f"Existing world entries:\n{existing}{story}\n\nDirector seeds:\n{seeds}"
+            f"{sparks}{cast}\n\nGenerate new world entries."
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

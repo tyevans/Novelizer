@@ -6,8 +6,9 @@ prompt surfaces). Produced by a fan-out of research + per-agent redesign subagen
 proposal was written against the live source with `file:line` citations and a check of which
 wording is pinned by tests.
 
-**Status: proposals only.** Nothing in `novelizer/` was changed. Each proposal contains a
-paste-ready system prompt and concrete context-assembly changes, gated on review.
+**Status: implemented (2026-07-20).** All seven LLM agents and the shared surfaces have landed;
+see "What shipped" below. The proposals remain as the design record and rationale — where the
+implementation diverged from a proposal, this README says so.
 
 ## Reading order
 
@@ -77,7 +78,48 @@ autonomous personalities should share one identity source (voice pack).
   that the Editor then acts on.
 - **World Architect has no watermark** — it re-fires on an unchanged story.
 
-## Suggested implementation order
+## What shipped
+
+**Shared surfaces.** `novelizer/agents/prompts.py` is the new home for `RETRIEVAL_NOTE`,
+`RETRIEVAL_NOTE_BASE`, `PASS_PROMPT_INSTRUCTION` and `DEFAULT_PASS_REMARK`, re-exported from
+`author.py`/`base.py` so the existing import sites keep resolving (migrate those, then drop the
+re-export). The retrieval note now names the index-then-read loop, the grep-vs-`search_canon`
+boundary, the no-write-from-summary rule and a stopping rule. The pass instruction is a three-way
+act / stand-aside / confirm-first decision anchored to "what changed since your last pass", with
+correct silence framed as success and a don't-miss-real-events counterweight.
+
+**Identifiers and tools.** `chapter_map_note` and `causal_flags_note` speak in `chNNN` ordinals
+(matching the canon_fs `NNN-slug.md` filenames) with the raw UUID trailing only where a schema
+still needs it; `known_secrets_note` is title-first. `search_canon` gained a real tool contract
+(meaning vs exact string, worked example) and a 20-hit cap that announces its own truncation.
+
+**Evidence grounding.** Thread `touch`/`pay_off`/`abandon`, knowledge `learn`/`reveal`/`uses` and
+causal intents carry an `evidence` field, recorded onto the event payload as provenance.
+*Divergence from the proposal:* ungrounded citing intents are logged, not dropped — losing a real
+narrative beat is worse than recording an under-cited one, and the warning rate is the measurement
+that would justify a stricter policy. All payload fields default to `""`, so old events replay.
+
+**Per-agent.** Author (research-then-write phasing, anti-tell craft rules, ending guidance, cast
+ids, full most-recent chapter); Editor (cite-the-line ranked judging, bias guards, revision
+budget); Continuity Checker (both prompts: quote-both-sides grounding, mid-book weighting, stops
+duplicating the deterministic leak/paradox checks; worked learn/uses/reveal examples in the miner);
+Character Keeper (`pull_mode`, secret ids, aliases); Retconner (verify-then-amend, blast-radius
+check, `resolution` outcomes, lane guard); Structure Analyst (rubric with band anchors, calibration
+table of recent scores, `pull_mode`); World Architect (chapter index, watermark, survey-then-emit).
+
+**Bugs fixed along the way.** The infinite revision loop (chapters now carry a projector-derived
+`revision_count`; the Editor force-approves past `MAX_REVISIONS`); the Retconner's orphan world
+entry on character-id retcons (lane guard + the previously-dead `RETCON_REQUEST_REJECTED` event);
+the Character Keeper's dormant `learn` path (secret ids now reach the prompt); the World
+Architect's missing watermark; the Author's 200-char prior-chapter starvation.
+
+**Still open.** Persona weighting by lane (heavy for generators, light for fact-checkers) and the
+single-source-of-truth identity refactor between `voices/default.toml` and `chat/personas.py` —
+both described in `proposal-fleet-shared.md` §2.5/§5, neither implemented. The rotating crutch-word
+ledger (`recently_used_note`) is also unimplemented; `AI_TELL_BAN_NOTE` stays a static list, with
+the craft rules now carried in the Author's own prompt.
+
+## Original implementation order (as proposed)
 
 1. **Fleet-shared surfaces** (`proposal-fleet-shared.md`): new `agents/prompts.py` with
    rewritten RETRIEVAL_NOTE + PASS_PROMPT_INSTRUCTION; `chNNN` ordinals replacing raw UUIDs
