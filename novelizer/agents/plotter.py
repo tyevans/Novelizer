@@ -125,6 +125,7 @@ class Plotter(BaseAgent):
         promises = await self._read.list_promises()
         signals = await self._read.list_unconsumed_signals(target_agent="plotter")
         hand = await self._read.get_active_hand()
+        open_proposals = await self._read.list_proposals(status="open")
         return {
             "chapters": chapters,
             "world": world[:10],
@@ -137,6 +138,7 @@ class Plotter(BaseAgent):
             "promises": promises,
             "signals": signals,
             "hand": hand,
+            "open_proposals": open_proposals,
         }
 
     async def work(self, ctx: dict) -> PlotterOutput | None:
@@ -150,13 +152,22 @@ class Plotter(BaseAgent):
             return
 
         if out.blueprint_plan is not None:
-            if ctx["blueprint"] is None:
-                await self._commit_blueprint_plan(out.blueprint_plan)
-            else:
+            pending_blueprint_proposal = any(
+                p.target_event_type == "blueprint.adopted" for p in ctx["open_proposals"]
+            )
+            if ctx["blueprint"] is not None:
                 logger.warning(
                     "plotter: dropped blueprint plan citing framework %r -- a blueprint is already active",
                     out.blueprint_plan.framework,
                 )
+            elif pending_blueprint_proposal:
+                logger.info(
+                    "plotter: dropped blueprint plan citing framework %r -- a blueprint proposal is "
+                    "already pending Director approval",
+                    out.blueprint_plan.framework,
+                )
+            else:
+                await self._commit_blueprint_plan(out.blueprint_plan)
 
         active_thread_ids = {t.id for t in ctx["threads"]}
         active_beat_ids = {b.id for b in ctx["beats"]}

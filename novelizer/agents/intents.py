@@ -519,10 +519,14 @@ async def commit_brief_intents(
             if not intent.goal.strip():
                 logger.warning("%s: dropped brief draft with blank goal", agent_name)
                 continue
-            threads_to_touch = [t for t in intent.threads_to_touch if _normalize_id(t) in active_thread_ids]
-            beats_to_hit = [b for b in intent.beats_to_hit if _normalize_id(b) in active_beat_ids]
+            threads_to_touch = [
+                _normalize_id(t) for t in intent.threads_to_touch if _normalize_id(t) in active_thread_ids
+            ]
+            beats_to_hit = [
+                _normalize_id(b) for b in intent.beats_to_hit if _normalize_id(b) in active_beat_ids
+            ]
             promises_to_progress = [
-                p for p in intent.promises_to_progress if _normalize_id(p) in active_promise_ids
+                _normalize_id(p) for p in intent.promises_to_progress if _normalize_id(p) in active_promise_ids
             ]
             if (
                 len(threads_to_touch) != len(intent.threads_to_touch)
@@ -551,10 +555,13 @@ async def commit_brief_intents(
                     synopsis=intent.synopsis,
                 ),
             )
+            open_by_ordinal[intent.target_ordinal] = ChapterBriefRecord(
+                id=brief_id, target_ordinal=intent.target_ordinal, goal=intent.goal,
+            )
             continue
         # supersede
         brief_id = _normalize_id(intent.id)
-        if brief_id not in {k for k in open_by_id}:
+        if brief_id not in open_by_id:
             logger.warning(
                 "%s: dropped brief supersede citing unknown/non-open id %r", agent_name, intent.id
             )

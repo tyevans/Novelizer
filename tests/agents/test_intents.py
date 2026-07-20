@@ -306,7 +306,7 @@ async def test_brief_draft_filters_unknown_cited_ids_but_keeps_brief(caplog):
     await commit_brief_intents(
         c, "plotter",
         [BriefIntent(action="draft", target_ordinal=5, goal="x",
-                     threads_to_touch=["t1", "ghost"], beats_to_hit=["ghost-beat"],
+                     threads_to_touch=["T1 ", "ghost"], beats_to_hit=["ghost-beat"],
                      promises_to_progress=["ghost-promise"])],
         open_brief_ids=[], drafted_chapter_count=3,
         active_thread_ids={"t1"}, active_beat_ids=set(), active_promise_ids=set(),
@@ -336,6 +336,30 @@ async def test_brief_draft_supersedes_existing_open_brief_for_same_ordinal():
     name1, event_type1, agg1, payload1 = c.commits[1]
     assert event_type1 == EventType.CHAPTER_BRIEF_DRAFTED
     assert payload0.superseded_by_brief_id == payload1.brief_id
+
+
+@pytest.mark.asyncio
+async def test_brief_draft_duplicate_ordinal_in_same_batch_supersedes_first():
+    c = FakeCommitter()
+    await commit_brief_intents(
+        c, "plotter",
+        [
+            BriefIntent(action="draft", target_ordinal=5, goal="first"),
+            BriefIntent(action="draft", target_ordinal=5, goal="second"),
+        ],
+        open_brief_ids=[], drafted_chapter_count=3,
+        active_thread_ids=set(), active_beat_ids=set(), active_promise_ids=set(),
+    )
+    drafted = [entry for entry in c.commits if entry[1] == EventType.CHAPTER_BRIEF_DRAFTED]
+    superseded = [entry for entry in c.commits if entry[1] == EventType.CHAPTER_BRIEF_SUPERSEDED]
+    assert len(drafted) == 2
+    assert len(superseded) == 1
+    first_brief_id = drafted[0][3].brief_id
+    second_brief_id = drafted[1][3].brief_id
+    assert drafted[0][3].goal == "first"
+    assert drafted[1][3].goal == "second"
+    assert superseded[0][3].brief_id == first_brief_id
+    assert superseded[0][3].superseded_by_brief_id == second_brief_id
 
 
 @pytest.mark.asyncio

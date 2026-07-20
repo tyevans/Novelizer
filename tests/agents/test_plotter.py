@@ -171,6 +171,28 @@ async def test_run_once_drops_blueprint_plan_when_one_already_active(stack):
     assert proposals == []
 
 
+async def test_run_once_twice_with_pending_proposal_creates_only_one_proposal(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+
+    autonomy_state = await read.get_autonomy_state()
+    assert autonomy_state.global_level == AutonomyLevel.full_auto
+
+    gating_committer = GatingCommitter(events, AutonomyPolicy(read))
+    out = PlotterOutput(blueprint_plan=BlueprintPlan(framework="six-position", target_chapter_count=12))
+    plotter = Plotter(FakeRunner(out), read, gating_committer)
+
+    await plotter.run_once()
+    await proj.catch_up()
+    await plotter.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0)
+    proposals = [e for e in log if e.event_type == EventType.PROPOSAL_CREATED]
+    assert len(proposals) == 1
+
+
 # --- prompt content ---
 
 async def test_prompt_with_no_blueprint_proposes_one(stack):
