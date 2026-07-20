@@ -7,8 +7,9 @@ import aiosqlite
 from novelizer.canon import db
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus, InspirationHandRecord
+from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus, InspirationHandRecord, PromiseRecord, PromiseState
 from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,9 @@ CREATE TABLE IF NOT EXISTS projector_state (
     id TEXT PRIMARY KEY, last_sequence INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS promises (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, state TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS secrets (
@@ -127,7 +131,7 @@ class Projector:
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
-            "inspiration_uptake",
+            "inspiration_uptake", "promises",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -288,6 +292,77 @@ class Projector:
             # else: no row for this id yet (shouldn't happen under correct agent
             # behavior, since agents validate intents against known ids before
             # committing) — nothing to project, no error raised.
+        elif t == EventType.PROMISE_MADE:
+            cur = await self._conn.execute("SELECT id FROM promises WHERE id=?", (p["id"],))
+            if await cur.fetchone() is None:
+                record = PromiseRecord(
+                    id=p["id"], name=p["name"], description=p.get("description", ""),
+                    kind=p.get("kind", "foreshadow"), thread_id=p.get("thread_id", ""),
+                    setup_chapter_id=p.get("chapter_id", ""),
+                    window_lo=p.get("window_lo", 0), window_hi=p.get("window_hi", 0),
+                    last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO promises (id, data, state) VALUES (?,?,?)",
+                    (record.id, record.model_dump_json(), record.state.value),
+                )
+            # else: a promise id is minted exactly once -- first-make-wins.
+        elif t in (EventType.PROMISE_PROGRESSED, EventType.PROMISE_PAID, EventType.PROMISE_RELEASED):
+            cur = await self._conn.execute("SELECT data FROM promises WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = PromiseRecord.model_validate_json(row[0])
+                if record.state.value not in TERMINAL_PROMISE_STATES:
+                    new_state = {
+                        EventType.PROMISE_PROGRESSED: PromiseState.open,
+                        EventType.PROMISE_PAID: PromiseState.paid,
+                        EventType.PROMISE_RELEASED: PromiseState.released,
+                    }[t]
+                    progress = record.progress_count + (1 if t == EventType.PROMISE_PROGRESSED else 0)
+                    updated = record.model_copy(update={
+                        "state": new_state, "progress_count": progress,
+                        "last_note": p.get("note", p.get("reason", "")),
+                        "last_chapter_id": p.get("chapter_id", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO promises (id, data, state) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.state.value),
+                    )
+                # else: paid/released are absorbing -- the event is a fact in
+                # the log, but the promises projection does not change.
+            # else: no row for this id yet -- nothing to project, no error raised.
+        elif t == EventType.THREAD_RESOLUTION_PLANNED:
+            cur = await self._conn.execute("SELECT data FROM threads WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ThreadRecord.model_validate_json(row[0])
+                if record.state.value not in TERMINAL_STATES:
+                    updated = record.model_copy(update={
+                        "window_lo": p.get("window_lo", 0), "window_hi": p.get("window_hi", 0),
+                        "planned_payoff_note": p.get("planned_payoff_note", ""),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.state.value),
+                    )
+                # else: no-op on a terminal thread.
+            # else: unknown thread id -- no-op, no error raised.
+        elif t == EventType.SECRET_REVEAL_PLANNED:
+            cur = await self._conn.execute("SELECT data FROM secrets WHERE id=?", (p["id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = SecretRecord.model_validate_json(row[0])
+                if not record.revealed:
+                    updated = record.model_copy(update={
+                        "reveal_window_lo": p.get("window_lo", 0),
+                        "reveal_window_hi": p.get("window_hi", 0),
+                    })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                        (updated.id, updated.model_dump_json()),
+                    )
+                # else: no-op once revealed.
+            # else: unknown secret id -- no-op, no error raised.
         elif t == EventType.SECRET_CREATED:
             cur = await self._conn.execute("SELECT id FROM secrets WHERE id=?", (p["id"],))
             existing = await cur.fetchone()

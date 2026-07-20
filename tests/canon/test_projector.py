@@ -654,3 +654,66 @@ def test_thread_touched_replays_identically_with_and_without_source_field(has_so
     record_a = asyncio.run(_build_thread_stack(omit_source=True))
     record_b = asyncio.run(_build_thread_stack(omit_source=False))
     assert record_a == record_b
+
+
+async def test_resolution_planned_folds_window_into_thread_and_supersedes(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadResolutionPlanned
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+    await events.append(EventType.THREAD_RESOLUTION_PLANNED, "t1",
+                        ThreadResolutionPlanned(id="t1", window_lo=18, window_hi=20, planned_payoff_note="pay at the gate"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["window_lo"] == 18
+    assert rows[0]["window_hi"] == 20
+    assert rows[0]["planned_payoff_note"] == "pay at the gate"
+
+    # Re-emission supersedes the prior plan.
+    await events.append(EventType.THREAD_RESOLUTION_PLANNED, "t1",
+                        ThreadResolutionPlanned(id="t1", window_lo=21, window_hi=23, planned_payoff_note="pay later"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["window_lo"] == 21
+    assert rows[0]["window_hi"] == 23
+    assert rows[0]["planned_payoff_note"] == "pay later"
+
+    # Unknown thread id: no crash, no new row.
+    await events.append(EventType.THREAD_RESOLUTION_PLANNED, "zz",
+                        ThreadResolutionPlanned(id="zz", window_lo=1, window_hi=2))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert len(rows) == 1
+
+
+async def test_resolution_planned_noop_on_terminal_thread(wired):
+    from novelizer.canon.events import ThreadPlanted, ThreadPaidOff, ThreadResolutionPlanned
+    events, proj, _ = wired
+    await events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="The Locket"))
+    await events.append(EventType.THREAD_PAID_OFF, "t1", ThreadPaidOff(id="t1"))
+    await events.append(EventType.THREAD_RESOLUTION_PLANNED, "t1",
+                        ThreadResolutionPlanned(id="t1", window_lo=18, window_hi=20, planned_payoff_note="too late"))
+    await proj.catch_up()
+    rows = await _thread_rows(proj)
+    assert rows[0]["state"] == "paid_off"
+    assert rows[0]["window_lo"] == 0
+    assert rows[0]["window_hi"] == 0
+    assert rows[0]["planned_payoff_note"] == ""
+
+
+async def test_reveal_planned_folds_window_into_secret_and_noop_when_revealed(wired):
+    from novelizer.canon.events import SecretCreated, SecretRevealPlanned, SecretRevealed
+    events, proj, _ = wired
+    await events.append(EventType.SECRET_CREATED, "s1", SecretCreated(id="s1", title="The Heir Lives"))
+    await events.append(EventType.SECRET_REVEAL_PLANNED, "s1", SecretRevealPlanned(id="s1", window_lo=5, window_hi=9))
+    await proj.catch_up()
+    rows = await _secret_rows(proj)
+    assert rows[0]["reveal_window_lo"] == 5
+    assert rows[0]["reveal_window_hi"] == 9
+
+    await events.append(EventType.SECRET_REVEALED, "s1", SecretRevealed(id="s1"))
+    await events.append(EventType.SECRET_REVEAL_PLANNED, "s1", SecretRevealPlanned(id="s1", window_lo=10, window_hi=12))
+    await proj.catch_up()
+    rows = await _secret_rows(proj)
+    assert rows[0]["revealed"] is True
+    assert rows[0]["reveal_window_lo"] == 5
+    assert rows[0]["reveal_window_hi"] == 9
