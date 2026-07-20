@@ -733,3 +733,23 @@ def test_build_editor_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_editor_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+async def test_editor_commits_promise_intents_with_validation(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import PromiseIntent
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="approve", notes="clean",
+        promise_intents=[
+            PromiseIntent(action="make", name="The Sealed Letter", kind="plant"),
+            PromiseIntent(action="pay", id="never-made"),
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    promises = await read.list_promises()
+    assert [p.id for p in promises] == ["the-sealed-letter"]
+    assert promises[0].state.value == "open"

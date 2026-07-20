@@ -5,6 +5,7 @@ from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, InspirationHandConsumed
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.events import ChapterRevised
 from novelizer.muse.prompts import AI_TELL_BAN_NOTE, casting_pool_note, inspiration_note
@@ -14,6 +15,7 @@ AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write 
 You receive world lore, active characters, previous chapter summaries, and director notes.
 Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
+You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring); progress/pay/release cite an existing promise id exactly.
 """ + AI_TELL_BAN_NOTE
 
 _RETRIEVAL_NOTE_PREFIX = (
@@ -116,6 +118,7 @@ class Author(BaseAgent):
             "themes": await self._read.list_themes(),
             "causal_edges": await self._read.list_causal_edges(),
             "hand": await self._read.get_active_hand(),
+            "promises": await self._read.list_promises(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -164,6 +167,12 @@ class Author(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter_id)
+        active_promise_ids = {
+            p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
+        }
+        await self._commit_promise_intents(
+            draft.promise_intents, active_promise_ids, active_thread_ids, chapter_id=chapter_id
+        )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter_id)
         active_secret_ids = {s.id for s in ctx["secrets"]}

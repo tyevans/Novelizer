@@ -38,6 +38,7 @@ class ChapterDraft(BaseModel):
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
 
 
 class Runner(Protocol):

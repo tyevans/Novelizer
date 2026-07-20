@@ -176,6 +176,7 @@ class EditorVerdict(BaseModel):
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     voice_drift_flags: list[VoiceDriftFlag] = Field(default_factory=list)
+    promise_intents: list[PromiseIntent] = Field(default_factory=list)
 
 
 class ContinuityOutput(BaseModel):

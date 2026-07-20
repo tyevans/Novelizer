@@ -689,3 +689,26 @@ def test_retrieval_note_pinned_and_base_split():
         "in full before writing. "
         + suffix
     )
+
+
+async def test_author_commits_promise_intents_with_validation(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import PromiseIntent
+    draft = ChapterDraft(
+        title="T", prose="P",
+        promise_intents=[
+            PromiseIntent(action="make", name="The Sealed Letter", kind="plant"),
+            PromiseIntent(action="pay", id="never-made"),
+        ],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    promises = await read.list_promises()
+    assert [p.id for p in promises] == ["the-sealed-letter"]
+    assert promises[0].state.value == "open"
+
+
+async def test_author_system_prompt_mentions_promises():
+    from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
+    assert "promise" in AUTHOR_SYSTEM_PROMPT.lower()

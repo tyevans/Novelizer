@@ -7,12 +7,14 @@ from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest, RetconStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
-notes: if revising, specific actionable feedback; if approving, brief praise."""
+notes: if revising, specific actionable feedback; if approving, brief praise.
+You may declare promise intents when the chapter plants or pays off a setup: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring); progress/pay/release cite an existing promise id exactly."""
 
 VOICE_SOURCE_TAG = "[source: voice_drift]"
 
@@ -47,6 +49,7 @@ class Editor(BaseAgent):
             "causal_edges": await self._read.list_causal_edges(),
             "themes": await self._read.list_themes(),
             "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "promises": await self._read.list_promises(),
         }
 
     async def _character_voices_block(self, character_ids: list[str]) -> str:
@@ -119,6 +122,12 @@ class Editor(BaseAgent):
             t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
         }
         await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_promise_ids = {
+            p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
+        }
+        await self._commit_promise_intents(
+            verdict.promise_intents, active_promise_ids, active_thread_ids, chapter_id=ch.id
+        )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
