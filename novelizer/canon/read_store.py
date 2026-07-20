@@ -6,6 +6,7 @@ from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
     InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
+    BlueprintRecord, BeatRecord, ChapterBriefRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
 
@@ -113,6 +114,34 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM promises WHERE id=?", (promise_id,))
         row = await cur.fetchone()
         return PromiseRecord.model_validate_json(row[0]) if row else None
+
+    async def get_active_blueprint(self) -> Optional[BlueprintRecord]:
+        cur = await self._conn.execute(
+            "SELECT data FROM blueprints WHERE active=1 ORDER BY rowid DESC LIMIT 1"
+        )
+        row = await cur.fetchone()
+        return BlueprintRecord.model_validate_json(row[0]) if row else None
+
+    async def list_beats(self) -> list[BeatRecord]:
+        cur = await self._conn.execute("SELECT data FROM beats ORDER BY rowid")
+        return [BeatRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def list_briefs(self, status: Optional[str] = None) -> list[ChapterBriefRecord]:
+        if status:
+            cur = await self._conn.execute(
+                "SELECT data FROM chapter_briefs WHERE status=? ORDER BY rowid", (status,)
+            )
+        else:
+            cur = await self._conn.execute("SELECT data FROM chapter_briefs ORDER BY rowid")
+        return [ChapterBriefRecord.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_open_brief_for_ordinal(self, ordinal: int) -> Optional[ChapterBriefRecord]:
+        cur = await self._conn.execute("SELECT data FROM chapter_briefs WHERE status='open' ORDER BY rowid")
+        for r in await cur.fetchall():
+            record = ChapterBriefRecord.model_validate_json(r[0])
+            if record.target_ordinal == ordinal:
+                return record
+        return None
 
     async def list_themes(self) -> list[ThemeRecord]:
         cur = await self._conn.execute("SELECT data FROM themes ORDER BY rowid")

@@ -717,3 +717,127 @@ async def test_reveal_planned_folds_window_into_secret_and_noop_when_revealed(wi
     assert rows[0]["revealed"] is True
     assert rows[0]["reveal_window_lo"] == 5
     assert rows[0]["reveal_window_hi"] == 9
+
+
+async def test_blueprint_adoption_supersedes_prior_and_clears_beats(wired):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20,
+        beats=[
+            BeatSpec(beat_id="A-inciting", slug="inciting", name="Inciting Incident", ideal_pct=0.1, tolerance_pct=0.05),
+            BeatSpec(beat_id="A-midpoint", slug="midpoint", name="Midpoint", ideal_pct=0.5, tolerance_pct=0.05),
+        ],
+    ))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active is not None and active.id == "A"
+    assert len(await read.list_beats()) == 2
+
+    await events.append(EventType.BLUEPRINT_ADOPTED, "B", BlueprintAdopted(
+        blueprint_id="B", framework="heros_journey", target_chapter_count=24,
+        beats=[
+            BeatSpec(beat_id="B-call", slug="call", name="Call to Adventure", ideal_pct=0.1, tolerance_pct=0.05),
+        ],
+    ))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active is not None and active.id == "B"
+    beats = await read.list_beats()
+    assert len(beats) == 1
+    assert beats[0].id == "B-call"
+
+    cur = await proj._conn.execute("SELECT data, active FROM blueprints WHERE id='A'")
+    row = await cur.fetchone()
+    assert row[1] == 0
+    assert json.loads(row[0])["active"] is False
+    await read.close()
+
+
+async def test_blueprint_retargeted_folds_only_active(wired):
+    from novelizer.canon.events import BlueprintAdopted, BlueprintRetargeted
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20, beats=[],
+    ))
+    await proj.catch_up()
+    await events.append(EventType.BLUEPRINT_ADOPTED, "B", BlueprintAdopted(
+        blueprint_id="B", framework="heros_journey", target_chapter_count=24, beats=[],
+    ))
+    await proj.catch_up()
+
+    # Retarget the now-superseded blueprint A: no-op.
+    await events.append(EventType.BLUEPRINT_RETARGETED, "A", BlueprintRetargeted(blueprint_id="A", target_chapter_count=99))
+    await proj.catch_up()
+    cur = await proj._conn.execute("SELECT data FROM blueprints WHERE id='A'")
+    row = await cur.fetchone()
+    assert json.loads(row[0])["target_chapter_count"] == 20
+
+    # Retarget the active blueprint B: folds.
+    await events.append(EventType.BLUEPRINT_RETARGETED, "B", BlueprintRetargeted(blueprint_id="B", target_chapter_count=30))
+    await proj.catch_up()
+    active = await read.get_active_blueprint()
+    assert active is not None and active.target_chapter_count == 30
+    await read.close()
+
+
+async def test_beat_fulfillment_folds_reemits_and_noops_on_unknown(wired):
+    from novelizer.canon.events import BlueprintAdopted, BeatSpec, BeatFulfilled
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.BLUEPRINT_ADOPTED, "A", BlueprintAdopted(
+        blueprint_id="A", framework="three_act", target_chapter_count=20,
+        beats=[BeatSpec(beat_id="A-midpoint", slug="midpoint", name="Midpoint", ideal_pct=0.5, tolerance_pct=0.05)],
+    ))
+    await proj.catch_up()
+
+    await events.append(EventType.BEAT_FULFILLED, "A-midpoint", BeatFulfilled(beat_id="A-midpoint", chapter_id="c5", note="turn"))
+    await proj.catch_up()
+    beats = await read.list_beats()
+    assert beats[0].fulfilled_by_chapter_id == "c5" and beats[0].note == "turn"
+
+    # Re-emission overwrites.
+    await events.append(EventType.BEAT_FULFILLED, "A-midpoint", BeatFulfilled(beat_id="A-midpoint", chapter_id="c7", note="actually here"))
+    await proj.catch_up()
+    beats = await read.list_beats()
+    assert beats[0].fulfilled_by_chapter_id == "c7" and beats[0].note == "actually here"
+
+    # Unknown beat id: no-op, no crash.
+    await events.append(EventType.BEAT_FULFILLED, "zz", BeatFulfilled(beat_id="zz", chapter_id="c9"))
+    await proj.catch_up()
+    assert len(await read.list_beats()) == 1
+    await read.close()
+
+
+async def test_get_open_brief_for_ordinal_ignores_terminal_briefs(wired):
+    from novelizer.canon.events import ChapterBriefDrafted, ChapterBriefSuperseded, ChapterBriefFulfilled
+    events, proj, _ = wired
+    read = ReadStore(proj._path)
+    await read.init()
+    await events.append(EventType.CHAPTER_BRIEF_DRAFTED, "r1",
+                        ChapterBriefDrafted(brief_id="r1", target_ordinal=3, goal="g1"))
+    await events.append(EventType.CHAPTER_BRIEF_DRAFTED, "r2",
+                        ChapterBriefDrafted(brief_id="r2", target_ordinal=4, goal="g2"))
+    await proj.catch_up()
+
+    open_for_3 = await read.get_open_brief_for_ordinal(3)
+    assert open_for_3 is not None and open_for_3.id == "r1"
+
+    await events.append(EventType.CHAPTER_BRIEF_SUPERSEDED, "r1",
+                        ChapterBriefSuperseded(brief_id="r1", superseded_by_brief_id="r3"))
+    await proj.catch_up()
+    assert await read.get_open_brief_for_ordinal(3) is None
+
+    open_for_4 = await read.get_open_brief_for_ordinal(4)
+    assert open_for_4 is not None and open_for_4.id == "r2"
+
+    await events.append(EventType.CHAPTER_BRIEF_FULFILLED, "r2",
+                        ChapterBriefFulfilled(brief_id="r2", chapter_id="c1"))
+    await proj.catch_up()
+    assert await read.get_open_brief_for_ordinal(4) is None
+    await read.close()

@@ -7,7 +7,11 @@ import aiosqlite
 from novelizer.canon import db
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, StoredEvent
-from novelizer.store.models import Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus, InspirationHandRecord, PromiseRecord, PromiseState
+from novelizer.store.models import (
+    Chapter, EditorialStatus, ThreadRecord, ThreadState, SecretRecord, ThemeRecord, HandStatus,
+    InspirationHandRecord, PromiseRecord, PromiseState, BlueprintRecord, BeatRecord,
+    ChapterBriefRecord, BriefStatus,
+)
 from novelizer.canon.threads import TERMINAL_STATES
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 
@@ -79,6 +83,15 @@ CREATE TABLE IF NOT EXISTS inspiration_uptake (
     hand_id TEXT NOT NULL, kind TEXT NOT NULL, item TEXT NOT NULL,
     chapter_id TEXT NOT NULL DEFAULT '', PRIMARY KEY (hand_id, kind, item)
 );
+CREATE TABLE IF NOT EXISTS blueprints (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, active INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS beats (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chapter_briefs (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
+);
 """
 
 
@@ -131,7 +144,7 @@ class Projector:
             "retcon_requests", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
-            "inspiration_uptake", "promises",
+            "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -494,3 +507,103 @@ class Projector:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)
             )
+        elif t == EventType.BLUEPRINT_ADOPTED:
+            # Adoption supersedes any prior active blueprint: fold active=False
+            # into every existing row's data JSON (so records stay truthful on
+            # read) and clear the active=1 flag column, then drop all beats --
+            # superseded blueprints keep their record for audit, but their
+            # beats do not survive as live targets.
+            cur = await self._conn.execute("SELECT id, data FROM blueprints")
+            rows = await cur.fetchall()
+            for row_id, row_data in rows:
+                existing = BlueprintRecord.model_validate_json(row_data)
+                updated = existing.model_copy(update={"active": False})
+                await self._conn.execute(
+                    "UPDATE blueprints SET data=?, active=0 WHERE id=?",
+                    (updated.model_dump_json(), row_id),
+                )
+            await self._conn.execute("DELETE FROM beats")
+            record = BlueprintRecord(
+                id=p["blueprint_id"], framework=p["framework"],
+                target_chapter_count=p["target_chapter_count"], genre=p.get("genre", ""),
+                obligatory_scenes=p.get("obligatory_scenes", []), active=True, note=p.get("note", ""),
+            )
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                (record.id, record.model_dump_json(), 1),
+            )
+            for spec in p.get("beats", []):
+                beat = BeatRecord(
+                    id=spec["beat_id"], blueprint_id=record.id, slug=spec["slug"], name=spec["name"],
+                    ideal_pct=spec["ideal_pct"], tolerance_pct=spec["tolerance_pct"],
+                    expected_polarity=spec.get("expected_polarity", ""),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO beats (id, data) VALUES (?,?)",
+                    (beat.id, beat.model_dump_json()),
+                )
+        elif t == EventType.BLUEPRINT_RETARGETED:
+            cur = await self._conn.execute("SELECT data, active FROM blueprints WHERE id=?", (p["blueprint_id"],))
+            row = await cur.fetchone()
+            if row is not None and row[1]:
+                record = BlueprintRecord.model_validate_json(row[0])
+                updated = record.model_copy(update={"target_chapter_count": p["target_chapter_count"]})
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                    (updated.id, updated.model_dump_json(), 1),
+                )
+            # else: unknown or superseded blueprint id -- no-op, no error raised.
+        elif t == EventType.BEAT_FULFILLED:
+            cur = await self._conn.execute("SELECT data FROM beats WHERE id=?", (p["beat_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = BeatRecord.model_validate_json(row[0])
+                updated = record.model_copy(update={
+                    "fulfilled_by_chapter_id": p.get("chapter_id", ""),
+                    "note": p.get("note", ""),
+                })
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO beats (id, data) VALUES (?,?)",
+                    (updated.id, updated.model_dump_json()),
+                )
+            # else: unknown beat id -- no-op, no error raised.
+        elif t == EventType.CHAPTER_BRIEF_DRAFTED:
+            cur = await self._conn.execute("SELECT id FROM chapter_briefs WHERE id=?", (p["brief_id"],))
+            if await cur.fetchone() is None:
+                record = ChapterBriefRecord(
+                    id=p["brief_id"], target_ordinal=p["target_ordinal"], goal=p["goal"],
+                    pov_character_id=p.get("pov_character_id", ""),
+                    threads_to_touch=p.get("threads_to_touch", []),
+                    beats_to_hit=p.get("beats_to_hit", []),
+                    promises_to_progress=p.get("promises_to_progress", []),
+                    value_shift=p.get("value_shift", ""), planned_outcome=p.get("planned_outcome", ""),
+                    synopsis=p.get("synopsis", ""),
+                )
+                await self._conn.execute(
+                    "INSERT OR REPLACE INTO chapter_briefs (id, data, status) VALUES (?,?,?)",
+                    (record.id, record.model_dump_json(), record.status.value),
+                )
+            # else: a brief id is minted exactly once -- first-draft-wins.
+        elif t in (EventType.CHAPTER_BRIEF_SUPERSEDED, EventType.CHAPTER_BRIEF_FULFILLED):
+            cur = await self._conn.execute("SELECT data FROM chapter_briefs WHERE id=?", (p["brief_id"],))
+            row = await cur.fetchone()
+            if row is not None:
+                record = ChapterBriefRecord.model_validate_json(row[0])
+                if record.status == BriefStatus.open:
+                    if t == EventType.CHAPTER_BRIEF_SUPERSEDED:
+                        updated = record.model_copy(update={
+                            "status": BriefStatus.superseded,
+                            "superseded_by_brief_id": p.get("superseded_by_brief_id", ""),
+                        })
+                    else:
+                        updated = record.model_copy(update={
+                            "status": BriefStatus.fulfilled,
+                            "fulfilled_by_chapter_id": p.get("chapter_id", ""),
+                        })
+                    await self._conn.execute(
+                        "INSERT OR REPLACE INTO chapter_briefs (id, data, status) VALUES (?,?,?)",
+                        (updated.id, updated.model_dump_json(), updated.status.value),
+                    )
+                # else: superseded/fulfilled are absorbing -- the event is a
+                # fact in the log, but the projection does not change.
+            # else: unknown brief id -- no-op, no error raised.
