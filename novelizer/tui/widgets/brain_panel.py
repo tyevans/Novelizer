@@ -34,6 +34,9 @@ class BrainPanel(Vertical):
     _brain_loop once per second; every refresh updates all four tabs plus the
     strip so nothing is missed while another tab is open."""
 
+    def on_mount(self) -> None:
+        self.query_one("#brain_tabs", TabbedContent).active = "tab_outline"
+
     def compose(self) -> ComposeResult:
         with TabbedContent(id="brain_tabs"):
             with TabPane("1 Shape", id="tab_shape"):

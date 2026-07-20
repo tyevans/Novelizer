@@ -31,7 +31,7 @@ async def test_brain_panel_replaces_the_four_stacked_panes():
             panel = app.query_one("#brain", BrainPanel)
             assert str(panel.border_title) == "STORY BRAIN"
             tabs = app.query_one("#brain_tabs", TabbedContent)
-            assert tabs.active == "tab_shape"
+            assert tabs.active == "tab_outline"
             for pane_id in (
                 "tab_shape", "tab_threads", "tab_secrets", "tab_causeway", "tab_outline", "tab_arcs",
             ):
