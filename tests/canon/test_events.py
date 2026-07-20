@@ -106,3 +106,22 @@ def test_causal_edge_declared_payload_roundtrips():
     from novelizer.canon.events import CausalEdgeDeclared
     edge = CausalEdgeDeclared(cause_chapter_id="c1", effect_chapter_id="c3", note="the fire forces the move")
     assert CausalEdgeDeclared.model_validate_json(edge.model_dump_json()) == edge
+
+
+def test_promise_event_payloads_construct_with_defaults():
+    from novelizer.canon.events import (
+        EventType, PromiseMade, PromiseProgressed, PromisePaid, PromiseReleased,
+        ThreadResolutionPlanned, SecretRevealPlanned,
+    )
+    made = PromiseMade(id="the-sealed-letter", name="The Sealed Letter")
+    assert made.kind == "foreshadow" and made.window_lo == 0 and made.window_hi == 0
+    assert PromiseProgressed(id="x").note == ""
+    assert PromisePaid(id="x").chapter_id == ""
+    assert PromiseReleased(id="x").reason == ""
+    trp = ThreadResolutionPlanned(id="t", window_lo=18, window_hi=20)
+    assert trp.planned_payoff_note == ""
+    srp = SecretRevealPlanned(id="s", window_lo=5, window_hi=9)
+    assert srp.window_hi == 9
+    assert EventType.PROMISE_MADE == "promise.made"
+    assert EventType.THREAD_RESOLUTION_PLANNED == "thread.resolution_planned"
+    assert EventType.SECRET_REVEAL_PLANNED == "secret.reveal_planned"
