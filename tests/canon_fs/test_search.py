@@ -64,3 +64,30 @@ async def test_search_canon_tool_metadata():
     tool = build_search_canon_tool(None, None)
     assert tool.name == "search_canon"
     assert "canon" in tool.description.lower()
+
+
+async def test_search_canon_promise_hit_points_at_ledger(store):
+    from novelizer.store.models import PromiseRecord
+    promise = PromiseRecord(id="p1", name="Sealed Letter", description="bell wax")
+    await store.upsert_promise(promise)
+    tool = build_search_canon_tool(store, FakeReadStore())
+    out = await tool.ainvoke({"query": "bell", "kinds": ["promise"]})
+    assert "(promise) /outline/ledger.md — 'Sealed Letter' [id: p1]" in out
+
+
+async def test_search_canon_brief_hit_points_at_briefs_dir(store):
+    from novelizer.store.models import ChapterBriefRecord
+    brief = ChapterBriefRecord(id="b1", target_ordinal=2, goal="bell tolls", synopsis="dusk")
+    await store.upsert_brief(brief)
+    tool = build_search_canon_tool(store, FakeReadStore())
+    out = await tool.ainvoke({"query": "bell", "kinds": ["brief"]})
+    assert "(brief) /outline/briefs/ — 'bell tolls' [id: b1]" in out
+
+
+async def test_search_canon_arc_hit_has_no_file(store):
+    from novelizer.store.models import ArcRecord
+    arc = ArcRecord(id="arc1", character_id="mara", arc_type="positive", lie="bells lie")
+    await store.upsert_arc(arc)
+    tool = build_search_canon_tool(store, FakeReadStore())
+    out = await tool.ainvoke({"query": "bell", "kinds": ["arc"]})
+    assert "(arc) (no file — cite id) — 'Arc: mara' [id: arc1]" in out

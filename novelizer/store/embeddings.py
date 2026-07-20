@@ -3,7 +3,10 @@ import asyncio
 from dataclasses import dataclass
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-from novelizer.store.models import WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord
+from novelizer.store.models import (
+    WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord,
+    PromiseRecord, ChapterBriefRecord, ArcRecord,
+)
 
 
 @dataclass
@@ -36,6 +39,9 @@ class EmbeddingStore:
         self._themes = self._client.get_or_create_collection("themes", embedding_function=ef)
         self._threads = self._client.get_or_create_collection("threads", embedding_function=ef)
         self._secrets = self._client.get_or_create_collection("secrets", embedding_function=ef)
+        self._promises = self._client.get_or_create_collection("promises", embedding_function=ef)
+        self._briefs = self._client.get_or_create_collection("briefs", embedding_function=ef)
+        self._arcs = self._client.get_or_create_collection("arcs", embedding_function=ef)
         # Writes ARE reachable concurrently: agent intent commits
         # (novelizer/agents/intents.py) run as concurrent background tasks,
         # and CanonIndexer.catch_up() runs on every TUI tick. chromadb's
@@ -90,6 +96,30 @@ class EmbeddingStore:
                 self._secrets.upsert, ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}]
             )
 
+    async def upsert_promise(self, promise: PromiseRecord) -> None:
+        text = f"{promise.name}\n{promise.description}\n{promise.last_note}".strip()
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._promises.upsert, ids=[promise.id], documents=[text],
+                metadatas=[{"title": promise.name}],
+            )
+
+    async def upsert_brief(self, brief: ChapterBriefRecord) -> None:
+        text = f"{brief.goal}\n{brief.synopsis}".strip()
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._briefs.upsert, ids=[brief.id], documents=[text],
+                metadatas=[{"title": brief.goal}],
+            )
+
+    async def upsert_arc(self, arc: ArcRecord) -> None:
+        text = f"{arc.character_id}\n{arc.lie}\n{arc.truth}\n{arc.want}\n{arc.need}".strip()
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._arcs.upsert, ids=[arc.id], documents=[text],
+                metadatas=[{"title": f"Arc: {arc.character_id}"}],
+            )
+
     async def delete(self, entity_id: str, collection: str) -> None:
         col = {
             "world_entries": self._world,
@@ -98,6 +128,9 @@ class EmbeddingStore:
             "themes": self._themes,
             "threads": self._threads,
             "secrets": self._secrets,
+            "promises": self._promises,
+            "briefs": self._briefs,
+            "arcs": self._arcs,
         }[collection]
         # Offload to a thread: this is a synchronous chromadb/HTTP call that
         # would otherwise block the whole asyncio loop (see upsert_* -- same
@@ -161,6 +194,9 @@ class EmbeddingStore:
             "thread": self._threads,
             "secret": self._secrets,
             "theme": self._themes,
+            "promise": self._promises,
+            "brief": self._briefs,
+            "arc": self._arcs,
         }
 
     @staticmethod
