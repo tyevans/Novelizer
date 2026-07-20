@@ -17,6 +17,19 @@ class SearchHit:
     distance: float
 
 
+# Conservative char cap so embedding input stays under the embed model's
+# token context window (e.g. nomic-embed-text's 2048 tokens): ~4 chars/token
+# is a safe average for English prose, so 6000 chars stays well under 2048
+# tokens even for token-dense text. Without this, any chapter/entry whose
+# text tokenizes past the window makes upsert raise every catch_up retry,
+# permanently stalling canon indexing at that event (see seq 65 stall).
+_MAX_EMBED_CHARS = 6000
+
+
+def _cap(text: str) -> str:
+    return text[:_MAX_EMBED_CHARS]
+
+
 class EmbeddingStore:
     def __init__(
         self,
@@ -55,14 +68,14 @@ class EmbeddingStore:
         pass  # chromadb PersistentClient auto-flushes
 
     async def upsert_world_entry(self, entry: WorldEntry) -> None:
-        text = f"{entry.title}\n{entry.body}"
+        text = _cap(f"{entry.title}\n{entry.body}")
         async with self._write_lock:
             await asyncio.to_thread(
                 self._world.upsert, ids=[entry.id], documents=[text], metadatas=[{"title": entry.title}]
             )
 
     async def upsert_character(self, char: Character) -> None:
-        text = f"{char.name}\n{char.traits}\n{char.backstory}"
+        text = _cap(f"{char.name}\n{char.traits}\n{char.backstory}")
         async with self._write_lock:
             await asyncio.to_thread(
                 self._chars.upsert, ids=[char.id], documents=[text], metadatas=[{"name": char.name}]
@@ -73,18 +86,18 @@ class EmbeddingStore:
             await asyncio.to_thread(
                 self._chapters.upsert,
                 ids=[chapter.id],
-                documents=[chapter.prose],
+                documents=[_cap(chapter.prose)],
                 metadatas=[{"title": chapter.title}],
             )
 
     async def upsert_theme(self, theme: ThemeRecord) -> None:
         async with self._write_lock:
             await asyncio.to_thread(
-                self._themes.upsert, ids=[theme.id], documents=[theme.title], metadatas=[{"title": theme.title}]
+                self._themes.upsert, ids=[theme.id], documents=[_cap(theme.title)], metadatas=[{"title": theme.title}]
             )
 
     async def upsert_thread(self, thread: ThreadRecord) -> None:
-        text = f"{thread.name}\n{thread.last_note}" if thread.last_note else thread.name
+        text = _cap(f"{thread.name}\n{thread.last_note}" if thread.last_note else thread.name)
         async with self._write_lock:
             await asyncio.to_thread(
                 self._threads.upsert, ids=[thread.id], documents=[text], metadatas=[{"title": thread.name}]
@@ -93,11 +106,11 @@ class EmbeddingStore:
     async def upsert_secret(self, secret: SecretRecord) -> None:
         async with self._write_lock:
             await asyncio.to_thread(
-                self._secrets.upsert, ids=[secret.id], documents=[secret.title], metadatas=[{"title": secret.title}]
+                self._secrets.upsert, ids=[secret.id], documents=[_cap(secret.title)], metadatas=[{"title": secret.title}]
             )
 
     async def upsert_promise(self, promise: PromiseRecord) -> None:
-        text = f"{promise.name}\n{promise.description}\n{promise.last_note}\nstate: {promise.state}".strip()
+        text = _cap(f"{promise.name}\n{promise.description}\n{promise.last_note}\nstate: {promise.state}".strip())
         async with self._write_lock:
             await asyncio.to_thread(
                 self._promises.upsert, ids=[promise.id], documents=[text],
@@ -105,7 +118,7 @@ class EmbeddingStore:
             )
 
     async def upsert_brief(self, brief: ChapterBriefRecord) -> None:
-        text = f"{brief.goal}\n{brief.synopsis}\nstatus: {brief.status}".strip()
+        text = _cap(f"{brief.goal}\n{brief.synopsis}\nstatus: {brief.status}".strip())
         async with self._write_lock:
             await asyncio.to_thread(
                 self._briefs.upsert, ids=[brief.id], documents=[text],
@@ -116,6 +129,7 @@ class EmbeddingStore:
         text = f"{arc.character_id}\n{arc.lie}\n{arc.truth}\n{arc.want}\n{arc.need}".strip()
         if arc.resolved:
             text = f"{text}\nresolved: {arc.outcome}".strip()
+        text = _cap(text)
         async with self._write_lock:
             await asyncio.to_thread(
                 self._arcs.upsert, ids=[arc.id], documents=[text],

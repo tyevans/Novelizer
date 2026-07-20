@@ -88,6 +88,14 @@ async def test_search_unknown_kind_raises(fake_store):
         await fake_store.search("x", kinds=["novel"])
 
 
+async def test_upsert_chapter_caps_oversized_prose(fake_store):
+    from novelizer.store.embeddings import _MAX_EMBED_CHARS
+    huge_prose = "word " * 5000  # far past the char cap
+    await fake_store.upsert_chapter(Chapter(id="ch1", title="Huge", prose=huge_prose))
+    stored = fake_store._chapters.get(ids=["ch1"])["documents"][0]
+    assert len(stored) <= _MAX_EMBED_CHARS
+
+
 async def test_concurrent_writes_are_serialized_and_complete(fake_store):
     import asyncio
     chapters = [Chapter(id=f"ch{i}", title=f"T{i}", prose="p") for i in range(8)]
