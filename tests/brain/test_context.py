@@ -313,3 +313,83 @@ def test_completion_note_complete_message():
         "The blueprint is satisfied: every beat fulfilled, every promise settled, "
         "every arc resolved. Write the ending — then the room is done."
     )
+
+
+# --- finale_convergence_note ---
+
+from novelizer.brain.context import finale_convergence_note
+
+
+def test_finale_convergence_note_empty_when_no_blueprint():
+    assert finale_convergence_note(None, [], [], [], _chapters(0)) == ""
+
+
+def test_finale_convergence_note_quiet_before_window_fallback_rule():
+    # No beats at all -> fallback: window opens at round(0.80 * 10) = 8
+    promises = [PromiseRecord(id="p1", name="Ring", state=PromiseState.open)]
+    note = finale_convergence_note(_bp(10), [], promises, [], _chapters(7))
+    assert note == ""
+
+
+def test_finale_convergence_note_fires_inside_fallback_window():
+    promises = [PromiseRecord(id="p1", name="Ring", state=PromiseState.open)]
+    note = finale_convergence_note(_bp(10), [], promises, [], _chapters(8))
+    assert note != ""
+    assert "Ring" in note
+
+
+def test_finale_convergence_note_uses_climax_beat_window_lo_when_present():
+    # six-position climax: ideal_pct=0.90, tolerance_pct=0.05, target=20
+    # beat_window -> lo = round((0.90 - 0.05) * 20) = 17
+    blueprint = _bp(20)
+    climax = BeatRecord(
+        id="climax", blueprint_id="bp1", slug="climax", name="Climax",
+        ideal_pct=0.90, tolerance_pct=0.05,
+    )
+    other = _beat("open", "Opening", fulfilled=False)
+    promises = [PromiseRecord(id="p1", name="Ring", state=PromiseState.open)]
+
+    # one chapter short of the climax-derived window: quiet
+    assert finale_convergence_note(blueprint, [other, climax], promises, [], _chapters(16)) == ""
+    # at the climax-derived window: fires
+    note = finale_convergence_note(blueprint, [other, climax], promises, [], _chapters(17))
+    assert note != ""
+
+
+def test_finale_convergence_note_flags_overdue_promise():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    promises = [PromiseRecord(id="p1", name="Ring", state=PromiseState.open, window_lo=1, window_hi=5)]
+    note = finale_convergence_note(_bp(10), beats, promises, [], _chapters(8))
+    assert "OVERDUE" in note
+    assert "Ring" in note
+
+
+def test_finale_convergence_note_lists_unresolved_arc():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    arcs = [ArcRecord(id="a1", character_id="mara", arc_type="positive", active=True, resolved=False)]
+    note = finale_convergence_note(_bp(10), beats, [], arcs, _chapters(8))
+    assert "mara" in note
+
+
+def test_finale_convergence_note_caps_each_list_at_three_with_more_count():
+    beats = [_beat(f"b{i}", f"Beat{i}", fulfilled=False) for i in range(5)]
+    note = finale_convergence_note(_bp(10), beats, [], [], _chapters(8))
+    assert "+2 more" in note
+
+
+def test_finale_convergence_note_names_chapters_remaining():
+    beats = [_beat("open", "Opening", fulfilled=False)]
+    note = finale_convergence_note(_bp(10), beats, [], [], _chapters(8))
+    assert "2" in note  # target 10 - 8 chapters drafted = 2 remaining
+
+
+def test_finale_convergence_note_chapters_remaining_never_negative():
+    beats = [_beat("open", "Opening", fulfilled=False)]
+    note = finale_convergence_note(_bp(10), beats, [], [], _chapters(12))
+    assert "-1" not in note
+
+
+def test_finale_convergence_note_empty_when_nothing_remains_open():
+    beats = [_beat("open", "Opening", fulfilled=True)]
+    note = finale_convergence_note(_bp(10), beats, [], [], _chapters(8))
+    assert note == ""

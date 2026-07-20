@@ -285,6 +285,84 @@ def completion_note(
     )
 
 
+def _capped_names(names: list[str], cap: int = 3) -> str:
+    shown = names[:cap]
+    text = ", ".join(shown)
+    remainder = len(names) - len(shown)
+    if remainder > 0:
+        text += f", +{remainder} more"
+    return text
+
+
+def finale_convergence_note(
+    blueprint: BlueprintRecord | None,
+    beats: list[BeatRecord],
+    promises: list[PromiseRecord],
+    arcs: list[ArcRecord],
+    chapters: list[Chapter],
+) -> str:
+    """Build the finale-window steering block: empty string until the story
+    has entered the finale window, then lists everything that must converge
+    before the end (unfulfilled beats, open promises with overdue flagged,
+    unresolved active arcs), capped at ~3 names per category, closing with
+    how many chapters remain.
+
+    Window threshold prefers the climax beat's window_lo (the highest
+    ideal_pct beat in the active blueprint's beats, per beat_window),
+    falling back to round(0.80 * target_chapter_count) when there are no
+    beats. Quiet when nothing remains open -- that's completion_note's job,
+    and double-reporting the same "nothing left" state would be noise.
+    """
+    if blueprint is None:
+        return ""
+
+    now = len(chapters)
+    target = blueprint.target_chapter_count
+
+    if beats:
+        climax = max(beats, key=lambda b: b.ideal_pct)
+        window_lo, _ = beat_window(climax.ideal_pct, climax.tolerance_pct, target)
+        threshold = window_lo
+    else:
+        threshold = round(0.80 * target)
+
+    if now < threshold:
+        return ""
+
+    unfulfilled = [b for b in beats if not b.fulfilled_by_chapter_id]
+    open_promises = [p for p in promises if p.state == PromiseState.open]
+    overdue = set(p.id for p in overdue_promises(promises, chapters))
+    unresolved_arcs = [a for a in arcs if a.active and not a.resolved]
+
+    if not unfulfilled and not open_promises and not unresolved_arcs:
+        return ""
+
+    lines = []
+    if unfulfilled:
+        names = _capped_names([b.name for b in unfulfilled])
+        count = len(unfulfilled)
+        noun = "beat" if count == 1 else "beats"
+        lines.append(f"- {count} unfulfilled {noun}: {names}")
+    if open_promises:
+        names = _capped_names(
+            [f"{p.name} (OVERDUE)" if p.id in overdue else p.name for p in open_promises]
+        )
+        count = len(open_promises)
+        noun = "promise" if count == 1 else "promises"
+        lines.append(f"- {count} open {noun}: {names}")
+    if unresolved_arcs:
+        names = _capped_names([a.character_id for a in unresolved_arcs])
+        count = len(unresolved_arcs)
+        noun = "arc" if count == 1 else "arcs"
+        lines.append(f"- {count} unresolved {noun}: {names}")
+
+    remaining = max(target - now, 0)
+    lines.append(
+        f"Everything still open must land in the next {remaining} chapters."
+    )
+    return "\n\nFinale convergence:\n" + "\n".join(lines)
+
+
 def causal_flags_note(edges: list[CausalEdgeRecord], chapter_order: list[str]) -> str:
     """Build the Editor-facing paradox-candidate summary, calling the *same*
     find_paradoxes function M4.2's Continuity Checker and M4.3's Causeway

@@ -466,6 +466,61 @@ async def test_prompt_includes_tension_target_note_when_deviated(stack):
     assert "ch 20" in sent
 
 
+async def test_prompt_includes_finale_convergence_note_inside_window(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    for i in range(8):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Opening" in sent
+    assert "chapter" in sent.lower()
+
+
+async def test_prompt_omits_finale_convergence_note_before_window(stack):
+    from novelizer.canon.events import BlueprintAdopted
+
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}", Chapter(id=f"c{i}", title=str(i), prose="p"))
+    await events.append(
+        EventType.BLUEPRINT_ADOPTED, "bp1",
+        BlueprintAdopted(
+            blueprint_id="bp1", framework="three_act", target_chapter_count=10,
+            beats=[
+                {
+                    "beat_id": "bp1-open", "slug": "open", "name": "Opening",
+                    "ideal_pct": 0.1, "tolerance_pct": 0.05,
+                },
+            ],
+        ),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(PlotterOutput())
+    plotter = Plotter(runner, read, committer)
+    ctx = await plotter.poll()
+    await plotter.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Steer the remaining" not in sent
+
+
 class _FakeSettings:
     agent_model = "gpt-4o-mini"
     llm_base_url = None
