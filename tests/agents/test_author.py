@@ -7,8 +7,9 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, ThemeIntroduced
 from novelizer.agents.author import Author, ChapterDraft
-from novelizer.agents.schemas import ThreadIntent, ThemeIntent
+from novelizer.agents.schemas import ThreadIntent, ThemeIntent, PromiseIntent
 from novelizer.store.models import Chapter, DirectorSignal, SignalKind
+from novelizer.brain.ledger import overdue_promises
 
 
 class FakeRunner:
@@ -253,6 +254,33 @@ async def test_author_commit_with_no_thread_intents_emits_no_thread_events(stack
     await proj.catch_up()
     log = await events.events_since(0)
     assert [e.event_type for e in log if e.event_type.startswith("thread.")] == []
+
+
+async def test_author_promise_with_window_surfaces_as_overdue_after_window_passes(stack):
+    # Pins the M7 acceptance loop's first hop: a PromiseIntent's window
+    # survives commit -> projection -> the ledger's overdue faculty.
+    events, proj, read, committer = stack
+    draft = ChapterDraft(
+        title="One", prose="P",
+        promise_intents=[
+            PromiseIntent(action="make", name="The Sealed Letter", window_lo=1, window_hi=1),
+        ],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    # Chapter 1 exists (window_hi=1), still within window: not overdue yet.
+    promises = await read.list_promises()
+    chapters = await read.list_chapters()
+    assert overdue_promises(promises, chapters) == []
+    # A second chapter passes; now = 2 > window_hi=1: overdue.
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Two", prose="p"))
+    await proj.catch_up()
+    promises = await read.list_promises()
+    chapters = await read.list_chapters()
+    overdue = overdue_promises(promises, chapters)
+    assert len(overdue) == 1
+    assert overdue[0].name == "The Sealed Letter"
 
 
 async def test_author_commits_theme_introduce_intent(stack):

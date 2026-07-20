@@ -18,7 +18,7 @@ AUTHOR_SYSTEM_PROMPT = """You are the Author of a living fictional world. Write 
 You receive world lore, active characters, previous chapter summaries, and director notes.
 Write a self-contained chapter with a clear narrative beat, 2-5 paragraphs.
 Return a title, the full prose, and the ids of characters who appear.
-You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring); progress/pay/release cite an existing promise id exactly.
+You may declare promise intents: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly.
 """ + AI_TELL_BAN_NOTE
 
 _RETRIEVAL_NOTE_PREFIX = (

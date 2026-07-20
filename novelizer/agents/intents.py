@@ -352,7 +352,11 @@ async def commit_promise_intents(
     `progress`/`pay`/`release` must cite an id present in
     `active_promise_ids` -- an intent naming an unknown or already-
     terminal id is dropped with a logged warning and no event is
-    committed. No-op on an empty list.
+    committed. `make` may also optionally carry a target payoff window
+    (`window_lo`/`window_hi`, 1-based chapter ordinals); an invalid
+    window (not `lo==hi==0` and not `1 <= lo <= hi`) is dropped with a
+    logged warning and zeroed rather than blocking the commit -- an
+    invalid window must never enter canon. No-op on an empty list.
     """
     for intent in intents:
         if intent.action == "make":
@@ -361,6 +365,15 @@ async def commit_promise_intents(
                 continue
             promise_id = slugify_promise_name(intent.name)
             if promise_id in active_promise_ids:
+                # A promise id is minted exactly once, at promise.made. This
+                # make collides with an id that's already live, so the agent
+                # clearly means "this promise is live" — downgrade to a
+                # progress instead of committing a made event the projection
+                # would just no-op.
+                logger.info(
+                    "%s: make %r collides with active promise id %r, downgrading to progress",
+                    agent_name, intent.name, promise_id,
+                )
                 await committer.commit(
                     agent_name, EventType.PROMISE_PROGRESSED, promise_id,
                     PromiseProgressed(id=promise_id, chapter_id=chapter_id, note=intent.note, source=source),
@@ -372,11 +385,24 @@ async def commit_promise_intents(
                     "%s: promise '%s' cited unknown thread %r — link dropped", agent_name, promise_id, thread_id
                 )
                 thread_id = ""
+            window_lo, window_hi = intent.window_lo, intent.window_hi
+            if not (window_lo == window_hi == 0 or 1 <= window_lo <= window_hi):
+                logger.warning(
+                    "%s: promise '%s' declared invalid window %r-%r, zeroing",
+                    agent_name, promise_id, window_lo, window_hi,
+                )
+                window_lo, window_hi = 0, 0
+            logger.warning(
+                "%s: make %r mints id %r; if this id already exists (unknown to the "
+                "caller) the commit will be a projection no-op",
+                agent_name, intent.name, promise_id,
+            )
             await committer.commit(
                 agent_name, EventType.PROMISE_MADE, promise_id,
                 PromiseMade(
                     id=promise_id, name=intent.name.strip(), description=intent.description,
                     kind=intent.kind, chapter_id=chapter_id, thread_id=thread_id,
+                    window_lo=window_lo, window_hi=window_hi,
                     note=intent.note, source=source,
                 ),
             )

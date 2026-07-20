@@ -14,7 +14,7 @@ from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, 
 SYSTEM_PROMPT = """You are the Editor of a living fictional world's story. Review the given chapter
 for prose quality, narrative coherence, and pacing. Return a verdict of "approve" or "revise" and
 notes: if revising, specific actionable feedback; if approving, brief praise.
-You may declare promise intents when the chapter plants or pays off a setup: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring); progress/pay/release cite an existing promise id exactly."""
+You may declare promise intents when the chapter plants or pays off a setup: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or red herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers); progress/pay/release cite an existing promise id exactly."""
 
 VOICE_SOURCE_TAG = "[source: voice_drift]"
 
