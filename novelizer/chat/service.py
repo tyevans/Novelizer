@@ -11,6 +11,7 @@ from novelizer.agents.intents import (
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
 from novelizer.brain.context import chapter_map_note
+from novelizer.telemetry.recorder import run_with_identity
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class ChatService:
 
     def __init__(
         self, events, read, committer, runner_for: Callable, personality_for: Callable[[str], str],
-        pull_mode: bool = False,
+        pull_mode: bool = False, telemetry=None,
     ) -> None:
         self._events = events
         self._read = read
@@ -52,6 +53,7 @@ class ChatService:
         self._locks: dict[str, asyncio.Lock] = {}
         self._pending: dict[str, int] = {}
         self.pull_mode = pull_mode
+        self._telemetry = telemetry
 
     def pending(self, agent_name: str) -> bool:
         return self._pending.get(agent_name, 0) > 0
@@ -71,10 +73,11 @@ class ChatService:
             async with lock:
                 prompt = await self._build_prompt(agent_name)
                 runner = self._runner_for(agent_name)
-                result = await runner.ainvoke({"messages": [{"role": "user", "content": prompt}]})
-                reply: ChatReply | None = result.get("structured_response")
-                if reply is None:
-                    raise ChatReplyError(f"{agent_name} returned no structured reply")
+                async with run_with_identity(self._telemetry, f"chat:{agent_name}"):
+                    result = await runner.ainvoke({"messages": [{"role": "user", "content": prompt}]})
+                    reply: ChatReply | None = result.get("structured_response")
+                    if reply is None:
+                        raise ChatReplyError(f"{agent_name} returned no structured reply")
                 await self._events.append(
                     EventType.CHAT_AGENT_REPLIED, agent_name,
                     ChatAgentReplied(
