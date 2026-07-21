@@ -144,3 +144,59 @@ async def test_input_submit_calls_app_send_and_escape_pops(db_path):
             assert not isinstance(app.screen, ChatScreen)
     finally:
         await rt.close()
+
+
+from novelizer.telemetry.events import TelemetryEventType, AgentRunStarted, TokenDelta
+from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
+
+
+@pytest.mark.asyncio
+async def test_panel_shows_stream_for_the_active_agent_only(db_path):
+    rt = await _runtime(db_path)
+    try:
+        await rt.events.append(
+            EventType.CHAT_USER_MESSAGED, "author",
+            ChatUserMessaged(message_id="m1", agent_name="author", text="hi"),
+        )
+        await rt.projector.catch_up()
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            screen = ChatScreen(rt, "author")
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                    AgentRunStarted(run_id="r1", agent_name="chat:author"))
+            rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="chat:author", text="drafting…"))
+            await pilot.pause(0.2)
+
+            panel = screen.query_one(LiveStreamPanel)
+            body = panel.query_one(LiveStreamPanel._STREAM_ID)
+            assert "drafting…" in str(body.renderable)
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_switching_conversation_resets_the_panel(db_path):
+    rt = await _runtime(db_path)
+    try:
+        app = NovelizerApp(rt)
+        async with app.run_test() as pilot:
+            screen = ChatScreen(rt, "author")
+            await app.push_screen(screen)
+            await pilot.pause()
+
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                    AgentRunStarted(run_id="r1", agent_name="chat:author"))
+            rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="chat:author", text="drafting…"))
+            await pilot.pause(0.2)
+
+            await screen.set_current("editor")
+            await pilot.pause(0.1)
+
+            panel = screen.query_one(LiveStreamPanel)
+            body = panel.query_one(LiveStreamPanel._STREAM_ID)
+            assert "drafting…" not in str(body.renderable)
+    finally:
+        await rt.close()
