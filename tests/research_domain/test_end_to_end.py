@@ -43,7 +43,7 @@ async def test_research_domain_composes_events_gating_and_projection(postgres_ds
         catalog = build_source_coverage_catalog(lambda source_id: counts_by_source[source_id])
         catalog.invalidate("source_coverage", _ClaimEvent(source_id="source-a"))
         catalog.invalidate("source_coverage", _ClaimEvent(source_id="source-b"))
-        result = catalog.recompute_dirty("source_coverage")
+        result = await catalog.recompute_dirty("source_coverage")
         assert result == {"source-a": 2, "source-b": 1}
     finally:
         await store.close()

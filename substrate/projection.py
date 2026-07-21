@@ -1,4 +1,5 @@
 from __future__ import annotations
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -24,9 +25,14 @@ class ProjectionCatalog:
         key = spec.invalidation_key(source_event)
         self._dirty[projection_name].add(key)
 
-    def recompute_dirty(self, projection_name: str) -> dict[str, Any]:
+    async def recompute_dirty(self, projection_name: str) -> dict[str, Any]:
         spec = self._specs[projection_name]
         keys = self._dirty[projection_name]
-        result = {key: spec.recompute(key) for key in keys}
+        result = {}
+        for key in keys:
+            value = spec.recompute(key)
+            if inspect.isawaitable(value):
+                value = await value
+            result[key] = value
         self._dirty[projection_name] = set()
         return result
