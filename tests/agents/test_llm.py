@@ -65,6 +65,31 @@ def test_build_chat_model_without_callbacks_keeps_current_defaults():
     assert not m.callbacks
 
 
+def test_reasoning_content_is_recovered_from_the_raw_streamed_delta():
+    """Plain ChatOpenAI silently drops non-standard streamed fields like
+    reasoning_content (langchain_openai's own module docstring says so) --
+    _ReasoningAwareChatOpenAI must lift it back onto the chunk so
+    TelemetryCallbackHandler can see it via additional_kwargs."""
+    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
+    raw_chunk = {
+        "choices": [{"index": 0, "delta": {"content": "The sea",
+                                           "reasoning_content": "pondering the tide"},
+                    "finish_reason": None}],
+    }
+    from langchain_core.messages import AIMessageChunk
+    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert gen_chunk.message.content == "The sea"
+    assert gen_chunk.message.additional_kwargs["reasoning_content"] == "pondering the tide"
+
+
+def test_reasoning_content_absent_leaves_chunk_unaffected():
+    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
+    raw_chunk = {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}]}
+    from langchain_core.messages import AIMessageChunk
+    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert "reasoning_content" not in gen_chunk.message.additional_kwargs
+
+
 def test_every_builder_accepts_a_callbacks_kwarg():
     import inspect
     from novelizer.agents.author import build_author_runner

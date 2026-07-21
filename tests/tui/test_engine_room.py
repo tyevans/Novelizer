@@ -231,6 +231,30 @@ async def test_agent_tabs_carry_glyph_and_color_from_the_identity_registry(rt):
         assert vitals.style == ident.style
 
 
+async def test_agent_tab_titles_carry_glyph_and_color():
+    """A plain str TabPane title gets markup-parsed (Widget.render_str ->
+    Content.from_markup) and silently loses any style not spelled as markup
+    -- titles must be pre-styled Content, not str, or they render colorless."""
+    from novelizer.tui.widgets.engine_room import EngineRoom
+    from novelizer.tui.identity import identity_for
+    from textual.content import Content
+    from textual.widgets import TabbedContent
+    from textual.app import App
+
+    class _Harness(App):
+        def compose(self):
+            yield EngineRoom(id="engine_room")
+
+    app = _Harness()
+    async with app.run_test() as pilot:
+        tabs = app.query_one("#er_tabs", TabbedContent)
+        author_tab = tabs.query_one("#er_tab_author")._title
+        ident = identity_for("author")
+        assert isinstance(author_tab, Content)
+        assert author_tab.plain == f"{ident.glyph} {ident.label}"
+        assert any(span.style == ident.style for span in author_tab.spans)
+
+
 async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt):
     from textual.widgets import Static
     app = NovelizerApp(rt)
