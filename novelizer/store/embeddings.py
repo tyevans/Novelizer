@@ -7,6 +7,7 @@ from novelizer.store.models import (
     WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord,
     PromiseRecord, ChapterBriefRecord, ArcRecord,
 )
+from novelizer.text_chunk import chunk_prose
 
 
 @dataclass
@@ -40,20 +41,6 @@ _CHAPTER_CHUNK_OVERLAP = 500
 
 def _cap(text: str) -> str:
     return text[:_MAX_EMBED_CHARS]
-
-
-def _chunk_prose(text: str) -> list[str]:
-    if len(text) <= _CHAPTER_CHUNK_CHARS:
-        return [text]
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + _CHAPTER_CHUNK_CHARS
-        chunks.append(text[start:end])
-        if end >= len(text):
-            break
-        start = end - _CHAPTER_CHUNK_OVERLAP
-    return chunks
 
 
 def _chunk_id(chapter_id: str, index: int) -> str:
@@ -113,7 +100,7 @@ class EmbeddingStore:
             )
 
     async def upsert_chapter(self, chapter: Chapter) -> None:
-        chunks = _chunk_prose(chapter.prose)
+        chunks = chunk_prose(chapter.prose, _CHAPTER_CHUNK_CHARS, _CHAPTER_CHUNK_OVERLAP)
         ids = [_chunk_id(chapter.id, i) for i in range(len(chunks))]
         metadatas = [
             {"title": chapter.title, "chapter_id": chapter.id, "chunk_index": i}

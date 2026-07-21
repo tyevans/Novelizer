@@ -14,12 +14,18 @@ from novelizer.brain.leaks import LEAK_SOURCE_TAG
 
 
 class FakeRunner:
+    """`out` may be a single structured-response value (returned for every
+    call) or a list of values (returned in order, one per call, to simulate
+    one call per prose chunk)."""
+
     def __init__(self, out):
         self._out = out
         self.calls = []
 
     async def ainvoke(self, inputs):
         self.calls.append(inputs)
+        if isinstance(self._out, list):
+            return {"structured_response": self._out[len(self.calls) - 1]}
         return {"structured_response": self._out}
 
 
@@ -279,6 +285,32 @@ async def test_mining_commits_a_secret_referenced_event_tagged_mined(stack):
     refs = await read.list_secret_references()
     leaks = find_leaks(refs, matrix)
     assert any(l.secret_id == "the-heir-lives" and l.character_id == "mara" for l in leaks)
+
+
+async def test_mining_chunks_long_chapter_and_merges_facts_across_chunks(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    long_prose = "word " * 2000  # well past _MINING_CHUNK_CHARS (3000) -> 4 chunks
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose=long_prose))
+    await proj.catch_up()
+
+    contradiction_runner = FakeRunner(ContinuityOutput())
+    mining_runner = FakeRunner([
+        MinedFactsOutput(secret_facts=[
+            MinedSecretFact(action="uses", id="the-heir-lives", character_id="mara", chapter_id="c1"),
+        ]),
+        MinedFactsOutput(), MinedFactsOutput(), MinedFactsOutput(),
+    ])
+    agent = ContinuityChecker(contradiction_runner, mining_runner, read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    assert len(mining_runner.calls) == 4  # one call per chunk
+    log = await events.events_since(0)
+    mined_refs = [e for e in log if e.event_type == EventType.SECRET_REFERENCED and e.payload.get("source") == "mined"]
+    assert len(mined_refs) == 1
 
 
 async def test_mining_does_not_recommit_on_a_second_run_once(stack):

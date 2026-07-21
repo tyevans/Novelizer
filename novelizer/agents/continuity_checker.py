@@ -15,8 +15,17 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, ChapterMined, InspirationUptakeRecorded
 from novelizer.store.models import Flag, FlagStatus
+from novelizer.text_chunk import chunk_prose
 
 logger = logging.getLogger(__name__)
+
+# Same rationale as kg_projector.py's extraction chunking: a chapter mined
+# in one call can produce a structured-output response that overruns
+# llm_max_tokens on fact-dense chapters, truncating mid-JSON. Smaller than
+# embeddings.py's 6000-char retrieval chunk size because the failure mode
+# here is output length, not input length.
+_MINING_CHUNK_CHARS = 3000
+_MINING_CHUNK_OVERLAP = 200
 
 SYSTEM_PROMPT = """You are the Continuity Checker for a living novel written chapter by chapter,
 without stopping. You FIND contradictions in the canon and file each as a retcon_request. You do
@@ -184,7 +193,20 @@ class ContinuityChecker(BaseAgent):
 
         mined: dict[str, MinedFactsOutput] = {}
         for chapter in ctx.get("mined_chapters", []):
-            mining_msg = self._mining_prompt(chapter, ctx)
+            chapter_mined = await self._mine_chapter(chapter, ctx)
+            if chapter_mined is not None:
+                mined[chapter.id] = chapter_mined
+        return out, mined
+
+    async def _mine_chapter(self, chapter, ctx: dict) -> MinedFactsOutput | None:
+        chunks = chunk_prose(chapter.prose, _MINING_CHUNK_CHARS, _MINING_CHUNK_OVERLAP)
+        merged: dict[str, list] = {
+            "secret_facts": [], "reveal_facts": [], "thread_facts": [],
+            "causal_facts": [], "inspiration_facts": [], "promise_progress_facts": [],
+        }
+        feed_note = ""
+        for chunk in chunks:
+            mining_msg = self._mining_prompt(chapter, ctx, chunk)
             try:
                 mining_result = await self._mining_runner.ainvoke({"messages": [{"role": "user", "content": mining_msg}]})
             except Exception:
@@ -192,7 +214,7 @@ class ContinuityChecker(BaseAgent):
                     "%s: mining pass for chapter %r raised an exception; not stamped "
                     "chapter.mined, will retry next poll", self.name, chapter.id, exc_info=True,
                 )
-                continue
+                return None
             mining_out = mining_result.get("structured_response")
             if not isinstance(mining_out, MinedFactsOutput):
                 logger.warning(
@@ -200,11 +222,14 @@ class ContinuityChecker(BaseAgent):
                     "(%r); not stamped chapter.mined, will retry next poll",
                     self.name, chapter.id, type(mining_out).__name__,
                 )
-                continue
-            mined[chapter.id] = mining_out
-        return out, mined
+                return None
+            for field in merged:
+                merged[field].extend(getattr(mining_out, field))
+            if mining_out.feed_note:
+                feed_note = mining_out.feed_note
+        return MinedFactsOutput(**merged, feed_note=feed_note)
 
-    def _mining_prompt(self, chapter, ctx: dict) -> str:
+    def _mining_prompt(self, chapter, ctx: dict, prose_chunk: str) -> str:
         # The secret namespace must be stated outright: shown only implicitly
         # (via matrix lines), the live miner cited thread ids and character
         # names as secret ids (a-dress-for-doug, 2026-07-19).
@@ -237,7 +262,7 @@ class ContinuityChecker(BaseAgent):
             promise_lines = "\n".join(f"- {p.id}: {p.name}" for p in open_promises)
             promises_block = f"\n\nOpen promises:\n{promise_lines}"
         return (
-            f"Chapter [{chapter.id}] {chapter.title}:\n{chapter.prose}\n\n"
+            f"Chapter [{chapter.id}] {chapter.title}:\n{prose_chunk}\n\n"
             f"Active secret ids (the ONLY legal values for secret_facts ids; thread ids and "
             f"character names are never secret ids): {secret_ids}\n\n"
             f"Knowledge matrix:\n{matrix}\n\nSecret references:\n{secret_refs}\n\n"
