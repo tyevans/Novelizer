@@ -65,6 +65,16 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if et == TelemetryEventType.AGENT_RUN_FAILED:
         error = f"{p.get('error_type', '?')}: {p.get('error_message', '')}"
         return replace(state, status="failed", ended_at=now, error=error)
+    if et == TelemetryEventType.TOOL_CALL_STARTED:
+        summary = str(p.get("input_summary", "")).replace("\n", "␤")[:120]
+        line = f"\n⚒ {p.get('tool_name', '?')}({summary})\n"
+        return replace(state, text=(state.text + line)[-TEXT_CAP:])
+    if et == TelemetryEventType.TOOL_CALL_FINISHED:
+        line = f"   ↳ done in {p.get('duration_s', 0):.1f}s\n"
+        return replace(state, text=(state.text + line)[-TEXT_CAP:])
+    if et == TelemetryEventType.TOOL_CALL_FAILED:
+        line = f"   ↳ ✗ {p.get('error_type', '?')}\n"
+        return replace(state, text=(state.text + line)[-TEXT_CAP:])
     return state
 
 

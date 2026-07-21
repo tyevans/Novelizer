@@ -107,6 +107,31 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_apply_bus_item_folds_tool_calls_into_the_live_text_stream():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author", text="Once upon a time")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "dragons"})
+    s = apply_bus_item(s, started, now=1.0)
+    assert "⚒ search_web(dragons)" in s.text
+    assert s.text.startswith("Once upon a time")
+
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2})
+    s = apply_bus_item(s, finished, now=2.0)
+    assert "done in 1.2s" in s.text
+
+
+def test_apply_bus_item_folds_tool_call_failure_into_the_live_text_stream():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                 "error_type": "ValueError"})
+    s = apply_bus_item(s, failed, now=1.0)
+    assert "✗ ValueError" in s.text
+
+
 def test_trace_line_formats_tool_call_events():
     started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
