@@ -13,6 +13,7 @@ from novelizer.canon.events import StoredEvent, EventType
 from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
 from novelizer.tui.chat_screen import ChatScreen
+from novelizer.tui.research_screen import ResearchScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
@@ -68,6 +69,7 @@ class NovelizerApp(App):
         ("4", "brain_tab('tab_causeway')", "Cause"),
         ("5", "brain_tab('tab_outline')", "Outline"),
         ("6", "brain_tab('tab_arcs')", "Arcs"),
+        ("ctrl+r", "talk_to_project", "Talk to Project"),
         ("q", "quit", "Quit"),
     ]
     # COMMANDS is set below, after NovelizerCommandProvider is defined at
@@ -369,6 +371,9 @@ class NovelizerApp(App):
     def action_toggle_prompt(self) -> None:
         _app_toggle_prompt(self)
 
+    def action_talk_to_project(self) -> None:
+        _app_open_research(self)
+
     def action_brain_tab(self, pane_id: str) -> None:
         _app_brain_tab(self, pane_id)
 
@@ -522,6 +527,10 @@ def _app_quit(app: NovelizerApp) -> None:
     app.exit()
 
 
+def _app_open_research(app: NovelizerApp) -> None:
+    app.push_screen(ResearchScreen(app.runtime))
+
+
 APP_COMMANDS: list[AppCommand] = [
     AppCommand("approvals", "Open the approvals screen", _app_open_approvals),
     AppCommand("toggle_room", "Toggle Room view", _app_toggle_room),
@@ -530,6 +539,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
     AppCommand("settings", "Open settings", _app_open_settings),
     AppCommand("export_epub", "Export EPUB", _app_open_export),
+    AppCommand("talk_to_project", "Talk to the Project (research)", _app_open_research),
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",

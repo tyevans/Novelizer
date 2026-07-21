@@ -80,6 +80,7 @@ class Runtime:
         self.active_prose_profile = None
         self.chat: Optional[ChatService] = None
         self._chat_runner_cache: dict[str, object] = {}
+        self._research_runner_cache = None
         self.embeddings = embedding_store   # None => built in start()
         self.indexer = None
 
@@ -160,6 +161,20 @@ class Runtime:
                 self._chat_runner_cache[key] = build_chat_runner(self.settings, agent_name)
         return self._chat_runner_cache[key]
 
+    def _research_runner_for(self):
+        """Lazy research runner, built once and cached. Injected fakes use
+        key 'research' in the runners dict."""
+        if self._runners is not None and "research" in self._runners:
+            return self._runners["research"]
+        if self._research_runner_cache is None:
+            from novelizer.research.runner import build_research_runner
+            self._research_runner_cache = build_research_runner(
+                self.settings, callbacks=self._llm_callbacks,
+                backend=self._canon_backend, tools=self._canon_tools,
+                read_store=self.read,
+            )
+        return self._research_runner_cache
+
     async def start(self) -> None:
         await self.events.init()
         await self.projector.init()
@@ -227,6 +242,8 @@ class Runtime:
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
             pull_mode=s.chat_tools_enabled,
         )
+        from novelizer.research.service import ResearchService
+        self.research = ResearchService(self._research_runner_for)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
