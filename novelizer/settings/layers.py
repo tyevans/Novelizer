@@ -56,6 +56,8 @@ class GlobalConfig(BaseModel):
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
     plotter_tools_enabled: bool | None = None
+    triage_interval: int | None = None
+    triage_tools_enabled: bool | None = None
     world_architect_subagent_enabled: bool | None = None
     character_keeper_subagent_enabled: bool | None = None
     editor_subagent_enabled: bool | None = None
@@ -100,6 +102,8 @@ class StoryConfig(BaseModel):
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
     plotter_tools_enabled: bool | None = None
+    triage_interval: int | None = None
+    triage_tools_enabled: bool | None = None
     world_architect_subagent_enabled: bool | None = None
     character_keeper_subagent_enabled: bool | None = None
     editor_subagent_enabled: bool | None = None
