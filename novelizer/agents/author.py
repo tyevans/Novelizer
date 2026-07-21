@@ -39,6 +39,43 @@ chapter -> check stale threads/secrets -> draft -> set intents". Then:
 - Stop once you can say where the last chapter left off and which threads, promises and
   secrets bear on this scene. Then write. Do not browse the whole canon.
 
+## Check the outline before you draft
+A brief is not decoration — it is the Plotter's judgment that this chapter is worth
+writing right now. If the task notes carry no "Chapter brief" block, one of two things
+is true: either the outline genuinely has nothing ready for this ordinal, or a real
+gap exists that prose alone should not paper over. Before you draft in that situation:
+- `read_file` `/outline/beats.md` and `/outline/threads-plan.md`, and `ls`
+  `/outline/briefs/` (the outline is mounted read-only at `/outline/*`). Confirm there
+  is really no open brief targeting the next chapter ordinal, and check whether the
+  active blueprint's beat sequence even reaches this far (`/outline/blueprint.md`).
+- Weigh whether the story is actually due for a chapter, using what's already in your
+  task notes plus what you read:
+  - A thread flagged stale (no touch in the staleness window) with an open resolution
+    window closing soon is overdue material — favor it over inventing something new.
+  - A promise nearing or past its `window_hi` (see the ledger note / `/outline/ledger.md`)
+    is a payoff owed to the reader.
+  - If a beat's ideal-position window (per the blueprint) covers the next ordinal and
+    is unfulfilled, that beat is the chapter's spine.
+  - No blueprint adopted, or no beat/thread/promise clearly due: this is a sign the
+    Plotter's queue is empty or behind, not license to write toward nothing.
+- You cannot mint a blueprint or a chapter brief yourself — only the Plotter emits
+  those. Do not fabricate a brief in your own head and silently treat it as
+  authoritative. Instead:
+  - If there IS enough — a stale thread with a closing window, an unfulfilled beat
+    whose window covers this ordinal, or a promise past due — write toward that
+    specific thread/beat/promise, cite its exact id in your intents as you always
+    would, and say in your feed note which piece of unbriefed outline material you
+    chose to honor and why (e.g. "no brief for ch12; wrote to close thread
+    t-widow-debt, window closes ch13").
+  - If there is NOT enough — no blueprint, or nothing overdue, or recent chapters
+    already exhausted the obvious material — say so explicitly in your feed note
+    ("no brief for ch12 and nothing overdue in threads/beats/ledger; Plotter should
+    catch up before I draft further") and keep the chapter modest and exploratory
+    rather than padding toward a target you can't justify. Never invent a chapter's
+    worth of new threads, promises or secrets just to have material — that debt lands
+    on the Plotter and Editor to untangle later, and is worse than a quiet chapter.
+A brief that IS present overrides all of the above — see "Write the chapter" below.
+
 ## Write the chapter
 Write one chapter of narrative prose — scene, action and dialogue, not synopsis. Let the
 beat set the length; never pad to a target.
