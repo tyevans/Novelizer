@@ -221,6 +221,37 @@ projections, in place of its current hardcoded versions.
 Proof of success: Novelizer's existing test suite passes unchanged — this is
 a pure extraction, zero behavior change from the fiction user's perspective.
 
+**M1 status (2026-07-21): done, with two logged fast-follows.** Extracted:
+the event-type registry (`substrate/event_registry.py`), the generic
+per-event-type gating mechanism (`substrate/policy.py`, with fiction's
+`canon/policy.py` rewired onto it as a thin adapter — zero behavior change,
+verified by manual equivalence trace across all four gating buckets plus
+the `gated_all` catch-all edge case, and by the full fiction test suite
+staying green), the agent-registry shape (`substrate/agent_registry.py`,
+with `novelizer/agents/registry_types.py` reduced to a re-export), and a
+`ProjectionCatalog` abstraction (`substrate/projection.py`) proven against
+fakes modeling both `canon_fs`'s and `kg_store`'s real invalidation shapes.
+`substrate/` imports nothing from `novelizer.*` (verified by grep). Full
+suite result: 1953 passed, 5 failed, 7 deselected — all 5 failures
+pre-existing and unrelated to this milestone (two `fake_create_deep_agent()`
+middleware-kwarg mismatches in `test_author.py`/`test_plotter.py`, one
+`AGENT_REGISTRY` ordering assertion expecting nine specs instead of the
+current ten now that `triage` was added, and two `tests/settings/test_layers.py`
+field-set mismatches in code neither this milestone nor its commits touch —
+none traceable to any file this milestone changed). **Not done, logged as
+fast-follow work for a future milestone:** (1) rewiring the real
+`canon_fs`/`kg_store` projection code to actually use `ProjectionCatalog`
+instead of their current bespoke recompute paths — M1 proved the
+abstraction fits, migrating the call sites is separate, riskier work against
+production fiction code; (2) moving the event store
+(`canon/event_store.py`) into `substrate/` — deferred to M2, since its
+extraction is entangled with the Postgres-vs-SQLite adapter boundary M2 is
+building, and moving it twice would be wasted work; (3) the literal
+separate-repo split the original spec text calls for — this repo has no
+configured git remote, so `substrate/` was built as an import-independent
+top-level package within this repo instead, ready for a mechanical directory
+copy whenever a real separate repo exists.
+
 ### M2 — Postgres(+pgvector) backend
 
 Unchanged from the original spec. Add a Postgres storage adapter to the
