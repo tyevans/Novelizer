@@ -462,7 +462,7 @@ def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkey
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, middleware=None, subagents=None):
         captured["skills"] = skills
         return FakeGraph()
 
@@ -473,6 +473,63 @@ def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkey
     keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
     assert captured["skills"] == keeper_mod.KEEPER_SKILLS
     assert captured["skills"] == ["/skills"]
+
+
+def test_build_character_keeper_runner_tooled_branch_passes_subagents_through(monkeypatch):
+    from novelizer.agents import character_keeper as keeper_mod
+    from novelizer.canon_fs.backend import CanonBackend
+
+    captured = {}
+
+    class FakeGraph:
+        def with_config(self, config):
+            return self
+
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None,
+                                tools=None, skills=None, middleware=None, subagents=None):
+        captured["subagents"] = subagents
+        return FakeGraph()
+
+    import deepagents
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake_create_deep_agent)
+
+    backend = CanonBackend(read_store=None)
+    researcher = {"name": "researcher", "description": "d", "system_prompt": "p"}
+    keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[],
+                                              subagents=[researcher])
+    assert captured["subagents"] == [researcher]
+
+
+def test_construct_reads_subagent_enabled_setting():
+    from novelizer.agents.character_keeper import _construct
+    from novelizer.agents.registry_types import AgentContext
+
+    seen = {}
+
+    def fake_tooled(builder, enabled, subagent_enabled=False, subagent_agent_name=""):
+        seen["enabled"] = enabled
+        seen["subagent_enabled"] = subagent_enabled
+        seen["subagent_agent_name"] = subagent_agent_name
+        return builder
+
+    class _Settings(_FakeSettings):
+        character_keeper_tools_enabled = True
+        character_keeper_subagent_enabled = True
+        default_agent_interval = 120
+        keeper_prose_chars = 6000
+
+    ctx = AgentContext(
+        read=None, committer=None, events=None, settings=_Settings(),
+        casting_note="", personalities={}, provenance={}, tooled=fake_tooled,
+        runner_for=lambda name, builder, fallback_name=None: builder(_Settings()),
+    )
+    _construct(ctx)
+    assert seen == {"enabled": True, "subagent_enabled": True, "subagent_agent_name": "character_keeper"}
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.character_keeper import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "character_keeper_subagent_enabled"
 
 
 def test_build_character_keeper_runner_bare_branch_carries_no_skills_kwarg(monkeypatch):
