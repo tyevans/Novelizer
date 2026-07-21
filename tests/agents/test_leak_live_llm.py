@@ -58,7 +58,7 @@ from novelizer.agents.continuity_checker import (
     ContinuityChecker, build_continuity_checker_runner, build_continuity_mining_runner,
 )
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
-from novelizer.store.models import Chapter, Character, RetconStatus
+from novelizer.store.models import Chapter, Character, FlagStatus
 
 
 @pytest.fixture
@@ -137,7 +137,7 @@ async def test_planted_prose_leak_is_annotated_by_the_real_editor_and_reaches_th
     await checker.run_once()
     await proj.catch_up()
 
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)
                  and "the-heir-lives" in r.description and "kestrel" in r.description.lower()]
     assert leak_reqs, (
