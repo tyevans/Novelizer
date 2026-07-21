@@ -363,3 +363,17 @@ async def test_adopt_blueprint_story_dir_rejects_short_target(tmp_path):
     sd = create_story(tmp_path / "s", title="S")
     with pytest.raises(ValueError):
         await adopt_blueprint_story_dir(sd, "six-position", 2)
+
+
+def test_registry_has_one_entry_per_dispatch_command():
+    names = {c.name for c in commands.COMMAND_REGISTRY}
+    assert names == {
+        "seed", "focus", "pause", "resume", "autonomy",
+        "retarget", "approve", "reject", "muse",
+    }
+
+
+def test_find_command_matches_by_name_and_returns_none_for_unknown():
+    assert commands.find_command("seed") is not None
+    assert commands.find_command("seed").description
+    assert commands.find_command("frobnicate") is None
