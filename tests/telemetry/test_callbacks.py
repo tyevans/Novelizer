@@ -189,3 +189,111 @@ def test_tool_end_and_error_with_unknown_run_id_are_no_ops():
         await h.on_tool_error(ValueError("x"), run_id=lc_run)
     _in_run(go)
     assert rec.emitted == []
+
+
+def test_tool_start_without_metadata_has_empty_delegate():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start({"name": "read_file"}, "path", run_id=lc_run)
+    _in_run(go)
+    (etype, payload), = rec.emitted
+    assert etype == TelemetryEventType.TOOL_CALL_STARTED
+    assert payload.delegate == ""
+
+
+def test_tool_start_with_lc_agent_name_metadata_stamps_delegate():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start(
+            {"name": "read_file"}, "path", run_id=lc_run,
+            metadata={"lc_agent_name": "researcher"},
+        )
+    _in_run(go)
+    (etype, payload), = rec.emitted
+    assert payload.delegate == "researcher"
+    assert payload.agent_name == "author"
+
+
+def test_tool_end_carries_the_same_delegate_as_tool_start():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start(
+            {"name": "read_file"}, "path", run_id=lc_run,
+            metadata={"lc_agent_name": "researcher"},
+        )
+        await h.on_tool_end("output", run_id=lc_run)
+    _in_run(go)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.TOOL_CALL_FINISHED
+    assert payload.delegate == "researcher"
+
+
+def test_tool_error_carries_the_same_delegate_as_tool_start():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_tool_start(
+            {"name": "read_file"}, "path", run_id=lc_run,
+            metadata={"lc_agent_name": "researcher"},
+        )
+        await h.on_tool_error(ValueError("bad input"), run_id=lc_run)
+    _in_run(go)
+    etype, payload = rec.emitted[-1]
+    assert etype == TelemetryEventType.TOOL_CALL_FAILED
+    assert payload.delegate == "researcher"
+
+
+def test_llm_start_with_lc_agent_name_metadata_stamps_delegate():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start(
+            {"kwargs": {"model_name": "qwen"}},
+            [[HumanMessage(content="Write.")]],
+            run_id=lc_run,
+            metadata={"lc_agent_name": "researcher"},
+        )
+    _in_run(go)
+    (etype, payload), = rec.emitted
+    assert etype == TelemetryEventType.LLM_CALL_STARTED
+    assert payload.delegate == "researcher"
+
+
+def test_llm_end_and_error_carry_the_same_delegate_as_llm_start():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start(
+            {"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run,
+            metadata={"lc_agent_name": "researcher"},
+        )
+        response = SimpleNamespace(generations=[[SimpleNamespace(
+            message=SimpleNamespace(usage_metadata={"output_tokens": 1}))]])
+        await h.on_llm_end(response, run_id=lc_run)
+
+        lc_run2 = uuid.uuid4()
+        await h.on_chat_model_start(
+            {"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run2,
+            metadata={"lc_agent_name": "researcher"},
+        )
+        await h.on_llm_error(TimeoutError("timeout"), run_id=lc_run2)
+    _in_run(go)
+    finished = [p for e, p in rec.emitted if e == TelemetryEventType.LLM_CALL_FINISHED][0]
+    failed = [p for e, p in rec.emitted if e == TelemetryEventType.LLM_CALL_FAILED][0]
+    assert finished.delegate == "researcher"
+    assert failed.delegate == "researcher"
