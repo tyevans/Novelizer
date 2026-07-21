@@ -101,6 +101,25 @@ async def test_flag_escalation_cleared_unsets_escalated_column(stack):
     assert any(f.id == "f2" for f in all_flags)
 
 
+async def test_flag_escalation_cleared_roundtrips_cleared_by_and_note(stack):
+    events, proj, read = stack
+    flag = Flag(id="f3", category="contradiction", description="x", severity="critical", escalated=True)
+    await events.append(EventType.FLAG_CREATED, "f3", flag)
+    await events.append(EventType.FLAG_ESCALATED, "f3", flag)
+    cleared_flag = flag.model_copy(update={
+        "escalated": False,
+        "escalation_cleared_by": "human",
+        "escalation_clear_note": "checked manually, looks fine",
+    })
+    await events.append(EventType.FLAG_ESCALATION_CLEARED, "f3", cleared_flag)
+    await proj.catch_up()
+
+    all_flags = await read.list_flags()
+    got = next(f for f in all_flags if f.id == "f3")
+    assert got.escalation_cleared_by == "human"
+    assert got.escalation_clear_note == "checked manually, looks fine"
+
+
 async def test_legacy_retcon_request_resolved_preserves_escalated(stack):
     """The legacy retcon_request.* alias branch must also preserve `escalated`,
     the same as the four flag.* handlers, since it writes the same flags row."""

@@ -188,6 +188,7 @@ async def test_commit_amend_clears_prior_escalation(stack):
     resolved = await read.list_flags(category="contradiction", status=FlagStatus.resolved)
     assert len(resolved) == 1
     assert resolved[0].escalated is False
+    assert resolved[0].escalation_cleared_by == "agent"
 
 
 async def test_noop_when_no_open_retcons(stack):

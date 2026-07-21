@@ -127,7 +127,7 @@ class Retconner(BaseAgent):
         resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
         await self._committer.commit(self.name, EventType.FLAG_RESOLVED, req.id, resolved)
         if resolved.escalated:
-            cleared = resolved.model_copy(update={"escalated": False})
+            cleared = resolved.model_copy(update={"escalated": False, "escalation_cleared_by": "agent"})
             await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, req.id, cleared)
         await self._remark(out.feed_note)
 

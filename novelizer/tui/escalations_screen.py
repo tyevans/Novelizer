@@ -72,7 +72,12 @@ class EscalationsScreen(Screen):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id != "escalations-clear-button" or self._selected is None:
             return
-        cleared = self._selected.model_copy(update={"escalated": False})
+        note = self.query_one("#escalations-clear-note", Input).value or None
+        cleared = self._selected.model_copy(update={
+            "escalated": False,
+            "escalation_cleared_by": "human",
+            "escalation_clear_note": note,
+        })
         await self.runtime.committer.commit(
             "human", EventType.FLAG_ESCALATION_CLEARED, cleared.id, cleared,
         )

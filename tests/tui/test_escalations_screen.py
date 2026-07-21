@@ -98,5 +98,10 @@ async def test_clear_escalation_commits_event_and_refreshes(db_path):
             events = await rt.events.events_for_aggregate("f1")
             cleared_events = [e for e in events if e.event_type == EventType.FLAG_ESCALATION_CLEARED]
             assert len(cleared_events) >= 1
+            human_cleared = [
+                e for e in cleared_events if e.payload.get("escalation_cleared_by") == "human"
+            ]
+            assert len(human_cleared) == 1
+            assert human_cleared[0].payload.get("escalation_clear_note") == "resolved by hand"
     finally:
         await rt.close()

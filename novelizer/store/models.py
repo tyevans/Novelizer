@@ -354,6 +354,8 @@ class Flag(BaseModel):
     severity: Optional[Literal["minor", "major", "critical"]] = None
     escalated: bool = False
     failed_attempts: int = 0
+    escalation_cleared_by: Optional[Literal["agent", "human"]] = None
+    escalation_clear_note: Optional[str] = None
 
 
 def _tolerant_signal_kind(v: object) -> object:
