@@ -70,3 +70,32 @@ async def test_retcon_requests_table_no_longer_created(stack):
         "SELECT name FROM sqlite_master WHERE type='table' AND name='retcon_requests'"
     )
     assert await cur.fetchone() is None
+
+
+async def test_flag_escalated_sets_escalated_column(stack):
+    events, proj, read = stack
+    flag = Flag(id="f1", category="contradiction", description="x", severity="critical")
+    await events.append(EventType.FLAG_CREATED, "f1", flag)
+    escalated_flag = flag.model_copy(update={"escalated": True})
+    await events.append(EventType.FLAG_ESCALATED, "f1", escalated_flag)
+    await proj.catch_up()
+
+    flags = await read.list_flags(escalated=True)
+    assert len(flags) == 1
+    assert flags[0].id == "f1"
+    assert flags[0].severity == "critical"
+
+
+async def test_flag_escalation_cleared_unsets_escalated_column(stack):
+    events, proj, read = stack
+    flag = Flag(id="f2", category="contradiction", description="x", severity="critical", escalated=True)
+    await events.append(EventType.FLAG_CREATED, "f2", flag)
+    await events.append(EventType.FLAG_ESCALATED, "f2", flag)
+    cleared_flag = flag.model_copy(update={"escalated": False})
+    await events.append(EventType.FLAG_ESCALATION_CLEARED, "f2", cleared_flag)
+    await proj.catch_up()
+
+    flags = await read.list_flags(escalated=True)
+    assert flags == []
+    all_flags = await read.list_flags()
+    assert any(f.id == "f2" for f in all_flags)
