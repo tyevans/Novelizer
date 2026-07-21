@@ -22,6 +22,20 @@ class WorldEntryDraft(BaseModel):
         return v if v in _DOMAINS else "other"
 
 
+class TriageVerdict(BaseModel):
+    """Triage's per-flag decision: is it real, and (if unowned) does it get
+    reclassified? `verdict="real"` with a known-owner category just leaves
+    the flag open for its owner's own poll; `verdict="dismiss"` rejects it;
+    `reclassify_category`, when set, overwrites an unowned flag's category
+    before the owner-routing check runs again next pass.
+    """
+
+    verdict: Literal["real", "dismiss"] = "real"
+    reason: str = ""
+    reclassify_category: str = ""
+    feed_note: str = ""
+
+
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
     flags: list[FlagDraft] = Field(default_factory=list)

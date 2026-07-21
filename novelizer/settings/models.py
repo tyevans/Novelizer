@@ -19,6 +19,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "world_architect_tools_enabled", "character_keeper_tools_enabled", "editor_tools_enabled",
     "retconner_tools_enabled", "structure_analyst_tools_enabled",
     "plotter_interval", "plotter_tools_enabled",
+    "triage_interval", "triage_tools_enabled",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -71,6 +72,7 @@ class EffectiveSettings(BaseModel):
     structure_analyst_interval: int = 180
     plotter_interval: int = 240
     muse_interval: int = 60
+    triage_interval: int = 120
     projector_interval: float = 0.5
 
     # Voice
@@ -94,3 +96,4 @@ class EffectiveSettings(BaseModel):
     retconner_tools_enabled: bool = True
     structure_analyst_tools_enabled: bool = True
     plotter_tools_enabled: bool = True
+    triage_tools_enabled: bool = True
