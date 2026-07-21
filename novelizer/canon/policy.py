@@ -1,6 +1,8 @@
 from __future__ import annotations
 from novelizer.canon.autonomy import AutonomyLevel
 from novelizer.canon.events import EventType
+from substrate.event_registry import EventTypeRegistry, EventTypeSpec, GatingTier
+from substrate.policy import is_gated as _substrate_is_gated
 
 _RETCON_EVENTS = {EventType.WORLD_ENTRY_SUPERSEDED, EventType.FLAG_RESOLVED}
 _CANON_EVENTS = _RETCON_EVENTS | {
@@ -54,11 +56,44 @@ _NEVER_GATED = {
     EventType.BOOK_COMPLETED,
 }
 
-_GATED_SETS: dict[AutonomyLevel, set[str]] = {
-    AutonomyLevel.full_auto: set(),
-    AutonomyLevel.gated_retcons: _RETCON_EVENTS,
-    AutonomyLevel.gated_canon: _CANON_EVENTS,
-    # gated_all is resolved dynamically in is_gated: everything not in _NEVER_GATED.
+FICTION_TIER_ORDER = ["full_auto", "retcons", "canon", "all"]
+
+
+def _build_fiction_registry() -> EventTypeRegistry:
+    registry = EventTypeRegistry()
+    all_known: set[str] = set()
+    for name in _ALWAYS_GATED:
+        registry.register(EventTypeSpec(name=name, gating_tier=GatingTier.always))
+        all_known.add(name)
+    for name in _NEVER_GATED:
+        registry.register(EventTypeSpec(name=name, gating_tier=GatingTier.never))
+        all_known.add(name)
+    for name in _CANON_EVENTS:
+        if name in all_known:
+            continue
+        tier = "retcons" if name in _RETCON_EVENTS else "canon"
+        registry.register(EventTypeSpec(name=name, gating_tier=GatingTier.tiered, tier_level=tier))
+        all_known.add(name)
+    # Every other EventType constant not explicitly bucketed above falls
+    # under the dynamic gated_all catch-all the original module documented
+    # ("gated_all is resolved dynamically in is_gated: everything not in
+    # _NEVER_GATED"). Register the rest at tier_level="all" so they are
+    # gated only once current_tier_index reaches gated_all.
+    for name in vars(EventType).values():
+        if not isinstance(name, str) or name in all_known:
+            continue
+        registry.register(EventTypeSpec(name=name, gating_tier=GatingTier.tiered, tier_level="all"))
+        all_known.add(name)
+    return registry
+
+
+_FICTION_REGISTRY = _build_fiction_registry()
+
+_LEVEL_TO_TIER_INDEX = {
+    AutonomyLevel.full_auto: 0,
+    AutonomyLevel.gated_retcons: 1,
+    AutonomyLevel.gated_canon: 2,
+    AutonomyLevel.gated_all: 3,
 }
 
 
@@ -69,14 +104,8 @@ class AutonomyPolicy:
         self._read = read_store
 
     async def is_gated(self, agent_name: str, event_type: str) -> bool:
-        if event_type in _ALWAYS_GATED:
-            # adopting a shape re-frames the whole book — the Director signs off
-            # at every autonomy level.
-            return True
-        if event_type in _NEVER_GATED:
-            return False
         state = await self._read.get_autonomy_state()
         level = state.level_for(agent_name)
-        if level == AutonomyLevel.gated_all:
-            return True
-        return event_type in _GATED_SETS.get(level, set())
+        return _substrate_is_gated(
+            event_type, _FICTION_REGISTRY, FICTION_TIER_ORDER, _LEVEL_TO_TIER_INDEX[level]
+        )
