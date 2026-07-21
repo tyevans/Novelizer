@@ -19,6 +19,7 @@ from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.approval_screen import ApprovalScreen
+from novelizer.tui.export_screen import ExportScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -511,6 +512,12 @@ def _app_open_settings(app: NovelizerApp) -> None:
     app.push_screen(SettingsScreen(story_dir, lambda: app.runtime.settings))
 
 
+def _app_open_export(app: NovelizerApp) -> None:
+    if app.screen is not app.default_screen:
+        return
+    app.push_screen(ExportScreen(app.runtime))
+
+
 def _app_quit(app: NovelizerApp) -> None:
     app.exit()
 
@@ -522,6 +529,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("toggle_prompt", "Toggle the Engine Room prompt panel", _app_toggle_prompt),
     AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
     AppCommand("settings", "Open settings", _app_open_settings),
+    AppCommand("export_epub", "Export EPUB", _app_open_export),
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",
