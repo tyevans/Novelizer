@@ -133,17 +133,25 @@ class Runtime:
         tools = [build_search_canon_tool(self.embeddings, self.read, self.kg_store)]
         return backend, tools
 
-    def _tooled(self, builder, enabled: bool):
+    def _tooled(self, builder, enabled: bool, subagent_enabled: bool = False,
+                subagent_agent_name: str = ""):
         """Wrap a runner builder so pull-mode agents keep their canon
         backend/tools on every build -- both the initial start() build and any
         later apply_settings rebuild. Returns a plain builder(settings,
         callbacks=None) callable; when `enabled` is False it's the bare
-        builder unchanged."""
+        builder unchanged.
+
+        subagent_enabled additionally passes a `subagents=[researcher]` kwarg
+        through to the builder -- a no-op when `enabled` is False, since a
+        subagent with no backend/tools to read from is moot (settings guard,
+        subagent-tooling design decision 6)."""
         if not enabled:
             return builder
+        from novelizer.agents.subagents import build_researcher_subagent
         backend, tools = self._canon_backend, self._canon_tools
+        subagents = [build_researcher_subagent(subagent_agent_name)] if subagent_enabled else None
         return lambda settings, callbacks=None: builder(
-            settings, callbacks=callbacks, backend=backend, tools=tools,
+            settings, callbacks=callbacks, backend=backend, tools=tools, subagents=subagents,
         )
 
     def _chat_runner_for(self, agent_name: str):

@@ -60,6 +60,7 @@ class LlmCallStarted(BaseModel):
     call_index: int
     model: str
     prompt: str
+    delegate: str = ""
 
 
 class LlmCallFinished(BaseModel):
@@ -69,6 +70,7 @@ class LlmCallFinished(BaseModel):
     model: str
     duration_s: float
     output_tokens: int
+    delegate: str = ""
 
 
 class LlmCallFailed(BaseModel):
@@ -79,6 +81,7 @@ class LlmCallFailed(BaseModel):
     duration_s: float
     error_type: str
     error_message: str
+    delegate: str = ""
 
 
 class ToolCallStarted(BaseModel):
@@ -86,6 +89,7 @@ class ToolCallStarted(BaseModel):
     agent_name: str
     tool_name: str
     input_summary: str  # str(tool input), truncated to 300 chars
+    delegate: str = ""
 
 
 class ToolCallFinished(BaseModel):
@@ -96,6 +100,7 @@ class ToolCallFinished(BaseModel):
     output_chars: int
     input_summary: str = ""
     output_summary: str = ""
+    delegate: str = ""
 
 
 class ToolCallFailed(BaseModel):
@@ -106,6 +111,7 @@ class ToolCallFailed(BaseModel):
     error_type: str
     error_message: str
     input_summary: str = ""
+    delegate: str = ""
 
 
 class TokenDelta(BaseModel):

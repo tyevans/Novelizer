@@ -194,3 +194,8 @@ def test_build_structure_analyst_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_structure_analyst_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.structure_analyst import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "structure_analyst_subagent_enabled"

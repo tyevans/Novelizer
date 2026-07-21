@@ -274,6 +274,79 @@ def test_seed_states_keeps_concurrent_agents_isolated():
     assert states["author"].run_id == "r1" and states["editor"].run_id == "r2"
 
 
+def test_apply_bus_item_opens_a_delegated_tool_block():
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                   "input_summary": "/chapters/ch-0012.md", "delegate": "researcher"})
+    s = apply_bus_item(s, started, now=1.0)
+    assert len(s.blocks) == 1
+    tool = s.blocks[0]
+    assert tool.kind == "tool" and tool.tool_name == "read_file" and tool.delegate == "researcher"
+
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                    "duration_s": 0.4})
+    s = apply_bus_item(s, finished, now=2.0)
+    tool = s.blocks[0]
+    assert tool.status == "done" and tool.duration_s == 0.4 and tool.delegate == "researcher"
+
+
+def test_apply_bus_item_marks_a_delegated_tool_block_failed():
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "grep",
+                   "input_summary": "Mateo", "delegate": "researcher"})
+    s = apply_bus_item(s, started, now=1.0)
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "grep",
+                 "error_type": "ValueError", "duration_s": 0.3})
+    s = apply_bus_item(s, failed, now=1.0)
+    tool = s.blocks[0]
+    assert tool.status == "failed" and tool.error == "ValueError" and tool.delegate == "researcher"
+
+
+def test_live_body_indents_delegated_tool_calls():
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper",
+                     blocks=(Block(kind="tool", tool_name="read_file",
+                                   input_summary="/chapters/ch-0012.md",
+                                   status="running", delegate="researcher"),))
+    body = live_body(s)
+    assert "    ⚒ ↳ researcher: read_file(/chapters/ch-0012.md)" in body
+
+
+def test_live_body_parent_tool_calls_are_not_indented():
+    """Regression: a tool block with no delegate renders exactly as before."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper",
+                     blocks=(Block(kind="tool", tool_name="task",
+                                   input_summary="researcher: find X", status="running"),))
+    body = live_body(s)
+    assert "⚒ task(researcher: find X)" in body
+    assert "↳" not in body
+
+
+def test_stream_line_kind_classifies_delegated_tool_lines_as_tool():
+    assert stream_line_kind("    ⚒ ↳ researcher: read_file(/x.md)") == "tool"
+
+
+def test_different_delegates_do_not_collapse_identical_calls():
+    """A parent's and a subagent's identical-looking tool call must not
+    collapse into one repeat-counted block -- they are different actors."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    for delegate in ("", "researcher"):
+        payload = {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                   "input_summary": "ch3.md"}
+        if delegate:
+            payload["delegate"] = delegate
+        started = _ev(1, TelemetryEventType.TOOL_CALL_STARTED, payload)
+        s = apply_bus_item(s, started, now=1.0)
+        finished = _ev(2, TelemetryEventType.TOOL_CALL_FINISHED,
+                       {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                        "duration_s": 0.1})
+        s = apply_bus_item(s, finished, now=1.1)
+    assert len(s.blocks) == 2
+    assert all(b.repeat_count == 1 for b in s.blocks)
+
 def test_trace_line_formats_tool_call_events():
     started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",

@@ -510,7 +510,7 @@ class ContinuityChecker(BaseAgent):
             self._clear_watermark()
 
 
-def build_continuity_checker_runner(settings, callbacks=None, backend=None, tools=None):
+def build_continuity_checker_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.author import RETRIEVAL_NOTE
     from novelizer.agents.llm import build_chat_model
@@ -527,7 +527,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -561,12 +561,13 @@ def build_continuity_mining_runner(settings, callbacks=None):
     return create_deep_agent(model=model, system_prompt=MINING_SYSTEM_PROMPT, response_format=ProviderStrategy(MinedFactsOutput))
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> ContinuityChecker:
     enabled = ctx.settings.checker_tools_enabled
-    builder = ctx.tooled(build_continuity_checker_runner, enabled)
+    subagent_enabled = ctx.settings.checker_subagent_enabled
+    builder = ctx.tooled(build_continuity_checker_runner, enabled, subagent_enabled, "continuity_checker")
     runner = ctx.runner_for("continuity_checker", builder)
     mining_runner = ctx.runner_for(
         "continuity_checker_mining", build_continuity_mining_runner,
@@ -583,5 +584,6 @@ def _construct(ctx: AgentContext) -> ContinuityChecker:
 SPEC = AgentSpec(
     name="continuity_checker",
     tool_grant=ToolGrant(enabled_setting="checker_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="checker_subagent_enabled"),
     construct=_construct,
 )

@@ -53,6 +53,8 @@ class Block:
     error: str = ""
     summary: str | None = None
     repeat_count: int = 1
+    delegate: str = ""  # subagent name (e.g. "researcher") when this tool
+    # call was dispatched by a subagent rather than the parent agent itself
 
 
 @dataclass(frozen=True)
@@ -140,9 +142,11 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if et == TelemetryEventType.TOOL_CALL_STARTED:
         tool_name = p.get("tool_name", "?")
         input_summary = normalize_input_summary(p.get("input_summary", ""))
+        delegate = p.get("delegate", "")
         if (state.blocks and state.blocks[-1].kind == "tool"
                 and state.blocks[-1].tool_name == tool_name
                 and state.blocks[-1].input_summary == input_summary
+                and state.blocks[-1].delegate == delegate
                 and state.blocks[-1].status != "running"):
             last = state.blocks[-1]
             # NOTE: summary reflects whichever ToolSummaryReady arrives first
@@ -152,7 +156,8 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
                                                   summary=None),)
         else:
             blocks = state.blocks + (Block(kind="tool", tool_name=tool_name,
-                                           input_summary=input_summary, status="running"),)
+                                           input_summary=input_summary, status="running",
+                                           delegate=delegate),)
         return replace(state, blocks=blocks)
     if et in (TelemetryEventType.TOOL_CALL_FINISHED, TelemetryEventType.TOOL_CALL_FAILED):
         tool_name = p.get("tool_name", "?")
@@ -267,13 +272,17 @@ def _render_block(b: Block) -> str:
         return header
     # kind == "tool"
     suffix = f" ×{b.repeat_count}" if b.repeat_count > 1 else ""
-    lines = [f"⚒ {b.tool_name}({b.input_summary}){suffix}"]
+    indent = "       " if b.delegate else "   "
+    if b.delegate:
+        lines = [f"    ⚒ ↳ {b.delegate}: {b.tool_name}({b.input_summary}){suffix}"]
+    else:
+        lines = [f"⚒ {b.tool_name}({b.input_summary}){suffix}"]
     if b.status == "done":
-        lines.append(f"   ↳ done in {b.duration_s:.1f}s")
+        lines.append(f"{indent}↳ done in {b.duration_s:.1f}s")
     elif b.status == "failed":
-        lines.append(f"   ↳ ✗ {b.error}")
+        lines.append(f"{indent}↳ ✗ {b.error}")
     if b.summary:
-        lines.append(f"   ↳ {b.summary}")
+        lines.append(f"{indent}↳ {b.summary}")
     return "\n".join(lines)
 
 

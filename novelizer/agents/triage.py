@@ -149,7 +149,7 @@ class Triage(BaseAgent):
         self._deferred.discard(flag.id)
 
 
-def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
+def build_triage_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -161,7 +161,7 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
         )
         graph = create_deep_agent(
             model=model, system_prompt=SYSTEM_PROMPT, response_format=TriageVerdict,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -172,12 +172,13 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=TriageVerdict)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Triage:
     enabled = ctx.settings.triage_tools_enabled
-    builder = ctx.tooled(build_triage_runner, enabled)
+    subagent_enabled = ctx.settings.triage_subagent_enabled
+    builder = ctx.tooled(build_triage_runner, enabled, subagent_enabled, "triage")
     runner = ctx.runner_for("triage", builder)
     return Triage(
         runner, ctx.read, ctx.committer,
@@ -189,5 +190,6 @@ def _construct(ctx: AgentContext) -> Triage:
 SPEC = AgentSpec(
     name="triage",
     tool_grant=ToolGrant(enabled_setting="triage_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="triage_subagent_enabled"),
     construct=_construct,
 )
