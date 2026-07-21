@@ -6,6 +6,10 @@ from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.research_screen import ResearchScreen
 from novelizer.research.schemas import ResearchAnswer
+from novelizer.telemetry.events import (
+    TelemetryEventType, AgentRunStarted, AgentRunFinished, TokenDelta,
+)
+from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
 
 
 class _R:
@@ -120,5 +124,66 @@ async def test_failed_runner_shows_warning_and_reenables_input(db_path):
             joined = "\n".join(str(line) for line in log.lines)
             assert "research failed" in joined
             assert input_widget.disabled is False
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_panel_shows_running_state_during_a_turn(db_path):
+    import asyncio
+    gate = asyncio.Event()
+    rt = await _runtime(db_path, _R(ResearchAnswer(answer_text="answer"), delay_event=gate))
+    try:
+        screen = ResearchScreen(rt)
+        from textual.app import App
+
+        class _TestApp(App):
+            def on_mount(self):
+                self.push_screen(screen)
+
+        app = _TestApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            input_widget = screen.query_one("#research_input", Input)
+            input_widget.value = "q1"
+            await screen.on_input_submitted(type("E", (), {"input": input_widget, "value": "q1"})())
+            await pilot.pause(0.05)
+
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                    AgentRunStarted(run_id="r1", agent_name="research"))
+            rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="research", text="thinking…"))
+            await pilot.pause(0.2)
+
+            panel = screen.query_one(LiveStreamPanel)
+            body = panel.query_one(LiveStreamPanel._STREAM_ID)
+            assert "thinking…" in str(body.renderable)
+
+            gate.set()
+            await pilot.pause(0.3)
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_panel_ignores_events_for_other_identities(db_path):
+    rt = await _runtime(db_path, _R(ResearchAnswer(answer_text="answer")))
+    try:
+        screen = ResearchScreen(rt)
+        from textual.app import App
+
+        class _TestApp(App):
+            def on_mount(self):
+                self.push_screen(screen)
+
+        app = _TestApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                    AgentRunStarted(run_id="r1", agent_name="chat:author"))
+            rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="chat:author", text="not mine"))
+            await pilot.pause(0.2)
+            panel = screen.query_one(LiveStreamPanel)
+            body = panel.query_one(LiveStreamPanel._STREAM_ID)
+            assert "not mine" not in str(body.renderable)
     finally:
         await rt.close()
