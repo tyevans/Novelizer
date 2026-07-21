@@ -62,3 +62,11 @@ async def test_legacy_retcon_request_created_event_aliases_into_flags(stack):
     assert len(flags) == 1
     assert flags[0].id == "r1"
     assert flags[0].related_entry_ids == ["w1"]
+
+
+async def test_retcon_requests_table_no_longer_created(stack):
+    events, proj, read = stack
+    cur = await read._conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='retcon_requests'"
+    )
+    assert await cur.fetchone() is None

@@ -36,9 +36,6 @@ CREATE TABLE IF NOT EXISTS characters (
 CREATE TABLE IF NOT EXISTS director_signals (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS retcon_requests (
-    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS flags (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, category TEXT NOT NULL
 );
@@ -147,7 +144,7 @@ class Projector:
     async def _reset_state_locked(self) -> None:
         for table in (
             "chapters", "world_entries", "characters", "director_signals",
-            "retcon_requests", "flags", "proposals", "autonomy_state", "threads",
+            "flags", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
             "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs", "arcs",

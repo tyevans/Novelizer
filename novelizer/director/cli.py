@@ -224,9 +224,9 @@ def read(ctx, chapter_id: str):
 @cli.command()
 @click.pass_context
 def retcons(ctx):
-    """List open retcon requests."""
+    """List open contradiction flags."""
     async def _run(rt: Runtime):
-        reqs = await rt.read.list_retcon_requests(status="open")
+        reqs = await rt.read.list_flags(category="contradiction", status="open")
         if not reqs:
             console.print("No open retcon requests.")
             return
