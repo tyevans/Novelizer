@@ -12,7 +12,9 @@ from tests.conftest import FakeEmbeddingFunction
 class FakeExtractionRunner:
     """Stands in for build_kg_extraction_runner's graph: same .ainvoke shape
     ContinuityChecker's mining runner uses, returning a canned
-    KGExtractionOutput via structured_response."""
+    KGExtractionOutput via structured_response. `output` may be a single
+    KGExtractionOutput (returned for every call) or a list of them (returned
+    in order, one per call, to simulate one call per prose chunk)."""
 
     def __init__(self, output):
         self._output = output
@@ -20,6 +22,8 @@ class FakeExtractionRunner:
 
     async def ainvoke(self, _messages):
         self.calls += 1
+        if isinstance(self._output, list):
+            return {"structured_response": self._output[self.calls - 1]}
         return {"structured_response": self._output}
 
 
@@ -96,6 +100,46 @@ async def test_chapter_revised_reflows_prose_extracted_entities(wiring, tmp_path
     # to garbage-collect per this task -- see docstring in kg_projector.py).
     hits = await emb.search("Salted Gull", kinds=["entity"])
     assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_long_chapter_is_extracted_in_chunks_and_merged(wiring, tmp_path):
+    events, projector, read, kg, emb = wiring
+    from novelizer.agents.schemas import KGExtractionOutput, KGExtractedEntity, KGExtractedRelation
+
+    long_prose = "word " * 2000  # well past _EXTRACTION_CHUNK_CHARS (3000) -> 4 chunks
+    await events.append_raw(EventType.CHAPTER_CREATED, "ch1", {
+        "id": "ch1", "title": "Ch 1", "prose": long_prose,
+    })
+    await projector.catch_up()
+
+    # Overlapping/duplicate entity and relation across chunks to verify merge dedupes.
+    dup_output = KGExtractionOutput(
+        entities=[
+            KGExtractedEntity(name="Eldara", entity_type="character"),
+            KGExtractedEntity(name="The Salted Gull", entity_type="location"),
+        ],
+        relations=[KGExtractedRelation(source="Eldara", target="The Salted Gull", relation_type="frequents")],
+    )
+    runner = FakeExtractionRunner([
+        KGExtractionOutput(
+            entities=[KGExtractedEntity(name="Eldara", entity_type="character", description="a sailor")],
+            relations=[KGExtractedRelation(source="Eldara", target="The Salted Gull", relation_type="frequents")],
+        ),
+        dup_output, dup_output, dup_output,
+    ])
+    cursor_path = str(tmp_path / "kg_cursor.json")
+    kgp = KGProjector(events, read, kg, emb, runner, cursor_path)
+    await kgp.catch_up()
+
+    assert runner.calls == 4  # one call per chunk
+    eldara = await kg.find_entity_by_name("Eldara", "character")
+    assert eldara is not None
+    assert eldara["description"] == "a sailor"  # first non-empty description wins
+    gull = await kg.find_entity_by_name("The Salted Gull", "location")
+    assert gull is not None
+    relations = await kg.entity_relations(eldara["id"])
+    assert len(relations) == 1  # duplicate relation across chunks merged to one
 
 
 @pytest.mark.asyncio
