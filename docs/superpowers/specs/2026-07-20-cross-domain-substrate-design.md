@@ -264,6 +264,38 @@ by running Novelizer against Postgres in an isolated test environment (never
 the shared/main checkout, per the standing DB-lock-incident rule) under
 concurrent multi-agent writes. No Redis at this stage.
 
+**M2 status (2026-07-21): done.** Added `substrate/postgres/` — `events.py`
+(`PostgresEventStore`, append-only `substrate_events` table with an
+identity `seq`, a stream/seq index, and BEFORE UPDATE/DELETE triggers that
+raise rather than allow mutation), `embeddings.py`
+(`PostgresEmbeddingStore`, `substrate_embeddings` table keyed by
+`(target_kind, target_id, model)` with an HNSW index), and `deps.py`
+(`PostgresDepsStore`, `substrate_derived_deps` edge table with a recursive
+CTE for blast-radius queries). No system-level Postgres install was
+available in this environment, so validation ran against an ephemeral
+`pgvector/pgvector:pg16` Docker container started and torn down per test
+session (`tests/substrate/postgres_fixture.py`) — never a shared or
+persistent database, consistent with the project's standing DB-lock-
+incident rule. Each store's `connect()` guards its schema DDL behind a
+distinct `pg_advisory_xact_lock` key (727271/727272/727273) to prevent a
+real race when multiple connections call `connect()` concurrently.
+Concurrency was validated at two levels: `PostgresEventStore` alone (20
+concurrent appends across 4 simulated writers, zero lost/duplicate sequence
+numbers) and all three stores together under 6 simulated concurrent agents
+each writing events, embeddings, and dependency edges
+(`test_postgres_concurrency.py`, re-run twice with zero flakiness). A full
+suite run (`pytest tests/`) after this milestone showed 1966 passed / 7
+failed / 7 deselected: 5 of the 7 failures are the pre-existing,
+already-diagnosed failures noted in M1's status above; the other 2
+(`test_postgres_deps.py::test_blast_radius_dedupes_diamond_dependency` and
+`test_brain_panel.py::test_strip_reflects_settings_thresholds_...`) were
+confirmed as load-flakes, not regressions — both pass cleanly (9 passed) in
+an isolated re-run of just those two files, consistent with this project's
+known load-flake pattern (memory: testing-load-flakes) when ~2000 tests and
+a live Docker container run at once. The existing SQLite adapter is
+untouched; this milestone is purely additive. No Redis was added, per the
+spec's explicit scope.
+
 ### M3 — Declarative per-event-type autonomy dial
 
 Fiction already has the gating *mechanism* (`AutonomyPolicy.is_gated`, three
