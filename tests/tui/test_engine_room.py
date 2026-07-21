@@ -213,6 +213,42 @@ async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequen
         assert not any("telemetry error" in m for m in app.messages)
 
 
+async def test_agent_tabs_carry_glyph_and_color_from_the_identity_registry(rt):
+    from textual.widgets import Static
+    from novelizer.tui.identity import identity_for
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="hi"))
+        await pilot.pause(0.8)
+
+        ident = identity_for("author")
+        vitals = app.query_one("#er_vitals_author", Static).renderable
+        assert ident.glyph in str(vitals)
+        assert vitals.style == ident.style
+
+
+async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt):
+    from textual.widgets import Static
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="pondering the tide", kind="thinking"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="The lighthouse", kind="text"))
+        await pilot.pause(0.8)
+        body = app.query_one("#er_stream_author", Static).renderable
+        assert "💭 pondering the tide" in str(body)
+        assert "The lighthouse" in str(body)
+
+
 async def test_agent_tabs_show_only_their_own_agents_activity(rt):
     """Two agents running concurrently (scheduler allows max_concurrent_agents
     > 1) must not clobber each other's tab -- each keeps its own live feed,

@@ -7,12 +7,38 @@ streamed token on its own line.
 from __future__ import annotations
 import time
 from rich.markup import escape
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Static, TabbedContent, TabPane
+from novelizer.tui.identity import identity_for
 from novelizer.tui.widgets.engine_room_model import (
-    AGENT_NAMES, LiveRunState, live_body, vitals_line,
+    AGENT_NAMES, LiveRunState, live_body, stream_line_kind, vitals_line,
 )
+
+# Rich styles per stream_line_kind(); "" leaves prose in the theme default so
+# the agent's own accent color (applied to the vitals bar) stays the visual
+# anchor rather than competing with a wall of colored prose.
+_LINE_STYLES = {"tool": "bold cyan", "call": "dim", "thinking": "italic dim magenta"}
+
+
+def _styled_vitals(state: LiveRunState, now: float) -> Text:
+    ident = identity_for(state.agent_name)
+    return Text(f"{ident.glyph} {vitals_line(state, now)}", style=ident.style)
+
+
+def _styled_body(body: str) -> Text:
+    # Text objects are never markup-parsed regardless of a Static's
+    # markup=False setting, so untrusted stream content (tool summaries,
+    # prompts) stays safe here the same way it does as a plain str.
+    text = Text()
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        style = _LINE_STYLES.get(stream_line_kind(line), "")
+        text.append(line, style=style)
+        if i != len(lines) - 1:
+            text.append("\n")
+    return text
 
 
 class EngineRoom(Vertical):
@@ -40,7 +66,8 @@ class EngineRoom(Vertical):
                     yield Static("", id="er_stream", classes="er-stream", markup=False)
                 yield Static("", id="er_prompt", markup=False)
             for agent_name in AGENT_NAMES:
-                with TabPane(agent_name, id=f"er_tab_{agent_name}"):
+                ident = identity_for(agent_name)
+                with TabPane(f"{ident.glyph} {ident.label}", id=f"er_tab_{agent_name}"):
                     yield Static("idle — waiting for the scheduler",
                                 id=f"er_vitals_{agent_name}", classes="er-vitals", markup=False)
                     with VerticalScroll(id=f"er_stream_scroll_{agent_name}",
@@ -60,10 +87,10 @@ class EngineRoom(Vertical):
 
     def render_live(self, state: LiveRunState, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
-        self.query_one("#er_vitals", Static).update(vitals_line(state, now))
+        self.query_one("#er_vitals", Static).update(_styled_vitals(state, now))
         body = live_body(state)
         if body != self._rendered_body.get("__all__"):
-            self.query_one("#er_stream", Static).update(body)
+            self.query_one("#er_stream", Static).update(_styled_body(body))
             self._rendered_body["__all__"] = body
             self.query_one("#er_stream_scroll", VerticalScroll).scroll_end(animate=False)
         self.query_one("#er_prompt", Static).update(state.prompt or "(no call in flight)")
@@ -71,10 +98,10 @@ class EngineRoom(Vertical):
     def render_agent_live(self, agent_name: str, state: LiveRunState,
                           now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
-        self.query_one(f"#er_vitals_{agent_name}", Static).update(vitals_line(state, now))
+        self.query_one(f"#er_vitals_{agent_name}", Static).update(_styled_vitals(state, now))
         body = live_body(state)
         if body != self._rendered_body.get(agent_name):
-            self.query_one(f"#er_stream_{agent_name}", Static).update(body)
+            self.query_one(f"#er_stream_{agent_name}", Static).update(_styled_body(body))
             self._rendered_body[agent_name] = body
             self.query_one(f"#er_stream_scroll_{agent_name}", VerticalScroll).scroll_end(animate=False)
 

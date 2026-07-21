@@ -4,7 +4,7 @@ from novelizer.tui.identity import IDENTITIES, SPEAKER_WIDTH, identity_for
 def test_all_seven_agents_plus_director_and_system_present():
     assert set(IDENTITIES) == {
         "author", "editor", "world_architect", "character_keeper",
-        "continuity_checker", "retconner", "structure_analyst", "plotter",
+        "continuity_checker", "retconner", "structure_analyst", "plotter", "muse",
         "director", "system",
     }
 
@@ -13,7 +13,7 @@ def test_glyphs_match_spec_table_verbatim():
     expected = {
         "author": "✎", "editor": "§", "world_architect": "⌂",
         "character_keeper": "♥", "continuity_checker": "⚖",
-        "retconner": "↺", "structure_analyst": "∿", "plotter": "⌖",
+        "retconner": "↺", "structure_analyst": "∿", "plotter": "⌖", "muse": "✦",
         "director": "★", "system": "·",
     }
     assert {k: v.glyph for k, v in IDENTITIES.items()} == expected
@@ -24,7 +24,7 @@ def test_labels_keep_existing_feed_names():
         "author": "Author", "editor": "Editor", "world_architect": "Architect",
         "character_keeper": "Keeper", "continuity_checker": "Continuity",
         "retconner": "Retconner", "structure_analyst": "Analyst", "plotter": "Plotter",
-        "director": "Director", "system": "System",
+        "muse": "Muse", "director": "Director", "system": "System",
     }
     assert {k: v.label for k, v in IDENTITIES.items()} == expected
 

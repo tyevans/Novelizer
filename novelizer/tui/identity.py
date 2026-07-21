@@ -32,6 +32,7 @@ IDENTITIES: dict[str, AgentIdentity] = {
     "retconner": AgentIdentity("retconner", "Retconner", "↺", "R", "dark_orange"),
     "structure_analyst": AgentIdentity("structure_analyst", "Analyst", "∿", "S", "green3"),
     "plotter": AgentIdentity("plotter", "Plotter", "⌖", "P", "turquoise2"),
+    "muse": AgentIdentity("muse", "Muse", "✦", "M", "orchid"),
     "director": AgentIdentity("director", "Director", "★", "D", "bold"),
     "system": AgentIdentity("system", "System", "·", "-", "dim"),
 }

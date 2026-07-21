@@ -44,6 +44,9 @@ class LiveRunState:
     call_index: int = 0
     error: str = ""
     stream_attached: bool = True
+    last_kind: str = ""  # "" | "text" | "thinking" — tracks stream-segment
+    # boundaries so a switch between reasoning and answer content gets a
+    # visible marker instead of running together unlabeled.
 
 
 def _append(state: LiveRunState, line: str) -> LiveRunState:
@@ -55,8 +58,15 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if isinstance(item, TokenDelta):
         if state.status != "running" or item.run_id != state.run_id:
             return state
-        text = (state.text + item.text)[-TEXT_CAP:]
-        return replace(state, text=text, tokens=state.tokens + 1)
+        kind = item.kind or "text"
+        marker = ""
+        if kind != state.last_kind:
+            if kind == "thinking":
+                marker = "\n💭 "
+            elif state.last_kind == "thinking":
+                marker = "\n"
+        text = (state.text + marker + item.text)[-TEXT_CAP:]
+        return replace(state, text=text, tokens=state.tokens + 1, last_kind=kind)
     if not isinstance(item, StoredEvent):
         return state
     p = item.payload
@@ -169,6 +179,19 @@ def live_body(state: LiveRunState) -> str:
     if state.status == "failed" and state.text:
         return state.text + "\n\n✗ crashed"
     return state.text or "(waiting for first token…)"
+
+
+def stream_line_kind(line: str) -> str:
+    """Classify a live_body() line for widget-level styling. Pure/text-only
+    so it stays testable without Rich or Textual."""
+    s = line.strip()
+    if s.startswith("⚒"):
+        return "tool"
+    if s.startswith("▸") or s.startswith("↳"):
+        return "call"
+    if s.startswith("💭"):
+        return "thinking"
+    return "prose"
 
 
 def _t(ev: StoredEvent) -> str:

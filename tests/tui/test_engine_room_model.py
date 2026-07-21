@@ -3,7 +3,7 @@ from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 from novelizer.tui.widgets.engine_room_model import (
     LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
-    strip_line, vitals_line, live_body, trace_line, trace_detail,
+    strip_line, stream_line_kind, vitals_line, live_body, trace_line, trace_detail,
 )
 
 
@@ -105,6 +105,29 @@ def test_trace_line_formats_key_event_shapes():
     assert "✗" in trace_line(fail) and "TimeoutError" in trace_line(fail)
     picked = _ev(5, TelemetryEventType.SCHEDULER_PICKED, {"agent_name": "author"})
     assert "picked author" in trace_line(picked)
+
+
+def test_apply_bus_item_marks_the_boundary_between_thinking_and_answer_text():
+    """Reasoning-model chunks arrive as separate thinking/text deltas: the
+    switch between them must be visible, not silently concatenated."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="let me consider", kind="thinking"), now=1.0)
+    assert s.text == "\n💭 let me consider"
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text=" the tide.", kind="thinking"), now=1.1)
+    assert s.text == "\n💭 let me consider the tide."
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="The lighthouse", kind="text"), now=1.2)
+    assert s.text == "\n💭 let me consider the tide.\nThe lighthouse"
+
+
+def test_stream_line_kind_classifies_marker_lines():
+    assert stream_line_kind("⚒ search_web(dragons)") == "tool"
+    assert stream_line_kind("   ↳ done in 1.2s") == "call"
+    assert stream_line_kind("▸ call 1 (qwen)") == "call"
+    assert stream_line_kind("💭 thinking about it") == "thinking"
+    assert stream_line_kind("Once upon a time") == "prose"
 
 
 def test_route_agent_reads_agent_name_from_token_deltas_and_events():
