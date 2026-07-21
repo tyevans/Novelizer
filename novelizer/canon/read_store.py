@@ -3,7 +3,7 @@ from typing import Optional
 import aiosqlite
 from novelizer.canon import db
 from novelizer.store.models import (
-    Chapter, WorldEntry, Character, DirectorSignal, RetconRequest, ThreadRecord, StructureScore,
+    Chapter, WorldEntry, Character, DirectorSignal, Flag, ThreadRecord, StructureScore,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
     InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
     BlueprintRecord, BeatRecord, ChapterBriefRecord, ArcRecord,
@@ -69,14 +69,17 @@ class ReadStore:
         row = await cur.fetchone()
         return Character.model_validate_json(row[0]) if row else None
 
-    async def list_retcon_requests(self, status: Optional[str] = None) -> list[RetconRequest]:
+    async def list_flags(self, category: Optional[str] = None, status: Optional[str] = None) -> list[Flag]:
+        clauses, params = [], []
+        if category:
+            clauses.append("category=?")
+            params.append(category)
         if status:
-            cur = await self._conn.execute(
-                "SELECT data FROM retcon_requests WHERE status=? ORDER BY rowid", (status,)
-            )
-        else:
-            cur = await self._conn.execute("SELECT data FROM retcon_requests ORDER BY rowid")
-        return [RetconRequest.model_validate_json(r[0]) for r in await cur.fetchall()]
+            clauses.append("status=?")
+            params.append(status)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        cur = await self._conn.execute(f"SELECT data FROM flags{where} ORDER BY rowid", params)
+        return [Flag.model_validate_json(r[0]) for r in await cur.fetchall()]
 
     async def list_proposals(self, status: Optional[str] = None) -> list[Proposal]:
         if status:

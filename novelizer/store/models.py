@@ -34,12 +34,6 @@ class EditorialStatus(StrEnum):
     final = "final"
 
 
-class RetconStatus(StrEnum):
-    open = "open"
-    resolved = "resolved"
-    rejected = "rejected"
-
-
 class SignalKind(StrEnum):
     seed = "seed"
     focus = "focus"
@@ -326,14 +320,32 @@ class Chapter(BaseModel):
     projected before this field replay unchanged."""
 
 
-class RetconRequest(BaseModel):
+class FlagStatus(StrEnum):
+    open = "open"
+    resolved = "resolved"
+    rejected = "rejected"
+    stale = "stale"
+
+
+class Flag(BaseModel):
+    """A structured issue any agent can raise mid-work — a generalization of
+    the old contradiction-only RetconRequest. `category` is free-form
+    (e.g. "contradiction", "pacing", "thematic", "worldbuilding", "voice_drift")
+    so agents aren't limited to a fixed taxonomy; the Triage agent routes by
+    category via a small owner map, catch-alling anything unmapped.
+    `triage_passes` counts unresolved catch-all Triage passes over an unowned
+    flag; past a threshold it is marked `stale` rather than looping forever.
+    """
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)
+    category: str
     description: str
-    conflicting_entry_ids: list[str]
-    proposed_resolution: str
-    status: RetconStatus = RetconStatus.open
+    related_entry_ids: list[str] = Field(default_factory=list)
+    proposed_resolution: str = ""
+    status: FlagStatus = FlagStatus.open
+    filed_by: str = ""
     resolved_by: Optional[str] = None
+    triage_passes: int = 0
 
 
 def _tolerant_signal_kind(v: object) -> object:

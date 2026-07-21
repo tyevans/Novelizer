@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS director_signals (
 CREATE TABLE IF NOT EXISTS retcon_requests (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS flags (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, category TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS proposals (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, proposing_agent TEXT NOT NULL
 );
@@ -144,7 +147,7 @@ class Projector:
     async def _reset_state_locked(self) -> None:
         for table in (
             "chapters", "world_entries", "characters", "director_signals",
-            "retcon_requests", "proposals", "autonomy_state", "threads",
+            "retcon_requests", "flags", "proposals", "autonomy_state", "threads",
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
             "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs", "arcs",
@@ -248,15 +251,39 @@ class Projector:
             await self._conn.execute(
                 "UPDATE director_signals SET consumed=1 WHERE id=?", (ev.aggregate_id,)
             )
-        elif t == EventType.RETCON_REQUEST_CREATED:
+        elif t == EventType.FLAG_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO retcon_requests (id, data, status) VALUES (?,?,?)",
-                (p["id"], data, p.get("status", "open")),
+                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
+                (p["id"], data, p.get("status", "open"), p.get("category", "")),
             )
-        elif t == EventType.RETCON_REQUEST_RESOLVED or t == EventType.RETCON_REQUEST_REJECTED:
+        elif t == EventType.FLAG_RESOLVED or t == EventType.FLAG_REJECTED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO retcon_requests (id, data, status) VALUES (?,?,?)",
-                (p["id"], data, p.get("status", "resolved" if t == EventType.RETCON_REQUEST_RESOLVED else "rejected")),
+                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
+                (p["id"], data,
+                 p.get("status", "resolved" if t == EventType.FLAG_RESOLVED else "rejected"),
+                 p.get("category", "")),
+            )
+        elif t in (EventType.RETCON_REQUEST_CREATED, EventType.RETCON_REQUEST_RESOLVED,
+                   EventType.RETCON_REQUEST_REJECTED):
+            # Legacy alias: pre-Flag databases only ever emitted these three
+            # event types for contradictions. Project them into the same
+            # `flags` table as category="contradiction" so old event logs
+            # keep working without any code path emitting these anymore.
+            legacy_status = p.get("status")
+            if legacy_status is None:
+                legacy_status = {
+                    EventType.RETCON_REQUEST_CREATED: "open",
+                    EventType.RETCON_REQUEST_RESOLVED: "resolved",
+                    EventType.RETCON_REQUEST_REJECTED: "rejected",
+                }[t]
+            aliased = dict(p)
+            aliased["category"] = "contradiction"
+            aliased.setdefault("related_entry_ids", aliased.pop("conflicting_entry_ids", []))
+            aliased.setdefault("filed_by", "")
+            aliased.setdefault("triage_passes", 0)
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
+                (aliased["id"], json.dumps(aliased), legacy_status, "contradiction"),
             )
         elif t == EventType.PROPOSAL_CREATED:
             await self._conn.execute(
