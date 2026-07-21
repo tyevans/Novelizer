@@ -8,7 +8,7 @@ from novelizer.agents.author import ChapterDraft
 from novelizer.store.models import DirectorSignal, SignalKind
 from novelizer.agents.schemas import (
     WorldEntriesDraft, WorldEntryDraft, KeeperOutput, CharacterUpdate,
-    EditorVerdict, ContinuityOutput, RetconAmendments, RetconDraft,
+    EditorVerdict, ContinuityOutput, RetconAmendments, FlagDraft,
 )
 from novelizer.agents.base import ChapterDraft
 from novelizer.canon.committer import GatingCommitter
@@ -130,7 +130,7 @@ async def test_full_pipeline_runs_under_runtime(settings):
     try:
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor", "continuity_checker",
-            "retconner", "structure_analyst", "muse", "plotter",
+            "retconner", "structure_analyst", "muse", "plotter", "triage",
         }
         # Drive each agent once directly (deterministic), projecting between.
         for name in ["world_architect", "author", "editor"]:
@@ -146,7 +146,7 @@ async def test_full_pipeline_runs_under_runtime(settings):
 
 
 class ScriptedContinuityRunner:
-    """Returns one RetconDraft referencing a known world-entry id on its first call,
+    """Returns one FlagDraft referencing a known world-entry id on its first call,
     then empty ContinuityOutput on every subsequent call (so it doesn't keep piling
     up new retcons once the scheduler starts favoring it again)."""
 
@@ -180,10 +180,11 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
     selects and runs ContinuityChecker to file a retcon and Retconner to resolve it,
     superseding a pre-existing world entry -- with only the LLM calls faked."""
     known_world_entry_id = "w1"
-    retcon = ContinuityOutput(retcon_requests=[
-        RetconDraft(
+    retcon = ContinuityOutput(flags=[
+        FlagDraft(
+            category="contradiction",
             description="two suns vs one sun",
-            conflicting_entry_ids=[known_world_entry_id],
+            related_entry_ids=[known_world_entry_id],
             proposed_resolution="there is only one sun",
         )
     ])
@@ -225,11 +226,11 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
             ran = await rt.scheduler.tick()
             await rt.scheduler.drain_in_flight()
             await rt.projector.catch_up()
-            if "continuity_checker" in ran and await rt.read.list_retcon_requests(status="open"):
+            if "continuity_checker" in ran and await rt.read.list_flags(category="contradiction", status="open"):
                 break
-        open_retcons = await rt.read.list_retcon_requests(status="open")
+        open_retcons = await rt.read.list_flags(category="contradiction", status="open")
         assert len(open_retcons) == 1, "scheduler did not drive ContinuityChecker to file a retcon"
-        assert open_retcons[0].conflicting_entry_ids == [known_world_entry_id]
+        assert open_retcons[0].related_entry_ids == [known_world_entry_id]
 
         # Phase 2: pause ContinuityChecker, resume Retconner -- this forces the
         # scheduler to select Retconner (deterministically) to resolve the retcon.
@@ -239,14 +240,14 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
             ran = await rt.scheduler.tick()
             await rt.scheduler.drain_in_flight()
             await rt.projector.catch_up()
-            if "retconner" in ran and await rt.read.list_retcon_requests(status="resolved"):
+            if "retconner" in ran and await rt.read.list_flags(category="contradiction", status="resolved"):
                 break
 
         # Real, non-vacuous assertions: the retcon actually resolved, and the world
         # entry it targeted was actually superseded (old id gone, new body active).
-        resolved = await rt.read.list_retcon_requests(status="resolved")
+        resolved = await rt.read.list_flags(category="contradiction", status="resolved")
         assert len(resolved) >= 1
-        assert await rt.read.list_retcon_requests(status="open") == []
+        assert await rt.read.list_flags(category="contradiction", status="open") == []
         active_ids = {e.id for e in await rt.read.list_world_entries()}
         assert known_world_entry_id not in active_ids
         active_bodies = {e.body for e in await rt.read.list_world_entries()}
@@ -282,7 +283,7 @@ async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor",
             "continuity_checker", "retconner", "structure_analyst", "muse",
-            "plotter",
+            "plotter", "triage",
         }
         assert rt.structure_analyst is not None
         assert rt.structure_analyst._committer is rt.committer

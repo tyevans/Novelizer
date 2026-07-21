@@ -3,9 +3,13 @@ detail pane's DetailView. Same seam as the other *_model.py modules — the
 async functions here do read-only ReadStore calls plus pure string/Text
 construction; no Textual imports.
 
-State cues (spec Zone 4): chapter rows carry an editorial-status dot, the
-Retcons label carries ⚠ when open items exist, and the Threads section
-carries the stale count. Staleness is never re-derived: is_thread_stale +
+State cues (spec Zone 4): chapter rows carry an editorial-status dot,
+the Flags label carries ⚠ when any STALE flag exists (Triage's catch-all
+gave up on an unowned-category flag and it needs a human), not merely
+when open items exist -- an open flag is expected to be actively worked
+by its owner agent or by Triage, and the count next to the label is a
+normal, non-alarming queue depth. The Threads section carries the stale
+count. Staleness is never re-derived: is_thread_stale +
 the settings-fed staleness_threshold, the SAME pair the brain panel uses.
 No ids/slugs in any label."""
 from __future__ import annotations
@@ -65,7 +69,8 @@ async def browser_sections(read, *, staleness_threshold: int) -> list:
     chapters = await read.list_chapters()
     characters = await read.list_characters()
     world = await read.list_world_entries()
-    retcons = await read.list_retcon_requests(status="open")
+    open_flags = await read.list_flags(status="open")
+    stale_flags = await read.list_flags(status="stale")
     threads = await read.list_threads()
     themes = await read.list_themes()
     open_threads = [t for t in threads if t.state.value not in TERMINAL_STATES]
@@ -77,7 +82,7 @@ async def browser_sections(read, *, staleness_threshold: int) -> list:
         if stale_count
         else f"Threads ({len(open_threads)})"
     )
-    retcons_label = f"Retcons ({len(retcons)}) ⚠" if retcons else "Retcons (0)"
+    flags_label = f"Flags ({len(open_flags)}) ⚠" if stale_flags else f"Flags ({len(open_flags)})"
     return [
         {"key": "chapters", "label": f"Chapters ({len(chapters)})",
          "items": [{"id": c.id, "label": f"{_status_dot(c.editorial_status)} {c.title}"} for c in chapters]},
@@ -85,8 +90,8 @@ async def browser_sections(read, *, staleness_threshold: int) -> list:
          "items": [{"id": c.id, "label": c.name} for c in characters]},
         {"key": "world", "label": f"World ({len(world)})",
          "items": [{"id": e.id, "label": f"[{_enum_val(e.domain)}] {e.title}"} for e in world]},
-        {"key": "retcons", "label": retcons_label,
-         "items": [{"id": r.id, "label": r.description[:40]} for r in retcons]},
+        {"key": "flags", "label": flags_label,
+         "items": [{"id": f.id, "label": f"[{f.category}] {f.description[:32]}"} for f in open_flags]},
         {"key": "threads", "label": threads_label,
          "items": [{"id": t.id, "label": _thread_row_label(t, chapters, staleness_threshold)} for t in threads]},
         {"key": "themes", "label": f"Themes ({len(themes)})",
@@ -144,11 +149,11 @@ async def detail_view(read, section_key: str, item_id: str) -> DetailView | None
             if e.id == item_id:
                 return _view(e.title, _enum_val(e.domain), e.body)
         return None
-    if section_key == "retcons":
-        for r in await read.list_retcon_requests():
-            if r.id == item_id:
-                return _view(r.description, f"status: {_enum_val(r.status)}", "",
-                             [("Proposed", r.proposed_resolution)])
+    if section_key == "flags":
+        for f in await read.list_flags():
+            if f.id == item_id:
+                return _view(f.description, f"status: {_enum_val(f.status)}  category: {f.category}", "",
+                             [("Proposed", f.proposed_resolution)])
         return None
     if section_key == "threads":
         t = await read.get_thread(item_id)

@@ -13,9 +13,12 @@ class EventType:
     CHAPTER_REVISED = "chapter.revised"
     DIRECTOR_SIGNAL_CREATED = "director_signal.created"
     DIRECTOR_SIGNAL_CONSUMED = "director_signal.consumed"
-    RETCON_REQUEST_CREATED = "retcon_request.created"
-    RETCON_REQUEST_RESOLVED = "retcon_request.resolved"
-    RETCON_REQUEST_REJECTED = "retcon_request.rejected"
+    RETCON_REQUEST_CREATED = "retcon_request.created"  # legacy alias only, see projector.py
+    RETCON_REQUEST_RESOLVED = "retcon_request.resolved"  # legacy alias only, see projector.py
+    RETCON_REQUEST_REJECTED = "retcon_request.rejected"  # legacy alias only, see projector.py
+    FLAG_CREATED = "flag.created"
+    FLAG_RESOLVED = "flag.resolved"
+    FLAG_REJECTED = "flag.rejected"
     PROPOSAL_CREATED = "proposal.created"
     PROPOSAL_APPROVED = "proposal.approved"
     PROPOSAL_REJECTED = "proposal.rejected"

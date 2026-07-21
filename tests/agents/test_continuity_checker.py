@@ -7,8 +7,8 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.continuity_checker import ContinuityChecker
-from novelizer.agents.schemas import ContinuityOutput, RetconDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact, PromiseProgressFact
-from novelizer.store.models import WorldEntry, RetconStatus, Chapter
+from novelizer.agents.schemas import ContinuityOutput, FlagDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact, PromiseProgressFact
+from novelizer.store.models import WorldEntry, FlagStatus, Chapter
 from novelizer.canon.events import SecretCreated, SecretReferenced
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
 
@@ -38,11 +38,11 @@ async def test_files_retcons_for_contradictions(stack):
     await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Sun", body="There are two suns."))
     await events.append(EventType.WORLD_ENTRY_CREATED, "w2", WorldEntry(id="w2", title="Sky", body="The lone sun set."))
     await proj.catch_up()
-    out = ContinuityOutput(retcon_requests=[RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1", "w2"], proposed_resolution="pick one")])
+    out = ContinuityOutput(flags=[FlagDraft(category="contradiction", description="two suns vs one", related_entry_ids=["w1", "w2"], proposed_resolution="pick one")])
     agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    assert len(await read.list_retcon_requests(status=RetconStatus.open)) == 1
+    assert len(await read.list_flags(category="contradiction", status=FlagStatus.open)) == 1
 
 
 async def test_no_contradictions_is_noop(stack):
@@ -50,7 +50,7 @@ async def test_no_contradictions_is_noop(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    assert await read.list_retcon_requests() == []
+    assert await read.list_flags(category="contradiction") == []
 
 
 async def test_work_prompt_includes_personality_when_set(stack):
@@ -96,7 +96,7 @@ async def test_leak_is_filed_as_a_tagged_retcon_request(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
     assert len(leak_reqs) == 1
     assert "the-heir-lives" in leak_reqs[0].description and "mara" in leak_reqs[0].description
@@ -110,7 +110,7 @@ async def test_leak_is_not_refiled_on_a_second_cycle(stack):
     await proj.catch_up()
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
     assert len(leak_reqs) == 1
 
@@ -126,7 +126,7 @@ async def test_learned_reference_does_not_get_flagged(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     assert [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)] == []
 
 
@@ -140,7 +140,7 @@ async def test_paradox_is_filed_as_a_tagged_retcon_request(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     paradox_reqs = [r for r in open_reqs if r.description.startswith(PARADOX_SOURCE_TAG)]
     assert len(paradox_reqs) == 1
 
@@ -148,11 +148,11 @@ async def test_paradox_is_filed_as_a_tagged_retcon_request(stack):
 async def test_llm_and_deterministic_findings_coexist_in_one_cycle(stack):
     events, proj, read, committer = stack
     await _seed_leak(events, proj)
-    llm_out = ContinuityOutput(retcon_requests=[RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")])
+    llm_out = ContinuityOutput(flags=[FlagDraft(category="contradiction", description="two suns vs one", related_entry_ids=["w1"], proposed_resolution="pick one")])
     agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     assert len(open_reqs) == 2
     assert any(r.description == "two suns vs one" for r in open_reqs)
     assert any(r.description.startswith(LEAK_SOURCE_TAG) for r in open_reqs)
@@ -183,13 +183,13 @@ async def test_m4_2_done_when_leak_fixture_reaches_the_open_retcon_queue(stack):
     await agent.run_once()
     await proj.catch_up()
 
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
     assert len(leak_reqs) == 1
-    assert leak_reqs[0].status == RetconStatus.open
+    assert leak_reqs[0].status == FlagStatus.open
 
     log = await events.events_since(0)
-    created = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+    created = [e for e in log if e.event_type == EventType.FLAG_CREATED
                and e.payload["description"].startswith(LEAK_SOURCE_TAG)]
     assert len(created) == 1
 
@@ -230,13 +230,13 @@ async def test_m4_3_done_when_mechanical_chain_leak_flagged_and_widget_still_sho
     # still files a tagged retcon request via the Committer.
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if r.description.startswith(LEAK_SOURCE_TAG)]
     assert len(leak_reqs) == 1
     assert "the-heir-lives" in leak_reqs[0].description and "kestrel" in leak_reqs[0].description
 
     # Step 3: it's visible in the open retcon queue.
-    assert leak_reqs[0].status == RetconStatus.open
+    assert leak_reqs[0].status == FlagStatus.open
 
     # Step 4: the Secrets matrix render-time helper (brain_model.secret_row) still shows
     # Kestrel as not having learned the secret -- the leak is flagged, not
@@ -328,7 +328,7 @@ async def test_mining_ambiguous_secret_fact_files_a_tagged_retcon_not_an_event(s
 
     log = await events.events_since(0)
     assert [e for e in log if e.event_type in (EventType.SECRET_REFERENCED, EventType.SECRET_LEARNED)] == []
-    retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    retcons = [e for e in log if e.event_type == EventType.FLAG_CREATED]
     assert any(e.payload["description"].startswith(MINED_SOURCE_TAG) for e in retcons)
 
 
@@ -344,7 +344,7 @@ async def test_mining_duplicate_unknown_id_facts_file_one_retcon(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+    mined_reqs = [r for r in await read.list_flags(category="contradiction", status=FlagStatus.open)
                   if r.description.startswith(MINED_SOURCE_TAG)]
     assert len(mined_reqs) == 1
 
@@ -353,13 +353,13 @@ async def test_mined_retcon_not_refiled_when_already_open(stack):
     # A crash between retcon filing and the chapter.mined stamp re-mines the
     # chapter next cycle; the identical description must not be filed twice —
     # same open-queue dedup the leak/paradox paths already have.
-    from novelizer.store.models import RetconRequest
+    from novelizer.store.models import Flag
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
     desc = (f"{MINED_SOURCE_TAG} mined secret uses fact citing unrecognized/unknown secret id "
             f"'the-invented' for character 'the-boy' in chapter 'c1'")
-    await events.append(EventType.RETCON_REQUEST_CREATED, "seed",
-                        RetconRequest(id="seed", description=desc, conflicting_entry_ids=[], proposed_resolution=""))
+    await events.append(EventType.FLAG_CREATED, "seed",
+                        Flag(id="seed", category="contradiction", description=desc, related_entry_ids=[], proposed_resolution=""))
     await proj.catch_up()
     mining_out = MinedFactsOutput(secret_facts=[
         MinedSecretFact(action="uses", id="the-invented", character_id="the-boy", chapter_id="c1", known_id=False),
@@ -367,7 +367,7 @@ async def test_mined_retcon_not_refiled_when_already_open(stack):
     agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(mining_out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+    mined_reqs = [r for r in await read.list_flags(category="contradiction", status=FlagStatus.open)
                   if r.description.startswith(MINED_SOURCE_TAG)]
     assert len(mined_reqs) == 1
 
@@ -409,7 +409,7 @@ async def test_mining_secret_fact_citing_thread_id_redirects_to_thread_touch(sta
     log = await events.events_since(0)
     touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED and e.payload.get("source") == "mined"]
     assert len(touches) == 1 and touches[0].payload["id"] == "the-lost-heir"
-    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+    mined_reqs = [r for r in await read.list_flags(category="contradiction", status=FlagStatus.open)
                   if r.description.startswith(MINED_SOURCE_TAG)]
     assert mined_reqs == []
 
@@ -430,7 +430,7 @@ async def test_mining_secret_fact_citing_already_touched_thread_is_a_noop(stack)
     log = await events.events_since(0)
     touches = [e for e in log if e.event_type == EventType.THREAD_TOUCHED]
     assert len(touches) == 1  # only the seeded one
-    mined_reqs = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
+    mined_reqs = [r for r in await read.list_flags(category="contradiction", status=FlagStatus.open)
                   if r.description.startswith(MINED_SOURCE_TAG)]
     assert mined_reqs == []
 
@@ -451,7 +451,7 @@ async def test_mining_reveal_fact_always_escalates_never_auto_commits(stack):
 
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
-    retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    retcons = [e for e in log if e.event_type == EventType.FLAG_CREATED]
     assert any(e.payload["description"].startswith(MINED_SOURCE_TAG) for e in retcons)
 
 
@@ -818,7 +818,7 @@ async def test_m5_1_done_when_mechanical_chain(stack):
     bad_events = [e for e in log if e.event_type in (EventType.SECRET_REFERENCED, EventType.SECRET_LEARNED)
                   and e.payload.get("id") == "some-unknown-secret"]
     assert bad_events == []
-    tagged_retcons = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+    tagged_retcons = [e for e in log if e.event_type == EventType.FLAG_CREATED
                       and e.payload["description"].startswith(MINED_SOURCE_TAG)]
     assert any("some-unknown-secret" in e.payload["description"] for e in tagged_retcons)
 
@@ -838,7 +838,7 @@ async def test_m5_1_done_when_mechanical_chain(stack):
 
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
-    retcons_after_c3 = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+    retcons_after_c3 = [e for e in log if e.event_type == EventType.FLAG_CREATED
                         and e.payload["description"].startswith(MINED_SOURCE_TAG)]
     assert any("the-heir-lives" in e.payload["description"] for e in retcons_after_c3)
 
@@ -862,17 +862,17 @@ async def test_m5_1_done_when_mechanical_chain(stack):
 
     log = await events.events_since(0)
     assert [e for e in log if e.event_type == EventType.SECRET_REVEALED] == []
-    tagged_retcons_after = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED
+    tagged_retcons_after = [e for e in log if e.event_type == EventType.FLAG_CREATED
                             and e.payload["description"].startswith(MINED_SOURCE_TAG)]
     assert len(tagged_retcons_after) >= len(retcons_after_c3) + 1
 
 
-from novelizer.store.models import RetconRequest
+from novelizer.store.models import Flag
 
 
 async def _seed_open_retcon(events, proj, description="two suns vs one"):
-    req = RetconRequest(description=description, conflicting_entry_ids=["w1"], proposed_resolution="pick one")
-    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    req = Flag(category="contradiction", description=description, related_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.FLAG_CREATED, req.id, req)
     await proj.catch_up()
     return req
 
@@ -910,23 +910,23 @@ async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
 async def test_llm_retcon_matching_open_description_is_not_refiled(stack):
     events, proj, read, committer = stack
     await _seed_open_retcon(events, proj)
-    llm_out = ContinuityOutput(retcon_requests=[RetconDraft(
-        description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")])
+    llm_out = ContinuityOutput(flags=[FlagDraft(
+        category="contradiction", description="two suns vs one", related_entry_ids=["w1"], proposed_resolution="pick one")])
     agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
 
 
 async def test_llm_duplicate_descriptions_within_one_output_filed_once(stack):
     events, proj, read, committer = stack
-    draft = RetconDraft(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
-    llm_out = ContinuityOutput(retcon_requests=[draft, draft])
+    draft = FlagDraft(category="contradiction", description="two suns vs one", related_entry_ids=["w1"], proposed_resolution="pick one")
+    llm_out = ContinuityOutput(flags=[draft, draft])
     agent = ContinuityChecker(FakeRunner(llm_out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     assert len([r for r in open_reqs if r.description == "two suns vs one"]) == 1
 
 
@@ -950,12 +950,12 @@ async def test_continuity_pass_skips_llm_retcons_but_still_mines(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
     await proj.catch_up()
     out = ContinuityOutput(no_action=True,
-                           retcon_requests=[RetconDraft(description="phantom", proposed_resolution="x")])
+                           flags=[FlagDraft(category="contradiction", description="phantom", proposed_resolution="x")])
     agent = ContinuityChecker(FakeRunner(out), FakeRunner(MinedFactsOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     # LLM retcon ignored on a pass...
-    assert await read.list_retcon_requests(status=RetconStatus.open) == []
+    assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
     # ...but the deterministic mining pass still ran and stamped the chapter.
     mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
     assert [e.payload["chapter_id"] for e in mined] == ["ch1"]

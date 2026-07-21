@@ -9,7 +9,7 @@ from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, InspirationUptakeRecorded
-from novelizer.store.models import Character, RetconRequest, RetconStatus
+from novelizer.store.models import Character, Flag, FlagStatus
 from novelizer.muse.prompts import NAME_UPTAKE_HAND_WINDOW, name_uptake_matches
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ class CharacterKeeper(BaseAgent):
 
     async def _fingerprint(self) -> tuple:
         chapters = await self._read.list_chapters()
-        open_retcons = await self._read.list_retcon_requests(status=RetconStatus.open)
+        open_retcons = await self._read.list_flags(category="contradiction", status=FlagStatus.open)
         return (len(chapters), chapters[-1].id if chapters else "", len(open_retcons))
 
     async def poll(self) -> dict:
@@ -121,7 +121,7 @@ class CharacterKeeper(BaseAgent):
             "recent": chapters[-5:],
             "chapters": chapters,
             "secrets": await self._read.list_secrets(),
-            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "open_retcons": await self._read.list_flags(category="contradiction", status=FlagStatus.open),
             "hands": (await self._read.list_hands(status="consumed"))[-NAME_UPTAKE_HAND_WINDOW:],
             "arcs": await self._read.list_arcs(active_only=True),
             "all_arcs": await self._read.list_arcs(active_only=False),
@@ -226,18 +226,18 @@ class CharacterKeeper(BaseAgent):
                     fields[f] = v
             updated = current.model_copy(update=fields)
             await self._committer.commit(self.name, EventType.CHARACTER_UPDATED, updated.id, updated)
-        if out.retcon_requests:
+        if out.flags:
             # Re-read the queue at commit time (not from ctx): the LLM call in
             # work() is slow enough that another agent may have filed meanwhile.
-            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+            open_reqs = await self._read.list_flags(category="contradiction", status=FlagStatus.open)
             seen_descriptions = {r.description for r in open_reqs}
-            for r in out.retcon_requests:
+            for r in out.flags:
                 if r.description in seen_descriptions:
                     continue
                 seen_descriptions.add(r.description)
-                req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
-                                    proposed_resolution=r.proposed_resolution)
-                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+                flag = Flag(category=r.category, filed_by=self.name, description=r.description,
+                            related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
         await self._commit_knowledge_intents(
             out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})

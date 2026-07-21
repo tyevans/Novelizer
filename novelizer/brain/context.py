@@ -12,7 +12,7 @@ from novelizer.canon.beat_templates import beat_window
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
     ArcRecord, BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord,
-    PromiseState, RetconRequest, SecretRecord, StructureScore, ThreadRecord,
+    Flag, PromiseState, SecretRecord, StructureScore, ThreadRecord,
 )
 
 
@@ -78,7 +78,7 @@ def known_secrets_note(
     return "\n\nSecrets and who knows them:\n" + "\n".join(lines)
 
 
-def open_retcons_note(requests: list[RetconRequest]) -> str:
+def open_retcons_note(requests: list[Flag]) -> str:
     """Build the checker-facing prompt block listing retcon requests already
     sitting open in the queue, so an LLM pass that re-reviews the same
     material every cycle doesn't re-report a known issue under fresh wording

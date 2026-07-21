@@ -44,8 +44,8 @@ from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.agents.editor import build_editor_runner, Editor, VOICE_SOURCE_TAG
-from novelizer.store.models import Chapter, Character, EditorialStatus, RetconStatus
+from novelizer.agents.editor import build_editor_runner, Editor
+from novelizer.store.models import Chapter, Character, EditorialStatus, FlagStatus
 
 
 @pytest.fixture
@@ -103,17 +103,15 @@ async def test_voice_drift_live_catch(stack):
     await editor.run_once()
     await proj.catch_up()
 
-    open_retcons = await read.list_retcon_requests(status=RetconStatus.open)
-    voice_retcons = [r for r in open_retcons if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert voice_retcons, (
-        "STAGE 1/2: expected a voice-drift retcon tagged VOICE_SOURCE_TAG in "
-        f"the open queue; got: {[r.description for r in open_retcons]}. If "
-        "the Editor returned no structured_response at all (not merely no "
-        "flags), this is the D3 contingency checkpoint -- see module "
-        "docstring."
+    voice_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert voice_flags, (
+        "STAGE 1/2: expected a voice-drift Flag(category='voice_drift') in "
+        f"the open queue; got none. If the Editor returned no "
+        "structured_response at all (not merely no flags), this is the D3 "
+        "contingency checkpoint -- see module docstring."
     )
-    description_lower = voice_retcons[0].description.lower()
+    description_lower = voice_flags[0].description.lower()
     assert "formal" in description_lower or "clipped" in description_lower, (
-        f"voice-drift retcon landed but did not cite the violated trait "
-        f"(formal/clipped): {voice_retcons[0].description!r}"
+        f"voice-drift flag landed but did not cite the violated trait "
+        f"(formal/clipped): {voice_flags[0].description!r}"
     )

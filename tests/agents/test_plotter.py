@@ -816,3 +816,20 @@ async def test_run_once_no_book_completed_when_unsatisfied(stack):
     log = await events.events_since(0)
     completed = [e for e in log if e.event_type == EventType.BOOK_COMPLETED]
     assert completed == []
+
+
+async def test_flags_from_structured_output_are_filed(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import FlagDraft
+
+    out = PlotterOutput(flags=[
+        FlagDraft(category="thematic", description="Theme of sacrifice never pays off",
+                  related_entry_ids=[], proposed_resolution="add a beat that tests it"),
+    ])
+    plotter = Plotter(FakeRunner(out), read, committer)
+    await plotter.run_once()
+    await proj.catch_up()
+    flags = await read.list_flags(category="thematic", status="open")
+    assert len(flags) == 1
+    assert flags[0].description == "Theme of sacrifice never pays off"
+    assert flags[0].filed_by == "plotter"

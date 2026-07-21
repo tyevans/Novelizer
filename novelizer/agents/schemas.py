@@ -22,8 +22,23 @@ class WorldEntryDraft(BaseModel):
         return v if v in _DOMAINS else "other"
 
 
+class TriageVerdict(BaseModel):
+    """Triage's per-flag decision: is it real, and (if unowned) does it get
+    reclassified? `verdict="real"` with a known-owner category just leaves
+    the flag open for its owner's own poll; `verdict="dismiss"` rejects it;
+    `reclassify_category`, when set, overwrites an unowned flag's category
+    before the owner-routing check runs again next pass.
+    """
+
+    verdict: Literal["real", "dismiss"] = "real"
+    reason: str = ""
+    reclassify_category: str = ""
+    feed_note: str = ""
+
+
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 
@@ -247,16 +262,17 @@ class ArcIntent(BaseModel):
     note: str = ""
 
 
-class RetconDraft(BaseModel):
+class FlagDraft(BaseModel):
+    category: str
     description: str
-    conflicting_entry_ids: list[str] = Field(default_factory=list)
+    related_entry_ids: list[str] = Field(default_factory=list)
     proposed_resolution: str = ""
 
 
 class KeeperOutput(BaseModel):
     new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
-    retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     arc_intents: list[ArcIntent] = Field(default_factory=list)
     feed_note: str = ""
@@ -265,9 +281,8 @@ class KeeperOutput(BaseModel):
 
 class VoiceDriftFlag(BaseModel):
     """One agent-declared instance of a character's prose voice violating its
-    voice card, from Editor structured output. Cited at commit time as a
-    tagged retcon_request.created (see novelizer/agents/editor.py's
-    VOICE_SOURCE_TAG), never a direct canon mutation.
+    voice card, from Editor structured output. Committed at commit time as a
+    Flag(category="voice_drift"), never a direct canon mutation.
     """
 
     character_id: str
@@ -289,7 +304,7 @@ class EditorVerdict(BaseModel):
 
 
 class ContinuityOutput(BaseModel):
-    retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 
@@ -322,6 +337,7 @@ class ChapterScore(BaseModel):
 
 class StructureAnalystOutput(BaseModel):
     scores: list[ChapterScore] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
 
 
@@ -336,6 +352,7 @@ class PlotterOutput(BaseModel):
     beat_intents: list[BeatIntent] = Field(default_factory=list)
     resolution_plan_intents: list[ResolutionPlanIntent] = Field(default_factory=list)
     promise_intents: list[PromiseIntent] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
 
 

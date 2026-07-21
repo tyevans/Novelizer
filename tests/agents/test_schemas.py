@@ -1,7 +1,7 @@
 import pytest
 from novelizer.agents.base import ChapterDraft
 from novelizer.agents.schemas import (
-    WorldEntryDraft, WorldEntriesDraft, CharacterUpdate, RetconDraft,
+    WorldEntryDraft, WorldEntriesDraft, CharacterUpdate, FlagDraft,
     KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments,
 )
 
@@ -34,7 +34,7 @@ def test_world_entry_draft_domains_match_store_domain_enum():
 
 def test_keeper_output_defaults_empty():
     k = KeeperOutput()
-    assert k.updated_characters == [] and k.retcon_requests == []
+    assert k.updated_characters == [] and k.flags == []
 
 
 def test_editor_verdict_literal():
@@ -47,7 +47,7 @@ def test_retcon_amendments_carry_supersedes():
 
 
 def test_continuity_and_character_shapes():
-    ContinuityOutput(retcon_requests=[RetconDraft(description="x", proposed_resolution="y")])
+    ContinuityOutput(flags=[FlagDraft(category="contradiction", description="x", proposed_resolution="y")])
     assert CharacterUpdate(id="c1", arc_status="wary").traits is None
 
 

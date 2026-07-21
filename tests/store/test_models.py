@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 from pydantic import ValidationError
 from novelizer.store.models import (
     WorldEntry, Character, CharacterRelationship, Event,
-    Chapter, RetconRequest, DirectorSignal, ThreadState, ThreadRecord,
+    Chapter, Flag, DirectorSignal, ThreadState, ThreadRecord,
     StructureScore,
-    CanonStatus, EditorialStatus, RetconStatus, SignalKind, Domain,
+    CanonStatus, EditorialStatus, FlagStatus, SignalKind, Domain,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord,
 )
 
@@ -26,12 +26,13 @@ def test_chapter_defaults():
 
 
 def test_retcon_request_defaults():
-    r = RetconRequest(
+    r = Flag(
+        category="contradiction",
         description="Contradiction in lore",
-        conflicting_entry_ids=["a", "b"],
+        related_entry_ids=["a", "b"],
         proposed_resolution="Remove entry a.",
     )
-    assert r.status == RetconStatus.open
+    assert r.status == FlagStatus.open
     assert r.resolved_by is None
 
 

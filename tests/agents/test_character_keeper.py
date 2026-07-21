@@ -7,10 +7,10 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, RetconDraft, KnowledgeIntent, ArcIntent
+from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, FlagDraft, KnowledgeIntent, ArcIntent
 from novelizer.agents.character_keeper import SYSTEM_PROMPT
 from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared
-from novelizer.store.models import Character, Chapter, RetconStatus
+from novelizer.store.models import Character, Chapter, FlagStatus
 from novelizer.agents.base import DEFAULT_PASS_REMARK
 
 
@@ -41,14 +41,14 @@ async def test_updates_character_arc_and_files_retcon(stack):
     await proj.catch_up()
     out = KeeperOutput(
         updated_characters=[CharacterUpdate(id="c1", arc_status="cracking")],
-        retcon_requests=[RetconDraft(description="stoic vs weeping", conflicting_entry_ids=["c1", "ch1"], proposed_resolution="show restraint")],
+        flags=[FlagDraft(category="contradiction", description="stoic vs weeping", related_entry_ids=["c1", "ch1"], proposed_resolution="show restraint")],
     )
     agent = CharacterKeeper(FakeRunner(out), read, committer)
     await agent.run_once()
     await proj.catch_up()
     mira = await read.get_character("c1")
     assert mira.arc_status == "cracking" and mira.name == "Mira" and mira.traits == "stoic"
-    assert len(await read.list_retcon_requests(status=RetconStatus.open)) == 1
+    assert len(await read.list_flags(category="contradiction", status=FlagStatus.open)) == 1
 
 
 async def test_noop_when_no_characters(stack):
@@ -152,7 +152,7 @@ async def test_character_keeper_commit_with_no_knowledge_intents_emits_no_secret
     assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []
 
 
-from novelizer.store.models import RetconRequest
+from novelizer.store.models import Flag
 
 
 async def _seed_keeper_scene(events, proj):
@@ -162,8 +162,8 @@ async def _seed_keeper_scene(events, proj):
 
 
 async def _seed_open_retcon(events, proj, description="stoic vs weeping"):
-    req = RetconRequest(description=description, conflicting_entry_ids=["c1"], proposed_resolution="show restraint")
-    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    req = Flag(category="contradiction", description=description, related_entry_ids=["c1"], proposed_resolution="show restraint")
+    await events.append(EventType.FLAG_CREATED, req.id, req)
     await proj.catch_up()
     return req
 
@@ -317,12 +317,12 @@ async def test_retcon_matching_open_description_is_not_refiled(stack):
     events, proj, read, committer = stack
     await _seed_keeper_scene(events, proj)
     await _seed_open_retcon(events, proj)
-    out = KeeperOutput(retcon_requests=[RetconDraft(
-        description="stoic vs weeping", conflicting_entry_ids=["c1"], proposed_resolution="show restraint")])
+    out = KeeperOutput(flags=[FlagDraft(
+        category="contradiction", description="stoic vs weeping", related_entry_ids=["c1"], proposed_resolution="show restraint")])
     agent = CharacterKeeper(FakeRunner(out), read, committer)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     assert len([r for r in open_reqs if r.description == "stoic vs weeping"]) == 1
 
 

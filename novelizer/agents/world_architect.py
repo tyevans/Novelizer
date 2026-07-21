@@ -7,7 +7,7 @@ from novelizer.canon.events import EventType
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import chapter_map_note
 from novelizer.muse.prompts import architect_settings_note
-from novelizer.store.models import WorldEntry
+from novelizer.store.models import WorldEntry, Flag
 
 SYSTEM_PROMPT = """You are the World Architect for a living, ever-expanding fictional world. You
 grow the world's lore — geography, factions, history, systems, cosmology — so the story always has
@@ -117,6 +117,16 @@ class WorldArchitect(BaseAgent):
             for e in draft.entries:
                 entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags)
                 await self._committer.commit(self.name, EventType.WORLD_ENTRY_CREATED, entry.id, entry)
+            if draft.flags:
+                open_flags = await self._read.list_flags(status="open")
+                seen_descriptions = {f.description for f in open_flags}
+                for r in draft.flags:
+                    if r.description in seen_descriptions:
+                        continue
+                    seen_descriptions.add(r.description)
+                    flag = Flag(category=r.category, filed_by=self.name, description=r.description,
+                                related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
+                    await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 

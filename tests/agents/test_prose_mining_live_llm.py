@@ -45,7 +45,7 @@ from novelizer.agents.author import build_author_runner
 from novelizer.agents.continuity_checker import (
     ContinuityChecker, build_continuity_checker_runner, build_continuity_mining_runner,
 )
-from novelizer.store.models import Chapter, Character, RetconStatus
+from novelizer.store.models import Chapter, Character, FlagStatus
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ async def test_engineered_leak_is_mined_and_reaches_the_retcon_queue(stack):
     await checker.run_once()
     await proj.catch_up()
 
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
     leak_reqs = [r for r in open_reqs if "the-heir-lives" in r.description]
     assert leak_reqs, (
         "STAGE 2 (catch): the mined reference landed but no retcon request "

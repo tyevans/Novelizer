@@ -15,8 +15,8 @@ class FakeRead:
 GATED_CASES = [
     # (level, event_type, expected_gated)
     (AutonomyLevel.full_auto, EventType.CHAPTER_CREATED, False),
-    (AutonomyLevel.full_auto, EventType.RETCON_REQUEST_RESOLVED, False),
-    (AutonomyLevel.gated_retcons, EventType.RETCON_REQUEST_RESOLVED, True),
+    (AutonomyLevel.full_auto, EventType.FLAG_RESOLVED, False),
+    (AutonomyLevel.gated_retcons, EventType.FLAG_RESOLVED, True),
     (AutonomyLevel.gated_retcons, EventType.WORLD_ENTRY_SUPERSEDED, True),
     (AutonomyLevel.gated_retcons, EventType.CHAPTER_CREATED, False),
     (AutonomyLevel.gated_retcons, EventType.WORLD_ENTRY_CREATED, False),
@@ -25,7 +25,7 @@ GATED_CASES = [
     (AutonomyLevel.gated_canon, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_STATUS_CHANGED, True),
     (AutonomyLevel.gated_canon, EventType.CHAPTER_REVISED, True),
-    (AutonomyLevel.gated_canon, EventType.RETCON_REQUEST_RESOLVED, True),
+    (AutonomyLevel.gated_canon, EventType.FLAG_RESOLVED, True),
     (AutonomyLevel.gated_all, EventType.CHAPTER_CREATED, True),
     (AutonomyLevel.gated_all, EventType.RETCON_REQUEST_CREATED, True),
 ]
@@ -48,7 +48,7 @@ async def test_per_agent_override_takes_precedence():
     state = AutonomyState(global_level=AutonomyLevel.full_auto,
                            overrides={"retconner": AutonomyLevel.gated_all})
     policy = AutonomyPolicy(FakeRead(state))
-    assert await policy.is_gated("retconner", EventType.RETCON_REQUEST_RESOLVED) is True
+    assert await policy.is_gated("retconner", EventType.FLAG_RESOLVED) is True
     assert await policy.is_gated("author", EventType.CHAPTER_CREATED) is False
 
 
