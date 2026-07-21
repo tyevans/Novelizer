@@ -8,8 +8,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated, ThemeIntroduced
 from novelizer.agents.editor import Editor
 from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, VoiceDriftFlag
-from novelizer.agents.editor import VOICE_SOURCE_TAG
-from novelizer.store.models import Chapter, EditorialStatus, Character, RetconStatus
+from novelizer.store.models import Chapter, EditorialStatus, Character, FlagStatus
 
 
 class FakeRunner:
@@ -445,10 +444,9 @@ async def test_editor_voice_drift_flag_commits_tagged_retcon(stack):
     agent = Editor(FakeRunner(verdict), read, committer)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
-    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 1
-    assert "formal, clipped diction" in tagged[0].description
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 1
+    assert "formal, clipped diction" in open_flags[0].description
 
 
 async def test_editor_voice_drift_flag_cites_character_in_conflicting_entry_ids(stack):
@@ -470,9 +468,8 @@ async def test_editor_voice_drift_flag_cites_character_in_conflicting_entry_ids(
     agent = Editor(FakeRunner(verdict), read, committer)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
-    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert tagged[0].conflicting_entry_ids == ["mara"]
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert open_flags[0].related_entry_ids == ["mara"]
 
 
 async def test_editor_no_voice_drift_flags_commits_no_extra_retcon(stack):
@@ -482,9 +479,8 @@ async def test_editor_no_voice_drift_flags_commits_no_extra_retcon(stack):
     agent = Editor(FakeRunner(EditorVerdict(verdict="approve", notes="clean")), read, committer)
     await agent.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
-    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert tagged == []
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert open_flags == []
 
 
 async def test_voice_drift_dedup_survives_reworded_trait(stack):
@@ -507,9 +503,8 @@ async def test_voice_drift_dedup_survives_reworded_trait(stack):
     ])
     await Editor(FakeRunner(reworded), read, committer).run_once()
     await proj.catch_up()
-    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
-              if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 1
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 1
 
 
 async def test_voice_drift_dedup_within_a_single_verdict(stack):
@@ -524,9 +519,8 @@ async def test_voice_drift_dedup_within_a_single_verdict(stack):
     ])
     await Editor(FakeRunner(verdict), read, committer).run_once()
     await proj.catch_up()
-    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
-              if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 1
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 1
 
 
 async def test_voice_drift_distinct_lines_and_characters_all_filed(stack):
@@ -540,9 +534,8 @@ async def test_voice_drift_distinct_lines_and_characters_all_filed(stack):
     ])
     await Editor(FakeRunner(verdict), read, committer).run_once()
     await proj.catch_up()
-    tagged = [r for r in await read.list_retcon_requests(status=RetconStatus.open)
-              if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 3
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 3
 
 
 async def test_m5_2_done_when_mechanical_chain_themes(stack):
@@ -630,20 +623,19 @@ async def test_m5_2_done_when_mechanical_chain_voice_drift(stack):
     result = await agent.work(ctx)
     assert result.voice_drift_flags and result.voice_drift_flags[0].character_id == "mara"
 
-    # --- Clause 2: Editor.commit() produces a retcon_request.created event.
+    # --- Clause 2: Editor.commit() produces a flag.created event.
     await agent.commit(result, ctx)
     await proj.catch_up()
     log = await events.events_since(0)
-    created = [e for e in log if e.event_type == EventType.RETCON_REQUEST_CREATED]
+    created = [e for e in log if e.event_type == EventType.FLAG_CREATED]
     assert len(created) == 1
 
-    # --- Clause 3: its description is tagged with VOICE_SOURCE_TAG.
-    assert created[0].payload["description"].startswith(VOICE_SOURCE_TAG)
+    # --- Clause 3: it is categorized as voice_drift.
+    assert created[0].payload["category"] == "voice_drift"
 
-    # --- Clause 4: it lands in the open retcon queue.
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
-    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 1
+    # --- Clause 4: it lands in the open flag queue.
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 1
 
 
 async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
@@ -673,9 +665,8 @@ async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
     second = Editor(FakeRunner(verdict), read, committer)
     await second.run_once()
     await proj.catch_up()
-    open_reqs = await read.list_retcon_requests(status=RetconStatus.open)
-    tagged = [r for r in open_reqs if r.description.startswith(VOICE_SOURCE_TAG)]
-    assert len(tagged) == 1, f"expected the duplicate drift flag to dedup, got {len(tagged)} open voice retcons"
+    open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
+    assert len(open_flags) == 1, f"expected the duplicate drift flag to dedup, got {len(open_flags)} open voice flags"
 
 
 async def test_editor_constructor_threads_sag_spike_delta_through(stack):
@@ -694,16 +685,17 @@ async def test_editor_constructor_threads_sag_spike_delta_through(stack):
     assert "Pacing flags" in sent
 
 
-from novelizer.store.models import RetconRequest
+from novelizer.store.models import Flag
 
 
 async def test_editor_prompt_lists_open_voice_drift_retcons(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
-    req = RetconRequest(
-        description=f"{VOICE_SOURCE_TAG} clipped speech violated by mara: \"Well, I suppose we could.\"",
-        conflicting_entry_ids=["mara"], proposed_resolution="")
-    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    flag = Flag(
+        category="voice_drift", filed_by="editor",
+        description="clipped speech violated by mara: \"Well, I suppose we could.\"",
+        related_entry_ids=["mara"], proposed_resolution="")
+    await events.append(EventType.FLAG_CREATED, flag.id, flag)
     await proj.catch_up()
     runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
     agent = Editor(runner, read, committer)
@@ -717,8 +709,9 @@ async def test_editor_prompt_lists_open_voice_drift_retcons(stack):
 async def test_editor_prompt_ignores_non_voice_open_retcons(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
-    req = RetconRequest(description="two suns vs one", conflicting_entry_ids=["w1"], proposed_resolution="pick one")
-    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    flag = Flag(category="contradiction", filed_by="continuity_checker", description="two suns vs one",
+                related_entry_ids=["w1"], proposed_resolution="pick one")
+    await events.append(EventType.FLAG_CREATED, flag.id, flag)
     await proj.catch_up()
     runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
     agent = Editor(runner, read, committer)

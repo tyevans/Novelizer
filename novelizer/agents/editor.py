@@ -12,7 +12,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import TERMINAL_STATES
-from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, RetconRequest, RetconStatus
+from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, Flag, FlagStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living, continuously-written novel. One chapter has been
 drafted and handed to you. You decide whether it ships as-is (approve) or goes back to the Author for
@@ -86,8 +86,6 @@ most the three or four that matter. A capped, ranked note gets acted on; a dump 
 
 logger = logging.getLogger(__name__)
 
-VOICE_SOURCE_TAG = "[source: voice_drift]"
-
 # A revise returns the chapter to `draft`, straight back into this agent's
 # queue. Self-refinement pays off for the first couple of rounds and then
 # flattens prose, so the loop is bounded rather than left to the model's taste.
@@ -141,7 +139,7 @@ class Editor(BaseAgent):
             "chapters": await self._read.list_chapters(),
             "causal_edges": await self._read.list_causal_edges(),
             "themes": await self._read.list_themes(),
-            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "open_retcons": await self._read.list_flags(category="contradiction", status=FlagStatus.open),
             "promises": await self._read.list_promises(),
             "blueprint": await self._read.get_active_blueprint(),
             "beats": await self._read.list_beats(),
@@ -189,18 +187,12 @@ class Editor(BaseAgent):
             )
         # The Editor re-reviews the same draft every cycle; showing the LLM
         # which voice-drift flags are already queued keeps it from burning
-        # output on repeats the commit-time dedup would drop anyway. Only
-        # VOICE_SOURCE_TAG-tagged requests belong here -- the rest of the
-        # queue is other checkers' business. Empty when none are open (prompt
-        # stays byte-identical, pinned by tests).
-        drift_filed = [
-            r.description.removeprefix(VOICE_SOURCE_TAG).strip()
-            for r in ctx.get("open_retcons", [])
-            if r.description.startswith(VOICE_SOURCE_TAG)
-        ]
+        # output on repeats the commit-time dedup would drop anyway. Empty
+        # when none are open (prompt stays byte-identical, pinned by tests).
+        drift_filed_flags = await self._read.list_flags(category="voice_drift", status=FlagStatus.open)
         drift = ""
-        if drift_filed:
-            listing = "\n".join(f"- {d}" for d in drift_filed[:20])
+        if drift_filed_flags:
+            listing = "\n".join(f"- {d.description}" for d in drift_filed_flags[:20])
             drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
         revisions = _revision_budget_note(ch.revision_count)
         msg = (
@@ -249,20 +241,21 @@ class Editor(BaseAgent):
             # revised, and the LLM rewords trait_violated/note on every pass, so
             # dedup must key on the stable (character, line) fragment of the
             # description — not the full reworded string — against the open queue.
-            open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
-            open_descriptions = [r.description for r in open_reqs]
+            open_flags = await self._read.list_flags(category="voice_drift", status=FlagStatus.open)
+            open_descriptions = [r.description for r in open_flags]
             filed_keys: set[str] = set()
-            for flag in verdict.voice_drift_flags:
-                key = f"violated by {flag.character_id}: \"{flag.line}\""
+            for vflag in verdict.voice_drift_flags:
+                key = f"violated by {vflag.character_id}: \"{vflag.line}\""
                 if key in filed_keys or any(key in d for d in open_descriptions):
                     continue
                 filed_keys.add(key)
                 description = (
-                    f"{VOICE_SOURCE_TAG} {flag.trait_violated} {key}"
-                    + (f" — {flag.note}" if flag.note else "")
+                    f"{vflag.trait_violated} {key}"
+                    + (f" — {vflag.note}" if vflag.note else "")
                 )
-                req = RetconRequest(description=description, conflicting_entry_ids=[flag.character_id], proposed_resolution="")
-                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+                flag = Flag(category="voice_drift", filed_by=self.name, description=description,
+                            related_entry_ids=[vflag.character_id], proposed_resolution="")
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
         await self._remark(verdict.feed_note)
 
     async def _run(self) -> None:

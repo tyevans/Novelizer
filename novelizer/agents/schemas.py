@@ -266,9 +266,8 @@ class KeeperOutput(BaseModel):
 
 class VoiceDriftFlag(BaseModel):
     """One agent-declared instance of a character's prose voice violating its
-    voice card, from Editor structured output. Cited at commit time as a
-    tagged retcon_request.created (see novelizer/agents/editor.py's
-    VOICE_SOURCE_TAG), never a direct canon mutation.
+    voice card, from Editor structured output. Committed at commit time as a
+    Flag(category="voice_drift"), never a direct canon mutation.
     """
 
     character_id: str
