@@ -1,6 +1,15 @@
 from __future__ import annotations
 from langchain_openai import ChatOpenAI
 
+# The local OpenAI-compatible endpoint we run agents against serves a 128k
+# context window. deepagents' create_deep_agent always attaches its own
+# SummarizationMiddleware, but without a model profile it falls back to a
+# fixed 170k-token trigger -- past our actual window, so compaction never
+# fires before a request overflows. Stamping max_input_tokens here switches
+# deepagents onto its fraction-based defaults (trigger at 85%, keep last
+# 10%), sized correctly for this window.
+CONTEXT_WINDOW_TOKENS = 128_000
+
 
 class _ReasoningAwareChatOpenAI(ChatOpenAI):
     """ChatOpenAI, plus surfacing provider-specific reasoning/thinking deltas
@@ -58,4 +67,5 @@ def build_chat_model(
         max_tokens=max_tokens,
         callbacks=callbacks,
         streaming=streaming,
+        profile={"max_input_tokens": CONTEXT_WINDOW_TOKENS},
     )
