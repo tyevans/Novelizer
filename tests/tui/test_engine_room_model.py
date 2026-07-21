@@ -107,6 +107,20 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_apply_bus_item_folds_llm_call_boundaries_into_the_live_text_stream():
+    """Fix: on tool-calling turns the model may emit zero streamed tokens, so
+    call start/finish must be visible on their own or the feed goes blank."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, _call_started(), now=1.0)
+    assert "▸ call 1" in s.text and "qwen" in s.text
+
+    fin = _ev(3, TelemetryEventType.LLM_CALL_FINISHED,
+              {"run_id": "r1", "agent_name": "author", "call_index": 1,
+               "duration_s": 2.5, "output_tokens": 40})
+    s = apply_bus_item(s, fin, now=3.0)
+    assert "2.5s" in s.text and "40 tok" in s.text
+
+
 def test_apply_bus_item_folds_tool_calls_into_the_live_text_stream():
     s = LiveRunState(status="running", run_id="r1", agent_name="author", text="Once upon a time")
     started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,

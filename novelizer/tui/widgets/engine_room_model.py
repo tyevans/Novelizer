@@ -38,6 +38,11 @@ class LiveRunState:
     stream_attached: bool = True
 
 
+def _append(state: LiveRunState, line: str) -> LiveRunState:
+    text = line if not state.text else state.text + line
+    return replace(state, text=text[-TEXT_CAP:])
+
+
 def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if isinstance(item, TokenDelta):
         if state.status != "running" or item.run_id != state.run_id:
@@ -56,10 +61,14 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if p.get("run_id") != state.run_id:
         return state
     if et == TelemetryEventType.LLM_CALL_STARTED:
-        return replace(state, prompt=p.get("prompt", ""), model=p.get("model", ""),
-                       call_index=p.get("call_index", 0))
+        state = replace(state, prompt=p.get("prompt", ""), model=p.get("model", ""),
+                        call_index=p.get("call_index", 0))
+        line = f"\n▸ call {p.get('call_index', '?')} ({p.get('model', '?')})\n"
+        return _append(state, line)
     if et == TelemetryEventType.LLM_CALL_FINISHED:
-        return replace(state, tokens=p.get("output_tokens", state.tokens))
+        state = replace(state, tokens=p.get("output_tokens", state.tokens))
+        line = (f"   ↳ {p.get('duration_s', 0):.1f}s · {p.get('output_tokens', 0)} tok\n")
+        return _append(state, line)
     if et == TelemetryEventType.AGENT_RUN_FINISHED:
         return replace(state, status="finished", ended_at=now)
     if et == TelemetryEventType.AGENT_RUN_FAILED:
@@ -67,14 +76,11 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         return replace(state, status="failed", ended_at=now, error=error)
     if et == TelemetryEventType.TOOL_CALL_STARTED:
         summary = str(p.get("input_summary", "")).replace("\n", "␤")[:120]
-        line = f"\n⚒ {p.get('tool_name', '?')}({summary})\n"
-        return replace(state, text=(state.text + line)[-TEXT_CAP:])
+        return _append(state, f"\n⚒ {p.get('tool_name', '?')}({summary})\n")
     if et == TelemetryEventType.TOOL_CALL_FINISHED:
-        line = f"   ↳ done in {p.get('duration_s', 0):.1f}s\n"
-        return replace(state, text=(state.text + line)[-TEXT_CAP:])
+        return _append(state, f"   ↳ done in {p.get('duration_s', 0):.1f}s\n")
     if et == TelemetryEventType.TOOL_CALL_FAILED:
-        line = f"   ↳ ✗ {p.get('error_type', '?')}\n"
-        return replace(state, text=(state.text + line)[-TEXT_CAP:])
+        return _append(state, f"   ↳ ✗ {p.get('error_type', '?')}\n")
     return state
 
 
