@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from novelizer.agents.middleware import ExcludeToolsMiddleware
+from novelizer.agents.middleware import ExcludeToolsMiddleware, TodoContextMiddleware
 from novelizer.agents.author import build_author_runner
+from novelizer.agents.plotter import build_plotter_runner
 from novelizer.agents.world_architect import build_world_architect_runner
 from novelizer.agents.character_keeper import build_character_keeper_runner
 from novelizer.agents.editor import build_editor_runner
@@ -77,3 +78,26 @@ def test_author_runner_keeps_write_todos(monkeypatch):
     assert capture.kwargs is not None
     middleware = capture.kwargs.get("middleware", [])
     assert not any(isinstance(m, ExcludeToolsMiddleware) for m in middleware)
+
+
+@pytest.mark.parametrize("builder", [build_author_runner, build_plotter_runner])
+def test_todo_holders_surface_state_in_context(monkeypatch, builder):
+    capture = Capture()
+    monkeypatch.setattr("deepagents.create_deep_agent", capture)
+    builder(FakeSettings(), backend=FakeBackend(), tools=[])
+    assert capture.kwargs is not None
+    middleware = capture.kwargs.get("middleware", [])
+    assert any(isinstance(m, TodoContextMiddleware) for m in middleware)
+
+
+@pytest.mark.parametrize(
+    "builder",
+    EXCLUDED_BUILDERS,
+)
+def test_non_todo_agents_skip_todo_context(monkeypatch, builder):
+    capture = Capture()
+    monkeypatch.setattr("deepagents.create_deep_agent", capture)
+    builder(FakeSettings(), backend=FakeBackend(), tools=[])
+    assert capture.kwargs is not None
+    middleware = capture.kwargs.get("middleware", [])
+    assert not any(isinstance(m, TodoContextMiddleware) for m in middleware)
