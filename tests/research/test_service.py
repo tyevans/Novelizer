@@ -76,3 +76,41 @@ async def test_runtime_wires_a_research_service(db_path):
         assert answer == "No leaks found."
     finally:
         await rt.close()
+
+
+from novelizer.telemetry.bus import TelemetryBus
+from novelizer.telemetry.recorder import TelemetryRecorder
+from novelizer.canon.event_store import EventStore
+from novelizer.telemetry.events import TelemetryEventType
+
+
+@pytest.mark.asyncio
+async def test_ask_tags_telemetry_with_research_identity(tmp_path):
+    telemetry_store = EventStore(str(tmp_path / "telemetry.db"))
+    await telemetry_store.init()
+    bus = TelemetryBus()
+    telemetry = TelemetryRecorder(telemetry_store, bus)
+    q = bus.subscribe()
+
+    runner = _R(ResearchAnswer(answer_text="answer"))
+    service = ResearchService(lambda: runner, telemetry=telemetry)
+
+    await service.ask("q?", history=[])
+
+    started = q.get_nowait()
+    assert started.event_type == TelemetryEventType.AGENT_RUN_STARTED
+    assert started.payload["agent_name"] == "research"
+    finished = q.get_nowait()
+    assert finished.event_type == TelemetryEventType.AGENT_RUN_FINISHED
+    await telemetry_store.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_wires_telemetry_into_research_service(db_path):
+    settings = Settings(db_path=db_path, projector_interval=0.05)
+    rt = Runtime(settings, runners={"research": _R(ResearchAnswer(answer_text="ok"))})
+    await rt.start()
+    try:
+        assert rt.research._telemetry is rt.telemetry
+    finally:
+        await rt.close()

@@ -243,7 +243,7 @@ class Runtime:
             pull_mode=s.chat_tools_enabled, telemetry=self.telemetry,
         )
         from novelizer.research.service import ResearchService
-        self.research = ResearchService(self._research_runner_for)
+        self.research = ResearchService(self._research_runner_for, telemetry=self.telemetry)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
