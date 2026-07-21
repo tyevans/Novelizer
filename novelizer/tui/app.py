@@ -21,6 +21,7 @@ from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.approval_screen import ApprovalScreen
 from novelizer.tui.export_screen import ExportScreen
+from novelizer.tui.escalations_screen import EscalationsScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -70,6 +71,7 @@ class NovelizerApp(App):
         ("5", "brain_tab('tab_outline')", "Outline"),
         ("6", "brain_tab('tab_arcs')", "Arcs"),
         ("ctrl+r", "talk_to_project", "Talk to Project"),
+        ("ctrl+e", "open_escalations", "Escalations"),
         ("q", "quit", "Quit"),
     ]
     # COMMANDS is set below, after NovelizerCommandProvider is defined at
@@ -380,6 +382,9 @@ class NovelizerApp(App):
     def action_talk_to_project(self) -> None:
         _app_open_research(self)
 
+    def action_open_escalations(self) -> None:
+        _app_open_escalations(self)
+
     def action_brain_tab(self, pane_id: str) -> None:
         _app_brain_tab(self, pane_id)
 
@@ -537,6 +542,10 @@ def _app_open_research(app: NovelizerApp) -> None:
     app.push_screen(ResearchScreen(app.runtime))
 
 
+def _app_open_escalations(app: NovelizerApp) -> None:
+    app.push_screen(EscalationsScreen(app.runtime))
+
+
 APP_COMMANDS: list[AppCommand] = [
     AppCommand("approvals", "Open the approvals screen", _app_open_approvals),
     AppCommand("toggle_room", "Toggle Room view", _app_toggle_room),
@@ -546,6 +555,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("settings", "Open settings", _app_open_settings),
     AppCommand("export_epub", "Export EPUB", _app_open_export),
     AppCommand("talk_to_project", "Talk to the Project (research)", _app_open_research),
+    AppCommand("open_escalations", "Review escalated flags", _app_open_escalations),
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",
