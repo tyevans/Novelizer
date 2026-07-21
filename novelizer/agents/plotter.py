@@ -290,7 +290,7 @@ class Plotter(BaseAgent):
         await self.commit(out, ctx)
 
 
-def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
+def build_plotter_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     """Mirror build_structure_analyst_runner, but the Plotter keeps
     write_todos: no ExcludeToolsMiddleware here, since the planner benefits
     from todo tracking per the pull-tools spec's "where it plausibly helps"
@@ -306,7 +306,7 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
-            backend=backend, tools=tools, skills=PLOTTER_SKILLS,
+            backend=backend, tools=tools, skills=PLOTTER_SKILLS, subagents=subagents,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
@@ -316,12 +316,13 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=PLOTTER_SYSTEM_PROMPT, response_format=PlotterOutput)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Plotter:
     enabled = ctx.settings.plotter_tools_enabled
-    builder = ctx.tooled(build_plotter_runner, enabled)
+    subagent_enabled = ctx.settings.plotter_subagent_enabled
+    builder = ctx.tooled(build_plotter_runner, enabled, subagent_enabled, "plotter")
     runner = ctx.runner_for("plotter", builder)
     return Plotter(
         runner, ctx.read, ctx.committer,
@@ -333,5 +334,6 @@ def _construct(ctx: AgentContext) -> Plotter:
 SPEC = AgentSpec(
     name="plotter",
     tool_grant=ToolGrant(enabled_setting="plotter_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="plotter_subagent_enabled"),
     construct=_construct,
 )
