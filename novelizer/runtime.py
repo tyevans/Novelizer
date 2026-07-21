@@ -130,7 +130,7 @@ class Runtime:
                 "/workspace/": StateBackend(),
             },
         )
-        tools = [build_search_canon_tool(self.embeddings, self.read)]
+        tools = [build_search_canon_tool(self.embeddings, self.read, self.kg_store)]
         return backend, tools
 
     def _tooled(self, builder, enabled: bool):
