@@ -309,6 +309,23 @@ tier model (`full_auto`/`gated_retcons`/`gated_canon`/`gated_all` +
 always/never overrides) carries over unchanged; only its *data source*
 moves.
 
+**M3 status (2026-07-21): done — mechanism delivered in M1, pluggability
+proven here.** M1 (commits `409a2de..e296ee3`) already converted fiction's
+four hardcoded gating sets in `canon/policy.py` into `EventTypeSpec` entries
+on an `EventTypeRegistry`, gated through the domain-neutral
+`substrate.policy.is_gated(event_name, registry, tier_order,
+current_tier_index)` — that already is the "migrate fiction's own
+policy.py sets onto this scheme first" dogfooding step this milestone's
+spec text calls for. This milestone's own contribution is
+`tests/substrate/test_second_domain_pluggability.py`: a synthetic research-
+flavored domain, with a two-tier structure (`auto`/`reviewed`) deliberately
+shaped differently than fiction's four-tier scheme, registers its own event
+types and gates correctly through the same `is_gated` call — with zero
+changes to any file under `substrate/`. The tier model itself
+(`full_auto`/`gated_retcons`/`gated_canon`/`gated_all` + always/never
+overrides) was correctly left unchanged, per this milestone's own
+non-goals.
+
 ### M4 — Second domain: research/fact-gathering
 
 Build the research-team deployment (naming distinct from the existing
