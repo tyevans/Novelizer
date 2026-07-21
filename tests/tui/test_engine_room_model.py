@@ -198,6 +198,45 @@ def test_apply_bus_item_folds_tool_call_failure_into_the_live_text_stream():
     assert "✗ ValueError" in s.text
 
 
+def test_apply_bus_item_indents_delegated_tool_calls():
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                   "input_summary": "/chapters/ch-0012.md", "delegate": "researcher"})
+    s = apply_bus_item(s, started, now=1.0)
+    assert "⚒ ↳ researcher: read_file(/chapters/ch-0012.md)" in s.text
+
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "read_file",
+                    "duration_s": 0.4, "delegate": "researcher"})
+    s = apply_bus_item(s, finished, now=2.0)
+    assert "done in 0.4s" in s.text
+
+
+def test_apply_bus_item_parent_tool_calls_are_not_indented():
+    """Regression: a tool call with no delegate renders exactly as before."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "task",
+                   "input_summary": "researcher: find X"})
+    s = apply_bus_item(s, started, now=1.0)
+    assert "⚒ task(researcher: find X)" in s.text
+    assert "↳" not in s.text
+
+
+def test_stream_line_kind_classifies_delegated_tool_lines_as_tool():
+    assert stream_line_kind("    ⚒ ↳ researcher: read_file(/x.md)") == "tool"
+
+
+def test_apply_bus_item_indents_delegated_tool_call_failure():
+    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper")
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                {"run_id": "r1", "agent_name": "character_keeper", "tool_name": "grep",
+                 "error_type": "ValueError", "delegate": "researcher"})
+    s = apply_bus_item(s, failed, now=1.0)
+    assert "✗ ValueError" in s.text
+
+
 def test_trace_line_formats_tool_call_events():
     started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",

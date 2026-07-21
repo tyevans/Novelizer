@@ -96,11 +96,16 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         return replace(state, status="failed", ended_at=now, error=error)
     if et == TelemetryEventType.TOOL_CALL_STARTED:
         summary = str(p.get("input_summary", "")).replace("\n", "␤")[:120]
+        delegate = p.get("delegate", "")
+        if delegate:
+            return _append(state, f"\n    ⚒ ↳ {delegate}: {p.get('tool_name', '?')}({summary})\n")
         return _append(state, f"\n⚒ {p.get('tool_name', '?')}({summary})\n")
     if et == TelemetryEventType.TOOL_CALL_FINISHED:
-        return _append(state, f"   ↳ done in {p.get('duration_s', 0):.1f}s\n")
+        indent = "       " if p.get("delegate") else "   "
+        return _append(state, f"{indent}↳ done in {p.get('duration_s', 0):.1f}s\n")
     if et == TelemetryEventType.TOOL_CALL_FAILED:
-        return _append(state, f"   ↳ ✗ {p.get('error_type', '?')}\n")
+        indent = "       " if p.get("delegate") else "   "
+        return _append(state, f"{indent}↳ ✗ {p.get('error_type', '?')}\n")
     return state
 
 
