@@ -31,7 +31,7 @@ from novelizer.tui.widgets.feed_model import (
 from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    AGENT_NAMES, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
     trace_line, trace_detail,
 )
 
@@ -318,7 +318,8 @@ class NovelizerApp(App):
             engine_room = self.query_one("#engine_room", EngineRoom)
             engine_room.render_live(self._live_state)
             for agent, state in self._agent_live_states.items():
-                engine_room.render_agent_live(agent, state)
+                if agent in AGENT_NAMES:
+                    engine_room.render_agent_live(agent, state)
             self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
@@ -338,7 +339,7 @@ class NovelizerApp(App):
                 self._refresh_strip()
                 engine_room = self.query_one("#engine_room", EngineRoom)
                 engine_room.render_live(self._live_state)
-                if agent:
+                if agent in AGENT_NAMES:
                     engine_room.render_agent_live(agent, self._agent_live_states[agent], now)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
@@ -351,7 +352,8 @@ class NovelizerApp(App):
                 engine_room.render_live(self._live_state)
                 now = time.monotonic()
                 for agent, state in self._agent_live_states.items():
-                    engine_room.render_agent_live(agent, state, now)
+                    if agent in AGENT_NAMES:
+                        engine_room.render_agent_live(agent, state, now)
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)

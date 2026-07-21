@@ -353,6 +353,22 @@ async def test_trace_rows_tolerate_markup_hostile_tool_summaries(rt):
         assert any("read" in r for r in rows)
 
 
+async def test_non_autonomous_identities_dont_crash_the_telemetry_loop(rt):
+    """chat:<agent> and research telemetry identities have no Engine Room
+    tab (only the fixed AGENT_NAMES seven do) — the app's global telemetry
+    loop must skip rendering them into Engine Room instead of crashing on
+    a missing #er_vitals_<agent> widget."""
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="research"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="research", text="hi"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="chat:author"))
+        await pilot.pause(0.8)
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
+
+
 async def test_seeded_trace_survives_restart(rt):
     from textual.widgets import DataTable
     await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
