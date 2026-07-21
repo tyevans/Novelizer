@@ -659,7 +659,7 @@ async def test_phase_b_flags_on_wire_backend_and_tools(settings, monkeypatch, ag
 
     seen_kwargs: list[dict] = []
 
-    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
         seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
         return _FakeAgentRunner()
 
@@ -686,7 +686,7 @@ async def test_phase_b_flags_off_uses_bare_builder(settings, monkeypatch, agent_
 
     seen_kwargs: list[dict] = []
 
-    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
         seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
         return _FakeAgentRunner()
 
