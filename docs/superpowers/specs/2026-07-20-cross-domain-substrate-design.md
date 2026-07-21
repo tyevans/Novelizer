@@ -339,6 +339,57 @@ test of generality. Anything the research domain needs that the substrate
 doesn't provide generically is logged as a substrate gap — not worked around
 with a domain-specific hack in the research deployment.
 
+**M4 status (2026-07-21): done, scoped as the spec's own non-goal
+specifies — "only as far as needed to prove the substrate generalizes."**
+Built `research_domain/` (distinct from the pre-existing
+`novelizer/research/` chat feature, per M0's naming-collision finding):
+`event_types.py` (four event types — `claim.proposed`, `source.corroborated`,
+`claim.refuted`, `claim.corrected` — registered on a fresh
+`substrate.event_registry.EventTypeRegistry` with a two-tier
+`auto`/`reviewed` gating scheme, exercising the exact low-blast-radius-vs-
+rippling distinction the spec's Findings section predicted for research
+specifically), `roles.py` (all six named roles — Scout, Extractor, Verifier,
+Retractor, Synthesizer, Coverage Analyst — as `AgentSpec` entries with
+synchronous stub `construct` callables, proving the agent-registry shape
+fits a non-fiction roster; no real LLM-backed agent logic was built, per
+this milestone's own scope), and `projections.py` (the Source Coverage
+Board, built on `ProjectionCatalog`). The proof of generality is
+`test_end_to_end.py`: real events appended to a live Postgres-backed
+`PostgresEventStore` (the same Docker-fixture-backed instance from M2),
+real gating decisions against the research registry, and a real recomputed
+projection — verified non-tautological under adversarial review (expected
+counts derive from actually-read-back rows, not independently-asserted
+magic numbers). Full suite after this milestone: 1983 passed, 5 failed
+(the same pre-existing failures documented in M1/M2's status notes, zero
+new regressions), 7 deselected.
+
+**Logged substrate gaps (explicitly not worked around here, per the spec's
+instruction to log rather than hack):**
+1. The Contradiction Map and Claim Dependency Graph projections (the other
+   two the spec names for this domain) were not built — Source Coverage
+   Board alone was sufficient to prove `ProjectionCatalog` composes with
+   real Postgres data; building the other two would exercise the same
+   abstraction again without new information.
+2. `ProjectionCatalog.recompute`'s callable contract is synchronous
+   (established in M1), but the natural implementation of a real
+   count-from-Postgres query is async — this milestone's integration test
+   worked around this by precomputing counts with one `await
+   store.read_stream(...)` call before building the catalog, rather than
+   making `recompute` call back into Postgres itself. A real research
+   deployment recomputing projections continuously from a live event
+   stream would need `ProjectionCatalog` to support async `recompute`
+   callables (or a documented convention of precomputing inputs before
+   invoking it, as done here) — this is a genuine substrate gap for M5 to
+   pick up if a future milestone needs live recompute against an async
+   store, not merely a research-domain-specific issue.
+3. No real role behavior (Scout actually scouting, Verifier actually
+   verifying) was built — `roles.py`'s stub `construct` callables prove the
+   registry shape accepts a non-fiction roster but do not exercise whether
+   `AgentContext`'s current fields (built for fiction's needs) are
+   sufficient for a research role's actual runtime needs (e.g. a `Verifier`
+   likely needs a different tool grant shape than any fiction role has).
+   This is deferred, not solved, pending real role implementation.
+
 ### M5 — Substrate hardening
 
 Fold M4's logged gaps back into the substrate (e.g., a sunk-cost-aware
