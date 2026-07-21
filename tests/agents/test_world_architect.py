@@ -50,6 +50,23 @@ async def test_run_once_creates_world_entries(stack):
     assert {"The Brinemarsh", "Salt Guild"} <= titles
 
 
+async def test_flags_from_structured_output_are_filed(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import FlagDraft
+
+    out = WorldEntriesDraft(flags=[
+        FlagDraft(category="worldbuilding", description="Two entries claim the same capital city",
+                  related_entry_ids=[], proposed_resolution="merge or rename one"),
+    ])
+    agent = WorldArchitect(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    flags = await read.list_flags(category="worldbuilding", status="open")
+    assert len(flags) == 1
+    assert flags[0].description == "Two entries claim the same capital city"
+    assert flags[0].filed_by == "world_architect"
+
+
 async def test_work_prompt_includes_personality_when_set(stack):
     events, proj, read, committer = stack
     runner = FakeRunner(WorldEntriesDraft())
