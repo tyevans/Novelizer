@@ -94,6 +94,8 @@ class ToolCallFinished(BaseModel):
     tool_name: str
     duration_s: float
     output_chars: int
+    input_summary: str = ""
+    output_summary: str = ""
 
 
 class ToolCallFailed(BaseModel):
@@ -103,6 +105,7 @@ class ToolCallFailed(BaseModel):
     duration_s: float
     error_type: str
     error_message: str
+    input_summary: str = ""
 
 
 class TokenDelta(BaseModel):

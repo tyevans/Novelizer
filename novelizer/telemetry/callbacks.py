@@ -46,13 +46,14 @@ class _CallState:
 
 
 class _ToolCallState:
-    __slots__ = ("novelizer_run_id", "agent_name", "tool_name", "started")
+    __slots__ = ("novelizer_run_id", "agent_name", "tool_name", "started", "input_summary")
 
     def __init__(self, novelizer_run_id: str, agent_name: str, tool_name: str) -> None:
         self.novelizer_run_id = novelizer_run_id
         self.agent_name = agent_name
         self.tool_name = tool_name
         self.started = time.monotonic()
+        self.input_summary = ""
 
 
 class TelemetryCallbackHandler(AsyncCallbackHandler):
@@ -130,12 +131,14 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
         nrun = current_run_id.get() or ""
         tool_name = (serialized or {}).get("name", "")
         agent_name = current_agent_name.get()
+        input_summary = str(input_str)[:300]
         state = _ToolCallState(nrun, agent_name, tool_name)
+        state.input_summary = input_summary
         self._tool_calls[run_id] = state
         await self._recorder.emit(
             TelemetryEventType.TOOL_CALL_STARTED, nrun,
             ToolCallStarted(run_id=nrun, agent_name=agent_name, tool_name=tool_name,
-                            input_summary=str(input_str)[:300]),
+                            input_summary=input_summary),
         )
 
     async def on_tool_end(self, output: Any, *, run_id: UUID, **kwargs: Any) -> None:
@@ -147,7 +150,9 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
             ToolCallFinished(run_id=state.novelizer_run_id, agent_name=state.agent_name,
                              tool_name=state.tool_name,
                              duration_s=time.monotonic() - state.started,
-                             output_chars=len(str(output))),
+                             output_chars=len(str(output)),
+                             input_summary=state.input_summary,
+                             output_summary=str(output)[:300]),
         )
 
     async def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
@@ -159,7 +164,8 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
             ToolCallFailed(run_id=state.novelizer_run_id, agent_name=state.agent_name,
                            tool_name=state.tool_name,
                            duration_s=time.monotonic() - state.started,
-                           error_type=type(error).__name__, error_message=str(error)),
+                           error_type=type(error).__name__, error_message=str(error),
+                           input_summary=state.input_summary),
         )
 
     @staticmethod
