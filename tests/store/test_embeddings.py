@@ -142,3 +142,26 @@ async def test_concurrent_writes_are_serialized_and_complete(fake_store):
     assert fake_store._chapters.count() == 8
     assert fake_store._chars.count() == 8
     assert fake_store._write_lock.locked() is False
+
+
+@pytest.mark.asyncio
+async def test_entity_upsert_is_searchable_as_entity_kind(tmp_path):
+    store = EmbeddingStore(str(tmp_path / "chroma"), embedding_function=FakeEmbeddingFunction())
+
+    await store.upsert_entity("42", "The Salted Gull", "The Salted Gull [location] a dockside tavern")
+
+    hits = await store.search("Salted Gull", kinds=["entity"])
+    assert len(hits) == 1
+    assert hits[0].kind == "entity"
+    assert hits[0].id == "42"
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_removes_it_from_search(tmp_path):
+    store = EmbeddingStore(str(tmp_path / "chroma"), embedding_function=FakeEmbeddingFunction())
+    await store.upsert_entity("42", "The Salted Gull", "a dockside tavern")
+
+    await store.delete_entity("42")
+
+    hits = await store.search("Salted Gull", kinds=["entity"])
+    assert hits == []
