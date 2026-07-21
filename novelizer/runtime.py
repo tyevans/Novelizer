@@ -35,6 +35,8 @@ from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
 from novelizer.store.embeddings import EmbeddingStore
 from novelizer.store.indexer import CanonIndexer
+from novelizer.store.kg_store import KGStore
+from novelizer.store.kg_projector import KGProjector
 
 # Agents pinned into Runtime._tooling_pinned. author and continuity_checker are
 # deliberately excluded here even though their SPECs carry a tool_grant (needed
@@ -83,6 +85,8 @@ class Runtime:
         self._research_runner_cache = None
         self.embeddings = embedding_store   # None => built in start()
         self.indexer = None
+        self.kg_store = None
+        self.kg_projector = None
 
     def _runner_for(self, name: str, builder, fallback_name: str | None = None):
         if self._runners is not None:
@@ -193,6 +197,15 @@ class Runtime:
             str(Path(self.settings.db_path).with_name("embed_cursor.json")),
         )
         await self.index_catch_up()  # backfill; failure-tolerant by contract
+        self.kg_store = KGStore(self.settings.db_path)
+        await self.kg_store.init()
+        from novelizer.agents.kg_extraction import build_kg_extraction_runner
+        kg_runner = build_kg_extraction_runner(self.settings, callbacks=self._llm_callbacks)
+        self.kg_projector = KGProjector(
+            self.events, self.read, self.kg_store, self.embeddings, kg_runner,
+            str(Path(self.settings.db_path).with_name("kg_cursor.json")),
+        )
+        await self.kg_catch_up()  # backfill; failure-tolerant by contract
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
         self.proposals = ProposalService(self.events)
@@ -356,8 +369,17 @@ class Runtime:
             return
         await self.indexer.catch_up()
 
+    async def kg_catch_up(self) -> None:
+        """Periodic-caller-safe KG catch-up: no-op without a projector, and
+        never raises (KGProjector.catch_up swallows batch failures)."""
+        if self.kg_projector is None:
+            return
+        await self.kg_projector.catch_up()
+
     async def close(self) -> None:
         await self.read.close()
         await self.projector.close()
         await self.telemetry_store.close()
         await self.events.close()
+        if self.kg_store is not None:
+            await self.kg_store.close()
