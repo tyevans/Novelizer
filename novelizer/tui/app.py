@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 from textual.app import App, ComposeResult
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
@@ -53,10 +54,7 @@ class NovelizerApp(App):
     CSS_PATH = "app.tcss"
     SETTINGS_POLL_INTERVAL: float = 1.0
 
-    # Note: Textual 5.3.0 does not accept "colon" as a key name for BINDINGS,
-    # so "ctrl+k" is used to focus the command input instead.
     BINDINGS = [
-        ("ctrl+k", "focus_command", "Command"),
         ("a", "approvals", "Approve"),
         ("r", "toggle_room", "Room"),
         ("e", "toggle_engine", "Engine Room"),
@@ -70,6 +68,9 @@ class NovelizerApp(App):
         ("6", "brain_tab('tab_arcs')", "Arcs"),
         ("q", "quit", "Quit"),
     ]
+    # COMMANDS is set below, after NovelizerCommandProvider is defined at
+    # module scope (it must exist before we can reference it here).
+    COMMAND_PALETTE_BINDING = "ctrl+k"
 
     def __init__(self, runtime, hint_index: int = 0) -> None:
         super().__init__()
@@ -331,9 +332,6 @@ class NovelizerApp(App):
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)
 
-    def action_focus_command(self) -> None:
-        self.set_focus(self.query_one("#command", Input))
-
     async def action_approvals(self) -> None:
         await _app_open_approvals(self)
 
@@ -351,6 +349,13 @@ class NovelizerApp(App):
 
     def action_brain_tab(self, pane_id: str) -> None:
         self.query_one("#brain", BrainPanel).activate_tab(pane_id)
+
+    def open_command_followup(self, name: str) -> None:
+        box = self.query_one("#command_followup", Input)
+        box.value = f"{name} "
+        box.display = True
+        self.set_focus(box)
+        box.action_end()
 
     async def _run_command(self, line: str) -> None:
         stripped = line.strip()
@@ -520,3 +525,57 @@ APP_COMMANDS: list[AppCommand] = [
         lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_arcs"),
     ),
 ]
+
+
+class NovelizerCommandProvider(Provider):
+    """Fuzzy-searches director commands (which need typed arguments, so
+    selecting one opens the follow-up Input) and zero-arg app commands
+    (which run immediately)."""
+
+    def _candidates(self) -> list[tuple[str, str, bool]]:
+        # (name, description, takes_args)
+        director_entries = [
+            (c.name, c.description, True) for c in commands.COMMAND_REGISTRY
+        ]
+        app_entries = [(c.name, c.description, False) for c in APP_COMMANDS]
+        return director_entries + app_entries
+
+    def _run(self, name: str, takes_args: bool) -> None:
+        app: NovelizerApp = self.app  # type: ignore[assignment]
+        if takes_args:
+            app.open_command_followup(name)
+            return
+        command = next(c for c in APP_COMMANDS if c.name == name)
+        result = command.callback(app)
+        if result is not None:
+            app.call_next(lambda: app.run_worker(result, exclusive=False))
+
+    async def search(self, query: str) -> Hits:
+        matcher = self.matcher(query)
+        for name, description, takes_args in self._candidates():
+            text = f"{name} — {description}"
+            score = matcher.match(text)
+            if score > 0:
+                yield Hit(
+                    score,
+                    matcher.highlight(text),
+                    lambda n=name, a=takes_args: self._run(n, a),
+                    text=text,
+                    help=description,
+                )
+
+    async def discover(self) -> Hits:
+        for name, description, takes_args in self._candidates():
+            text = f"{name} — {description}"
+            yield DiscoveryHit(
+                text,
+                lambda n=name, a=takes_args: self._run(n, a),
+                text=name,
+                help=description,
+            )
+
+
+# NovelizerApp.COMMANDS references NovelizerCommandProvider, which must be
+# defined first (it in turn depends on APP_COMMANDS, defined above) — so it
+# is assigned here rather than in the class body.
+NovelizerApp.COMMANDS = {NovelizerCommandProvider}

@@ -49,6 +49,29 @@ async def test_command_input_seeds_via_dispatch():
 
 
 @pytest.mark.asyncio
+async def test_command_provider_discovers_every_registered_command():
+    from novelizer.tui.app import APP_COMMANDS, NovelizerApp, NovelizerCommandProvider
+    from novelizer.director import commands as director_commands
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            provider = NovelizerCommandProvider(app.screen)
+            hits = [hit async for hit in provider.discover()]
+            names = {hit.text for hit in hits}
+            expected = {c.name for c in director_commands.COMMAND_REGISTRY} | {
+                c.name for c in APP_COMMANDS
+            }
+            assert names == expected
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_room_toggle_hides_right_column():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
