@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -12,7 +13,9 @@ from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
 from novelizer.canon.events import StoredEvent, EventType
 from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
+from novelizer.telemetry.events import TelemetryEventType, ToolSummaryReady
 from novelizer.tui.chat_screen import ChatScreen
+from novelizer.tui.tool_summarizer import summarize_tool_call
 from novelizer.tui.research_screen import ResearchScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import status_strip
@@ -21,6 +24,7 @@ from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.approval_screen import ApprovalScreen
 from novelizer.tui.export_screen import ExportScreen
+from novelizer.tui.escalations_screen import EscalationsScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -32,8 +36,10 @@ from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
     AGENT_NAMES, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
-    trace_line, trace_detail,
+    trace_line, trace_detail, normalize_input_summary,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,7 @@ class NovelizerApp(App):
         ("5", "brain_tab('tab_outline')", "Outline"),
         ("6", "brain_tab('tab_arcs')", "Arcs"),
         ("ctrl+r", "talk_to_project", "Talk to Project"),
+        ("ctrl+e", "open_escalations", "Escalations"),
         ("q", "quit", "Quit"),
     ]
     # COMMANDS is set below, after NovelizerCommandProvider is defined at
@@ -340,6 +347,9 @@ class NovelizerApp(App):
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()
+                if isinstance(item, StoredEvent) and item.event_type in (
+                        TelemetryEventType.TOOL_CALL_FINISHED, TelemetryEventType.TOOL_CALL_FAILED):
+                    self.run_worker(self._summarize_tool_call(item), exclusive=False, group="tool-summary")
                 self._refresh_strip()
                 engine_room = self.query_one("#engine_room", EngineRoom)
                 engine_room.render_live(self._live_state)
@@ -347,6 +357,28 @@ class NovelizerApp(App):
                     engine_room.render_agent_live(agent, self._agent_live_states[agent], now)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
+
+    async def _summarize_tool_call(self, ev: StoredEvent) -> None:
+        p = ev.payload
+        tool_name = p.get("tool_name", "?")
+        # Normalize identically to apply_bus_item's TOOL_CALL_STARTED handler:
+        # this string is both the LLM prompt's input_summary context and the
+        # ToolSummaryReady match key, so it must match the tool block exactly.
+        input_summary = normalize_input_summary(p.get("input_summary", ""))
+        if ev.event_type == TelemetryEventType.TOOL_CALL_FINISHED:
+            output_summary, error = p.get("output_summary", ""), ""
+        else:
+            output_summary = ""
+            error = f"{p.get('error_type', '?')}: {p.get('error_message', '')}"
+        try:
+            summary = await summarize_tool_call(
+                self.runtime.settings, tool_name, input_summary, output_summary, error)
+        except Exception as e:
+            logger.warning("tool-call summarization failed: %s", e)
+            return
+        self.runtime.telemetry_bus.publish(ToolSummaryReady(
+            run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
+            tool_name=tool_name, input_summary=input_summary, summary=summary))
 
     async def _telemetry_refresh_loop(self) -> None:
         while True:
@@ -379,6 +411,9 @@ class NovelizerApp(App):
 
     def action_talk_to_project(self) -> None:
         _app_open_research(self)
+
+    def action_open_escalations(self) -> None:
+        _app_open_escalations(self)
 
     def action_brain_tab(self, pane_id: str) -> None:
         _app_brain_tab(self, pane_id)
@@ -537,6 +572,10 @@ def _app_open_research(app: NovelizerApp) -> None:
     app.push_screen(ResearchScreen(app.runtime))
 
 
+def _app_open_escalations(app: NovelizerApp) -> None:
+    app.push_screen(EscalationsScreen(app.runtime))
+
+
 APP_COMMANDS: list[AppCommand] = [
     AppCommand("approvals", "Open the approvals screen", _app_open_approvals),
     AppCommand("toggle_room", "Toggle Room view", _app_toggle_room),
@@ -546,6 +585,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("settings", "Open settings", _app_open_settings),
     AppCommand("export_epub", "Export EPUB", _app_open_export),
     AppCommand("talk_to_project", "Talk to the Project (research)", _app_open_research),
+    AppCommand("open_escalations", "Review escalated flags", _app_open_escalations),
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",

@@ -666,7 +666,7 @@ def test_build_plotter_runner_tooled_branch_passes_plotter_skills(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, subagents=None, middleware=None):
         captured["skills"] = skills
         return FakeGraph()
 
@@ -833,3 +833,8 @@ async def test_flags_from_structured_output_are_filed(stack):
     assert len(flags) == 1
     assert flags[0].description == "Theme of sacrifice never pays off"
     assert flags[0].filed_by == "plotter"
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.plotter import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "plotter_subagent_enabled"

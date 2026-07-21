@@ -247,3 +247,8 @@ def test_build_world_architect_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_world_architect_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.world_architect import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "world_architect_subagent_enabled"

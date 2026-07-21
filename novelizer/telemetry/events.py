@@ -60,6 +60,7 @@ class LlmCallStarted(BaseModel):
     call_index: int
     model: str
     prompt: str
+    delegate: str = ""
 
 
 class LlmCallFinished(BaseModel):
@@ -69,6 +70,7 @@ class LlmCallFinished(BaseModel):
     model: str
     duration_s: float
     output_tokens: int
+    delegate: str = ""
 
 
 class LlmCallFailed(BaseModel):
@@ -79,6 +81,7 @@ class LlmCallFailed(BaseModel):
     duration_s: float
     error_type: str
     error_message: str
+    delegate: str = ""
 
 
 class ToolCallStarted(BaseModel):
@@ -86,6 +89,7 @@ class ToolCallStarted(BaseModel):
     agent_name: str
     tool_name: str
     input_summary: str  # str(tool input), truncated to 300 chars
+    delegate: str = ""
 
 
 class ToolCallFinished(BaseModel):
@@ -94,6 +98,9 @@ class ToolCallFinished(BaseModel):
     tool_name: str
     duration_s: float
     output_chars: int
+    input_summary: str = ""
+    output_summary: str = ""
+    delegate: str = ""
 
 
 class ToolCallFailed(BaseModel):
@@ -103,6 +110,8 @@ class ToolCallFailed(BaseModel):
     duration_s: float
     error_type: str
     error_message: str
+    input_summary: str = ""
+    delegate: str = ""
 
 
 class TokenDelta(BaseModel):
@@ -113,3 +122,17 @@ class TokenDelta(BaseModel):
     agent_name: str
     text: str
     kind: str = "text"  # "text" (answer content) | "thinking" (reasoning_content)
+
+
+class ToolSummaryReady(BaseModel):
+    """A cheap-LLM one-line summary of a finished/failed tool call, matched
+    back to its block by (run_id, tool_name, input_summary) rather than a
+    synthetic id -- the same event is folded independently into more than
+    one LiveRunState (the merged "All" view and each per-agent view), and
+    those don't share block numbering. Bus-only: NEVER persisted."""
+
+    run_id: str
+    agent_name: str
+    tool_name: str
+    input_summary: str
+    summary: str

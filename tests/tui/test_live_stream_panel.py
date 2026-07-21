@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Static
 from textual.containers import VerticalScroll
 from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
-from novelizer.tui.widgets.engine_room_model import LiveRunState
+from novelizer.tui.widgets.engine_room_model import Block, LiveRunState
 
 
 class _Harness(App):
@@ -27,7 +27,8 @@ async def test_running_state_shows_agent_name_in_vitals():
     app = _Harness()
     async with app.run_test() as pilot:
         panel = app.query_one("#panel", LiveStreamPanel)
-        state = LiveRunState(status="running", agent_name="research", started_at=0.0, text="hello")
+        state = LiveRunState(status="running", agent_name="research", started_at=0.0,
+                             blocks=(Block(kind="prose", text="hello"),))
         panel.render(state, now=1.0)
         await pilot.pause()
         vitals = panel.query_one(LiveStreamPanel._VITALS_ID, Static)

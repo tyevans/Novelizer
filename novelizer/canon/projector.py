@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS director_signals (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, consumed INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS flags (
-    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, category TEXT NOT NULL
+    id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, category TEXT NOT NULL,
+    escalated INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS proposals (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL, proposing_agent TEXT NOT NULL
@@ -112,6 +113,11 @@ class Projector:
     async def init(self) -> None:
         self._conn = await db.connect(self._path)
         await self._conn.executescript(_CREATE)
+        # Additive migration: pre-escalation DBs lack the flags.escalated column.
+        cur = await self._conn.execute("PRAGMA table_info(flags)")
+        cols = [r[1] for r in await cur.fetchall()]
+        if "escalated" not in cols:
+            await self._conn.execute("ALTER TABLE flags ADD COLUMN escalated INTEGER NOT NULL DEFAULT 0")
         await self._conn.execute(
             "INSERT OR IGNORE INTO projector_state (id, last_sequence) VALUES ('singleton', 0)"
         )
@@ -250,15 +256,26 @@ class Projector:
             )
         elif t == EventType.FLAG_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
-                (p["id"], data, p.get("status", "open"), p.get("category", "")),
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                (p["id"], data, p.get("status", "open"), p.get("category", ""),
+                 int(p.get("escalated", False))),
             )
         elif t == EventType.FLAG_RESOLVED or t == EventType.FLAG_REJECTED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
                 (p["id"], data,
                  p.get("status", "resolved" if t == EventType.FLAG_RESOLVED else "rejected"),
-                 p.get("category", "")),
+                 p.get("category", ""), int(p.get("escalated", False))),
+            )
+        elif t == EventType.FLAG_ESCALATED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,1)",
+                (p["id"], data, p.get("status", "open"), p.get("category", "")),
+            )
+        elif t == EventType.FLAG_ESCALATION_CLEARED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,0)",
+                (p["id"], data, p.get("status", "open"), p.get("category", "")),
             )
         elif t in (EventType.RETCON_REQUEST_CREATED, EventType.RETCON_REQUEST_RESOLVED,
                    EventType.RETCON_REQUEST_REJECTED):
@@ -279,8 +296,9 @@ class Projector:
             aliased.setdefault("filed_by", "")
             aliased.setdefault("triage_passes", 0)
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
-                (aliased["id"], json.dumps(aliased), legacy_status, "contradiction"),
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                (aliased["id"], json.dumps(aliased), legacy_status, "contradiction",
+                 int(aliased.get("escalated", False))),
             )
         elif t == EventType.PROPOSAL_CREATED:
             await self._conn.execute(

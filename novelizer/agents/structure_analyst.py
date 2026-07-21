@@ -164,7 +164,7 @@ class StructureAnalyst(BaseAgent):
         await self.commit(out, ctx)
 
 
-def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools=None):
+def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -177,7 +177,7 @@ def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=StructureAnalystOutput,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -188,12 +188,13 @@ def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> StructureAnalyst:
     enabled = ctx.settings.structure_analyst_tools_enabled
-    builder = ctx.tooled(build_structure_analyst_runner, enabled)
+    subagent_enabled = ctx.settings.structure_analyst_subagent_enabled
+    builder = ctx.tooled(build_structure_analyst_runner, enabled, subagent_enabled, "structure_analyst")
     runner = ctx.runner_for("structure_analyst", builder)
     return StructureAnalyst(
         runner, ctx.read, ctx.committer,
@@ -206,5 +207,6 @@ def _construct(ctx: AgentContext) -> StructureAnalyst:
 SPEC = AgentSpec(
     name="structure_analyst",
     tool_grant=ToolGrant(enabled_setting="structure_analyst_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="structure_analyst_subagent_enabled"),
     construct=_construct,
 )

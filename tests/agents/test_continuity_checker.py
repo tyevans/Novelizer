@@ -1140,3 +1140,8 @@ def test_build_continuity_mining_runner_construction_unchanged():
 
     runner = build_continuity_mining_runner(FakeSettings())
     assert runner is not None
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.continuity_checker import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "checker_subagent_enabled"

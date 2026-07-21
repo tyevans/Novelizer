@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from rich.text import Text
 from novelizer.canon.events import StoredEvent
-from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+from novelizer.telemetry.events import TelemetryEventType, ToolSummaryReady, TokenDelta
 from novelizer.tui.identity import identity_for
 
 TEXT_CAP = 8000
@@ -32,6 +32,31 @@ AGENT_NAMES = (
 )
 
 
+def normalize_input_summary(raw) -> str:
+    """Canonical normalization for a tool call's input_summary: newlines
+    swapped for a visible marker so single-line rendering stays intact, and
+    truncated to 120 chars. Used both when TOOL_CALL_STARTED opens a tool
+    block (as the match key) and by app.py's _summarize_tool_call when
+    building the ToolSummaryReady it publishes — the two MUST agree exactly,
+    since apply_bus_item's ToolSummaryReady handler matches on this string."""
+    return str(raw).replace("\n", "␤")[:120]
+
+
+@dataclass(frozen=True)
+class Block:
+    kind: str  # "prose" | "thinking" | "call" | "tool"
+    text: str = ""
+    tool_name: str = ""
+    input_summary: str = ""
+    status: str = "running"  # running | done | failed
+    duration_s: float = 0.0
+    error: str = ""
+    summary: str | None = None
+    repeat_count: int = 1
+    delegate: str = ""  # subagent name (e.g. "researcher") when this tool
+    # call was dispatched by a subagent rather than the parent agent itself
+
+
 @dataclass(frozen=True)
 class LiveRunState:
     status: str = "idle"  # idle | running | finished | failed
@@ -40,7 +65,7 @@ class LiveRunState:
     started_at: float = 0.0  # monotonic
     ended_at: float = 0.0
     tokens: int = 0
-    text: str = ""
+    blocks: tuple[Block, ...] = ()
     prompt: str = ""
     model: str = ""
     call_index: int = 0
@@ -51,9 +76,15 @@ class LiveRunState:
     # visible marker instead of running together unlabeled.
 
 
-def _append(state: LiveRunState, line: str) -> LiveRunState:
-    text = line if not state.text else state.text + line
-    return replace(state, text=text[-TEXT_CAP:])
+def _append_text_block(state: LiveRunState, kind: str, text: str) -> LiveRunState:
+    """Append to the trailing block if it's the same kind, else open a new one."""
+    if state.blocks and state.blocks[-1].kind == kind:
+        last = state.blocks[-1]
+        merged = (last.text + text)[-TEXT_CAP:]
+        blocks = state.blocks[:-1] + (replace(last, text=merged),)
+    else:
+        blocks = state.blocks + (Block(kind=kind, text=text[-TEXT_CAP:]),)
+    return replace(state, blocks=blocks)
 
 
 def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
@@ -61,14 +92,23 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         if state.status != "running" or item.run_id != state.run_id:
             return state
         kind = item.kind or "text"
-        marker = ""
-        if kind != state.last_kind:
-            if kind == "thinking":
-                marker = "\n💭 "
-            elif state.last_kind == "thinking":
-                marker = "\n"
-        text = (state.text + marker + item.text)[-TEXT_CAP:]
-        return replace(state, text=text, tokens=state.tokens + 1, last_kind=kind)
+        block_kind = "thinking" if kind == "thinking" else "prose"
+        state = _append_text_block(state, block_kind, item.text)
+        return replace(state, tokens=state.tokens + 1, last_kind=kind)
+    if isinstance(item, ToolSummaryReady):
+        if item.run_id != state.run_id or not state.blocks:
+            return state
+        # NOTE: if two non-collapsed blocks share (tool_name, input_summary),
+        # arrival order can swap which gets which summary — cosmetic only,
+        # both summaries are near-identical for identical calls.
+        for i in range(len(state.blocks) - 1, -1, -1):
+            b = state.blocks[i]
+            if (b.kind == "tool" and b.tool_name == item.tool_name
+                    and b.input_summary == item.input_summary
+                    and b.status != "running" and b.summary is None):
+                blocks = state.blocks[:i] + (replace(b, summary=item.summary),) + state.blocks[i + 1:]
+                return replace(state, blocks=blocks)
+        return state
     if not isinstance(item, StoredEvent):
         return state
     p = item.payload
@@ -83,24 +123,55 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if et == TelemetryEventType.LLM_CALL_STARTED:
         state = replace(state, prompt=p.get("prompt", ""), model=p.get("model", ""),
                         call_index=p.get("call_index", 0))
-        line = f"\n▸ call {p.get('call_index', '?')} ({p.get('model', '?')})\n"
-        return _append(state, line)
+        blocks = state.blocks + (Block(kind="call", status="running",
+                                       text=f"call {p.get('call_index', '?')} ({p.get('model', '?')})"),)
+        return replace(state, blocks=blocks)
     if et == TelemetryEventType.LLM_CALL_FINISHED:
         state = replace(state, tokens=p.get("output_tokens", state.tokens))
-        line = (f"   ↳ {p.get('duration_s', 0):.1f}s · {p.get('output_tokens', 0)} tok\n")
-        return _append(state, line)
+        if state.blocks and state.blocks[-1].kind == "call":
+            last = state.blocks[-1]
+            blocks = state.blocks[:-1] + (replace(last, status="done",
+                                                  duration_s=p.get("duration_s", 0.0)),)
+            state = replace(state, blocks=blocks)
+        return state
     if et == TelemetryEventType.AGENT_RUN_FINISHED:
         return replace(state, status="finished", ended_at=now)
     if et == TelemetryEventType.AGENT_RUN_FAILED:
         error = f"{p.get('error_type', '?')}: {p.get('error_message', '')}"
         return replace(state, status="failed", ended_at=now, error=error)
     if et == TelemetryEventType.TOOL_CALL_STARTED:
-        summary = str(p.get("input_summary", "")).replace("\n", "␤")[:120]
-        return _append(state, f"\n⚒ {p.get('tool_name', '?')}({summary})\n")
-    if et == TelemetryEventType.TOOL_CALL_FINISHED:
-        return _append(state, f"   ↳ done in {p.get('duration_s', 0):.1f}s\n")
-    if et == TelemetryEventType.TOOL_CALL_FAILED:
-        return _append(state, f"   ↳ ✗ {p.get('error_type', '?')}\n")
+        tool_name = p.get("tool_name", "?")
+        input_summary = normalize_input_summary(p.get("input_summary", ""))
+        delegate = p.get("delegate", "")
+        if (state.blocks and state.blocks[-1].kind == "tool"
+                and state.blocks[-1].tool_name == tool_name
+                and state.blocks[-1].input_summary == input_summary
+                and state.blocks[-1].delegate == delegate
+                and state.blocks[-1].status != "running"):
+            last = state.blocks[-1]
+            # NOTE: summary reflects whichever ToolSummaryReady arrives first
+            # for this repeat run, not necessarily the most recent call.
+            blocks = state.blocks[:-1] + (replace(last, status="running",
+                                                  repeat_count=last.repeat_count + 1,
+                                                  summary=None),)
+        else:
+            blocks = state.blocks + (Block(kind="tool", tool_name=tool_name,
+                                           input_summary=input_summary, status="running",
+                                           delegate=delegate),)
+        return replace(state, blocks=blocks)
+    if et in (TelemetryEventType.TOOL_CALL_FINISHED, TelemetryEventType.TOOL_CALL_FAILED):
+        tool_name = p.get("tool_name", "?")
+        for i in range(len(state.blocks) - 1, -1, -1):
+            b = state.blocks[i]
+            if b.kind == "tool" and b.tool_name == tool_name and b.status == "running":
+                if et == TelemetryEventType.TOOL_CALL_FINISHED:
+                    updated = replace(b, status="done", duration_s=p.get("duration_s", 0.0))
+                else:
+                    updated = replace(b, status="failed", duration_s=p.get("duration_s", 0.0),
+                                      error=p.get("error_type", "?"))
+                blocks = state.blocks[:i] + (updated,) + state.blocks[i + 1:]
+                return replace(state, blocks=blocks)
+        return state
     return state
 
 
@@ -119,6 +190,8 @@ def route_agent(item) -> str | None:
     """Which agent a bus item (TokenDelta or StoredEvent) belongs to, for
     fanning a single stream out into per-agent buckets."""
     if isinstance(item, TokenDelta):
+        return item.agent_name or None
+    if isinstance(item, ToolSummaryReady):
         return item.agent_name or None
     if isinstance(item, StoredEvent):
         return item.payload.get("agent_name") or None
@@ -178,9 +251,39 @@ def live_body(state: LiveRunState) -> str:
         return "run in progress (stream not attached — restarted mid-run)"
     if state.status == "idle":
         return "no run yet"
-    if state.status == "failed" and state.text:
-        return state.text + "\n\n✗ crashed"
-    return state.text or "(waiting for first token…)"
+    lines: list[str] = []
+    for b in state.blocks:
+        lines.append(_render_block(b))
+    body = "\n".join(lines).strip("\n")
+    if state.status == "failed" and body:
+        return body + "\n\n✗ crashed"
+    return body or "(waiting for first token…)"
+
+
+def _render_block(b: Block) -> str:
+    if b.kind == "prose":
+        return b.text
+    if b.kind == "thinking":
+        return f"💭 {b.text}"
+    if b.kind == "call":
+        header = f"▸ {b.text}"
+        if b.status == "done":
+            return header + f"\n   ↳ {b.duration_s:.1f}s"
+        return header
+    # kind == "tool"
+    suffix = f" ×{b.repeat_count}" if b.repeat_count > 1 else ""
+    indent = "       " if b.delegate else "   "
+    if b.delegate:
+        lines = [f"    ⚒ ↳ {b.delegate}: {b.tool_name}({b.input_summary}){suffix}"]
+    else:
+        lines = [f"⚒ {b.tool_name}({b.input_summary}){suffix}"]
+    if b.status == "done":
+        lines.append(f"{indent}↳ done in {b.duration_s:.1f}s")
+    elif b.status == "failed":
+        lines.append(f"{indent}↳ ✗ {b.error}")
+    if b.summary:
+        lines.append(f"{indent}↳ {b.summary}")
+    return "\n".join(lines)
 
 
 def stream_line_kind(line: str) -> str:
@@ -220,7 +323,7 @@ def trace_line(ev: StoredEvent) -> str:
         return (f"{_t(ev)} {p.get('agent_name', '?')} llm call {p.get('call_index', '?')} "
                 f"✗ {p.get('error_type', '?')}")
     if et == TelemetryEventType.TOOL_CALL_STARTED:
-        summary = str(p.get('input_summary', '')).replace("\n", "␤")[:120]
+        summary = normalize_input_summary(p.get('input_summary', ''))
         return (f"{_t(ev)} ⚒ {p.get('agent_name', '?')} → "
                 f"{p.get('tool_name', '?')}({summary})")
     if et == TelemetryEventType.TOOL_CALL_FINISHED:

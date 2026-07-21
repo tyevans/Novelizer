@@ -60,6 +60,14 @@ class EnvOverrides(BaseSettings):
     retconner_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
     plotter_tools_enabled: bool | None = None
+    world_architect_subagent_enabled: bool | None = None
+    character_keeper_subagent_enabled: bool | None = None
+    editor_subagent_enabled: bool | None = None
+    retconner_subagent_enabled: bool | None = None
+    structure_analyst_subagent_enabled: bool | None = None
+    plotter_subagent_enabled: bool | None = None
+    author_subagent_enabled: bool | None = None
+    checker_subagent_enabled: bool | None = None
 
 
 def build_effective(

@@ -264,7 +264,7 @@ class Editor(BaseAgent):
         await self.commit(verdict, ctx)
 
 
-def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
+def build_editor_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -277,7 +277,7 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=EditorVerdict,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -288,12 +288,13 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=EditorVerdict)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Editor:
     enabled = ctx.settings.editor_tools_enabled
-    builder = ctx.tooled(build_editor_runner, enabled)
+    subagent_enabled = ctx.settings.editor_subagent_enabled
+    builder = ctx.tooled(build_editor_runner, enabled, subagent_enabled, "editor")
     runner = ctx.runner_for("editor", builder)
     return Editor(
         runner, ctx.read, ctx.committer,
@@ -307,5 +308,6 @@ def _construct(ctx: AgentContext) -> Editor:
 SPEC = AgentSpec(
     name="editor",
     tool_grant=ToolGrant(enabled_setting="editor_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="editor_subagent_enabled"),
     construct=_construct,
 )

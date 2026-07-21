@@ -149,6 +149,48 @@ async def test_deferral_resets_once_every_open_request_has_failed(stack):
     assert len(runner.calls) == 2
 
 
+async def test_decline_increments_failed_attempts_and_escalates_at_threshold(stack):
+    events, proj, read, committer = stack
+    flag = Flag(id="f1", category="contradiction", description="x", failed_attempts=2)
+    await events.append(EventType.FLAG_CREATED, flag.id, flag)
+    await proj.catch_up()
+    agent = Retconner(FakeRunner(RetconAmendments()), read, committer)
+    await agent._decline(flag, "cannot_reproduce", "no evidence")
+    await proj.catch_up()
+    flags = await read.list_flags(escalated=True)
+    assert len(flags) == 1
+    assert flags[0].failed_attempts == 3
+
+
+async def test_decline_below_threshold_does_not_escalate(stack):
+    events, proj, read, committer = stack
+    flag = Flag(id="f1", category="contradiction", description="x", failed_attempts=0)
+    await events.append(EventType.FLAG_CREATED, flag.id, flag)
+    await proj.catch_up()
+    agent = Retconner(FakeRunner(RetconAmendments()), read, committer)
+    await agent._decline(flag, "cannot_reproduce", "no evidence")
+    await proj.catch_up()
+    assert await read.list_flags(escalated=True) == []
+    flags = await read.list_flags(category="contradiction")
+    assert flags[0].failed_attempts == 1
+
+
+async def test_commit_amend_clears_prior_escalation(stack):
+    events, proj, read, committer = stack
+    flag = Flag(id="f2", category="contradiction", description="x", escalated=True, severity="critical")
+    await events.append(EventType.FLAG_CREATED, flag.id, flag)
+    await proj.catch_up()
+    out = RetconAmendments(feed_note="fixed it")
+    agent = Retconner(FakeRunner(out), read, committer)
+    await agent.commit(out, {"target": flag, "world": []})
+    await proj.catch_up()
+    assert await read.list_flags(escalated=True) == []
+    resolved = await read.list_flags(category="contradiction", status=FlagStatus.resolved)
+    assert len(resolved) == 1
+    assert resolved[0].escalated is False
+    assert resolved[0].escalation_cleared_by == "agent"
+
+
 async def test_noop_when_no_open_retcons(stack):
     events, proj, read, committer = stack
     agent = Retconner(FakeRunner(RetconAmendments()), read, committer)
@@ -222,3 +264,8 @@ def test_build_retconner_runner_with_backend_bounds_recursion():
     backend = CanonBackend(read_store=None)
     runner = build_retconner_runner(_FakeSettings(), backend=backend, tools=[])
     assert runner.config.get("recursion_limit") == 100
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.retconner import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "retconner_subagent_enabled"

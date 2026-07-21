@@ -30,6 +30,13 @@ def settings():
     os.unlink(path)
 
 
+@pytest.fixture
+def runtime(settings):
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    rt._canon_backend, rt._canon_tools = object(), []
+    return rt
+
+
 async def test_start_wires_a_working_slice(settings):
     rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
     await rt.start()
@@ -652,7 +659,7 @@ async def test_phase_b_flags_on_wire_backend_and_tools(settings, monkeypatch, ag
 
     seen_kwargs: list[dict] = []
 
-    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
         seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
         return _FakeAgentRunner()
 
@@ -679,7 +686,7 @@ async def test_phase_b_flags_off_uses_bare_builder(settings, monkeypatch, agent_
 
     seen_kwargs: list[dict] = []
 
-    def _spy_builder(settings, callbacks=None, backend=None, tools=None):
+    def _spy_builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
         seen_kwargs.append({"callbacks": callbacks, "backend": backend, "tools": tools})
         return _FakeAgentRunner()
 
@@ -711,3 +718,36 @@ async def test_phase_a_toolkit_backend_is_composite_with_outline_route(settings)
         assert isinstance(rt._canon_backend.routes["/workspace/"], StateBackend)
     finally:
         await rt.close()
+
+
+def test_tooled_passes_no_subagents_kwarg_when_subagent_disabled(runtime):
+    calls = []
+
+    def builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
+        calls.append(subagents)
+        return "runner"
+
+    wrapped = runtime._tooled(builder, enabled=True, subagent_enabled=False, subagent_agent_name="character_keeper")
+    wrapped(runtime.settings)
+    assert calls == [None]
+
+
+def test_tooled_passes_researcher_subagent_when_enabled(runtime):
+    calls = []
+
+    def builder(settings, callbacks=None, backend=None, tools=None, subagents=None):
+        calls.append(subagents)
+        return "runner"
+
+    wrapped = runtime._tooled(builder, enabled=True, subagent_enabled=True, subagent_agent_name="character_keeper")
+    wrapped(runtime.settings)
+    assert len(calls) == 1
+    assert calls[0][0]["name"] == "researcher"
+
+
+def test_tooled_bare_builder_unchanged_when_tools_disabled(runtime):
+    def builder(settings, callbacks=None):
+        return "bare-runner"
+
+    wrapped = runtime._tooled(builder, enabled=False, subagent_enabled=True, subagent_agent_name="character_keeper")
+    assert wrapped is builder

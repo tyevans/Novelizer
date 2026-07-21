@@ -276,7 +276,7 @@ class CharacterKeeper(BaseAgent):
             self._clear_watermark()
 
 
-def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=None):
+def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -289,7 +289,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
         system_prompt = SYSTEM_PROMPT + KEEPER_PULL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
-            backend=backend, tools=tools, skills=KEEPER_SKILLS,
+            backend=backend, tools=tools, skills=KEEPER_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -300,12 +300,13 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=KeeperOutput)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> CharacterKeeper:
     enabled = ctx.settings.character_keeper_tools_enabled
-    builder = ctx.tooled(build_character_keeper_runner, enabled)
+    subagent_enabled = ctx.settings.character_keeper_subagent_enabled
+    builder = ctx.tooled(build_character_keeper_runner, enabled, subagent_enabled, "character_keeper")
     runner = ctx.runner_for("character_keeper", builder)
     return CharacterKeeper(
         runner, ctx.read, ctx.committer,
@@ -319,5 +320,6 @@ def _construct(ctx: AgentContext) -> CharacterKeeper:
 SPEC = AgentSpec(
     name="character_keeper",
     tool_grant=ToolGrant(enabled_setting="character_keeper_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="character_keeper_subagent_enabled"),
     construct=_construct,
 )

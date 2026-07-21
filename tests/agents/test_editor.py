@@ -775,3 +775,8 @@ async def test_editor_commits_promise_intents_with_validation(stack):
     promises = await read.list_promises()
     assert [p.id for p in promises] == ["the-sealed-letter"]
     assert promises[0].state.value == "open"
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.editor import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "editor_subagent_enabled"

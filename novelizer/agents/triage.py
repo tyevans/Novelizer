@@ -39,7 +39,11 @@ leave `reclassify_category` blank — it stays a catch-all and ages toward stale
    or has canon already moved past it / was it never actually a problem?
 2. DECIDE: "real" keeps it open. "dismiss" closes it — use this for stale, duplicate-in-substance,
    or simply wrong flags. Give a one-line `reason` either way; it goes in the log.
-3. STOP once you can state the evidence for your verdict.
+3. Every "real" verdict also gets a `severity`: "critical" if it contradicts a resolved arc,
+   breaks a paid-off thread, or spans multiple already-written chapters; "major" if it affects the
+   current chapter's coherence; "minor" otherwise. A "critical" call escalates the flag immediately,
+   so reserve it for issues that can't wait for the owning agent's normal poll.
+4. STOP once you can state the evidence for your verdict.
 
 ## Voice
 Neutral. Put personality only in `feed_note`, never in `reason`."""
@@ -86,7 +90,8 @@ class Triage(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, out: TriageVerdict | None, ctx: dict) -> None:
-        flag = ctx["target"]
+        original = ctx["target"]
+        flag = original
         if flag is None or out is None:
             return
         if out.verdict == "dismiss":
@@ -94,10 +99,20 @@ class Triage(BaseAgent):
             await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id, rejected)
             await self._remark(out.feed_note)
             return
+        flag = flag.model_copy(update={"severity": out.severity})
+        if out.severity == "critical" and not flag.escalated:
+            flag = flag.model_copy(update={"escalated": True})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, flag.id, flag)
         owner = _CATEGORY_OWNERS.get(flag.category)
         if owner is not None:
-            # Owned and verified real: leave it open, untouched, for the
-            # owner's own poll to pick up next cycle. Nothing to commit.
+            # Owned and verified real: persist the assessed severity (and
+            # any escalation above) and leave it open for the owner's own
+            # poll to pick up next cycle. Only commit if something actually
+            # changed from what's already persisted — these agents have no
+            # resolve path of their own, so an unconditional commit here
+            # would re-file the same flag forever.
+            if flag.severity != original.severity or flag.escalated != original.escalated:
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             await self._remark(out.feed_note)
             return
         # Unowned catch-all: reclassify if Triage recognized it, else age
@@ -134,7 +149,7 @@ class Triage(BaseAgent):
         self._deferred.discard(flag.id)
 
 
-def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
+def build_triage_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -146,7 +161,7 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
         )
         graph = create_deep_agent(
             model=model, system_prompt=SYSTEM_PROMPT, response_format=TriageVerdict,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -157,12 +172,13 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=TriageVerdict)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Triage:
     enabled = ctx.settings.triage_tools_enabled
-    builder = ctx.tooled(build_triage_runner, enabled)
+    subagent_enabled = ctx.settings.triage_subagent_enabled
+    builder = ctx.tooled(build_triage_runner, enabled, subagent_enabled, "triage")
     runner = ctx.runner_for("triage", builder)
     return Triage(
         runner, ctx.read, ctx.committer,
@@ -174,5 +190,6 @@ def _construct(ctx: AgentContext) -> Triage:
 SPEC = AgentSpec(
     name="triage",
     tool_grant=ToolGrant(enabled_setting="triage_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="triage_subagent_enabled"),
     construct=_construct,
 )

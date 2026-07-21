@@ -19,6 +19,8 @@ class EventType:
     FLAG_CREATED = "flag.created"
     FLAG_RESOLVED = "flag.resolved"
     FLAG_REJECTED = "flag.rejected"
+    FLAG_ESCALATED = "flag.escalated"
+    FLAG_ESCALATION_CLEARED = "flag.escalation_cleared"
     PROPOSAL_CREATED = "proposal.created"
     PROPOSAL_APPROVED = "proposal.approved"
     PROPOSAL_REJECTED = "proposal.rejected"

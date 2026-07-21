@@ -56,6 +56,8 @@ feed_note — never in the amendment text, which must read as plain canon."""
 
 
 class Retconner(BaseAgent):
+    _FAILURE_ESCALATION_THRESHOLD = 3
+
     def __init__(
         self,
         runner: Runner,
@@ -99,12 +101,17 @@ class Retconner(BaseAgent):
         """Close a request without amending anything. Distinct from resolving
         it: nothing was repaired, and the filing agent's log should say so."""
         logger.info("retconner: declining request %s (%s): %s", req.id, resolution, reason)
+        attempts = req.failed_attempts + 1
         rejected = req.model_copy(update={
             "status": FlagStatus.rejected,
             "resolved_by": self.name,
             "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
+            "failed_attempts": attempts,
         })
         await self._committer.commit(self.name, EventType.FLAG_REJECTED, req.id, rejected)
+        if attempts >= self._FAILURE_ESCALATION_THRESHOLD and not rejected.escalated:
+            escalated = rejected.model_copy(update={"escalated": True})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, req.id, escalated)
 
     async def commit(self, out: RetconAmendments | None, ctx: dict) -> None:
         req = ctx["target"]
@@ -119,6 +126,9 @@ class Retconner(BaseAgent):
             await self._committer.commit(self.name, EventType.WORLD_ENTRY_SUPERSEDED, entry.id, entry)
         resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
         await self._committer.commit(self.name, EventType.FLAG_RESOLVED, req.id, resolved)
+        if resolved.escalated:
+            cleared = resolved.model_copy(update={"escalated": False, "escalation_cleared_by": "agent"})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, req.id, cleared)
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
@@ -151,7 +161,7 @@ class Retconner(BaseAgent):
         self._deferred.discard(req.id)
 
 
-def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
+def build_retconner_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -164,7 +174,7 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=RetconAmendments,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -175,12 +185,13 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Retconner:
     enabled = ctx.settings.retconner_tools_enabled
-    builder = ctx.tooled(build_retconner_runner, enabled)
+    subagent_enabled = ctx.settings.retconner_subagent_enabled
+    builder = ctx.tooled(build_retconner_runner, enabled, subagent_enabled, "retconner")
     runner = ctx.runner_for("retconner", builder)
     return Retconner(
         runner, ctx.read, ctx.committer,
@@ -192,5 +203,6 @@ def _construct(ctx: AgentContext) -> Retconner:
 SPEC = AgentSpec(
     name="retconner",
     tool_grant=ToolGrant(enabled_setting="retconner_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="retconner_subagent_enabled"),
     construct=_construct,
 )

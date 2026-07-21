@@ -30,3 +30,13 @@ def test_token_delta_is_a_plain_model_not_a_telemetry_event_type():
     d = TokenDelta(run_id="r1", agent_name="author", text="The ")
     assert d.text == "The "
     assert not hasattr(TelemetryEventType, "TOKEN_DELTA")
+
+
+from novelizer.telemetry.events import ToolSummaryReady
+
+
+def test_tool_summary_ready_is_bus_only_shape():
+    item = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                            input_summary="dragons", summary="found three articles")
+    assert item.run_id == "r1" and item.tool_name == "search_web"
+    assert item.summary == "found three articles"
