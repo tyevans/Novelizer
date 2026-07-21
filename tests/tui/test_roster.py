@@ -94,8 +94,6 @@ def test_summary_is_the_plain_strip_and_one_cell_pair_per_agent(rows):
 
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.tui.widgets.roster import (
-    PLACEHOLDER_HINTS,
-    command_hint,
     dial_meter,
     status_strip,
 )
@@ -135,11 +133,3 @@ def test_dial_meter_summarizes_overrides_compactly():
 def test_status_strip_composes_roster_then_dial():
     strip = status_strip([_row("author")], AutonomyState(global_level=AutonomyLevel.gated_canon))
     assert strip.plain == "✎·    AUTONOMY ▮▮▯▯ gated_canon"
-
-
-def test_command_hint_is_deterministic_and_wraps():
-    assert command_hint(0) == PLACEHOLDER_HINTS[0]
-    assert command_hint(len(PLACEHOLDER_HINTS)) == PLACEHOLDER_HINTS[0]
-    assert command_hint(2) == PLACEHOLDER_HINTS[2]
-    assert len(PLACEHOLDER_HINTS) == 5
-    assert all(h.startswith(":") for h in PLACEHOLDER_HINTS)

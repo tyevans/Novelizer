@@ -91,8 +91,7 @@ async def test_room_toggle_hides_right_column():
 
 
 @pytest.mark.asyncio
-async def test_command_input_has_visible_content_row():
-    """The command Input must render at least one content row, or typed text is invisible."""
+async def test_followup_input_prefills_and_dispatches_on_submit():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
     rt = Runtime(settings, runners=_runners())
@@ -101,45 +100,24 @@ async def test_command_input_has_visible_content_row():
     try:
         async with app.run_test() as pilot:
             from textual.widgets import Input
-            box = app.query_one("#command", Input)
-            assert box.content_size.height >= 1, (
-                f"command input content height is {box.content_size.height}; "
-                "borders/padding are eating the only row, so typed text never renders"
-            )
-    finally:
-        await rt.close(); os.unlink(path)
-
-
-@pytest.mark.asyncio
-async def test_command_placeholder_is_hint_zero_by_default():
-    from novelizer.tui.widgets.roster import PLACEHOLDER_HINTS
-
-    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
-    await rt.start()
-    app = NovelizerApp(rt)  # default hint_index=0: deterministic under test
-    try:
-        async with app.run_test():
-            from textual.widgets import Input
-            assert app.query_one("#command", Input).placeholder == PLACEHOLDER_HINTS[0]
-    finally:
-        await rt.close(); os.unlink(path)
-
-
-@pytest.mark.asyncio
-async def test_command_placeholder_rotates_with_hint_index():
-    from novelizer.tui.widgets.roster import PLACEHOLDER_HINTS
-
-    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
-    await rt.start()
-    app = NovelizerApp(rt, hint_index=2)
-    try:
-        async with app.run_test():
-            from textual.widgets import Input
-            assert app.query_one("#command", Input).placeholder == PLACEHOLDER_HINTS[2]
+            app.open_command_followup("seed")
+            await pilot.pause()
+            box = app.query_one("#command_followup", Input)
+            assert box.value == "seed "
+            assert box.display is True
+            box.value = "seed a storm is coming"
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+            log = await rt.events.events_since(0)
+            created = [
+                e for e in log
+                if e.event_type == EventType.DIRECTOR_SIGNAL_CREATED
+                and "storm" in e.payload.get("body", "")
+            ]
+            assert created
+            # Submitting hides the box again and clears it for next time.
+            assert box.display is False
+            assert box.value == ""
     finally:
         await rt.close(); os.unlink(path)
 

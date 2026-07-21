@@ -103,18 +103,3 @@ def status_strip(status: list, state: AutonomyState) -> Text:
     strip.append("    ")
     strip.append_text(dial_meter(state))
     return strip
-
-
-# One hint chosen per app start (command_hint(index)); index 0 under test —
-# deterministic, no time/random in the TUI module. Only the CLI randomizes.
-PLACEHOLDER_HINTS: tuple[str, ...] = (
-    ":seed a lighthouse at the end of the world",
-    ":focus the storm that never lands",
-    ":pause author — let the room breathe",
-    ":autonomy gated_canon — take the wheel yourself",
-    ":retarget 30 — the book is running long",
-)
-
-
-def command_hint(index: int) -> str:
-    return PLACEHOLDER_HINTS[index % len(PLACEHOLDER_HINTS)]

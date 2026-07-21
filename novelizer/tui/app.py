@@ -14,7 +14,7 @@ from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
 from novelizer.tui.chat_screen import ChatScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
-from novelizer.tui.widgets.roster import command_hint, status_strip
+from novelizer.tui.widgets.roster import status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
@@ -72,10 +72,9 @@ class NovelizerApp(App):
     # module scope (it must exist before we can reference it here).
     COMMAND_PALETTE_BINDING = "ctrl+k"
 
-    def __init__(self, runtime, hint_index: int = 0) -> None:
+    def __init__(self, runtime) -> None:
         super().__init__()
         self.runtime = runtime
-        self._hint_index = hint_index
         self._last_seq = 0
         self._chapter_count = 0
         self.messages: list[str] = []
@@ -105,9 +104,13 @@ class NovelizerApp(App):
                     yield Static("Select an item to view details.", id="detail")
         yield Static("loading…", id="statusbar")
         yield ActivityStrip("idle", id="activity_strip")
-        # compact=True drops Input's default tall border, which would consume
-        # both edges of the single row #command gets and leave 0 content lines.
-        yield Input(id="command", placeholder=command_hint(self._hint_index), compact=True)
+        # Hidden by default; open_command_followup() reveals it, pre-filled,
+        # when an args-taking palette command is selected. compact=True
+        # drops Input's default tall border so the single row it gets has
+        # at least one visible content line.
+        followup = Input(id="command_followup", compact=True)
+        followup.display = False
+        yield followup
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -410,9 +413,10 @@ class NovelizerApp(App):
                 self.screen.add_error(agent_name, line)
 
     async def on_input_submitted(self, event) -> None:
-        if event.input.id == "command":
+        if event.input.id == "command_followup":
             await self._run_command(event.value)
             event.input.value = ""
+            event.input.display = False
             self.set_focus(None)
 
     async def on_tree_node_selected(self, event) -> None:
