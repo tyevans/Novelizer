@@ -6,8 +6,10 @@ apply_bus_item and re-renders.
 """
 from __future__ import annotations
 from dataclasses import dataclass, replace
+from rich.text import Text
 from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+from novelizer.tui.identity import identity_for
 
 TEXT_CAP = 8000
 
@@ -246,3 +248,28 @@ def trace_detail(ev: StoredEvent, produced: list[StoredEvent]) -> str:
     if prompt is not None:
         lines += ["", "─ prompt ─", prompt]
     return "\n".join(lines)
+
+
+# Rich styles per stream_line_kind(); "" leaves prose in the theme default so
+# the agent's own accent color (applied to the vitals bar) stays the visual
+# anchor rather than competing with a wall of colored prose.
+_LINE_STYLES = {"tool": "bold cyan", "call": "dim", "thinking": "italic dim magenta"}
+
+
+def styled_vitals(state: LiveRunState, now: float) -> Text:
+    ident = identity_for(state.agent_name)
+    return Text(f"{ident.glyph} {vitals_line(state, now)}", style=ident.style)
+
+
+def styled_body(body: str) -> Text:
+    # Text objects are never markup-parsed regardless of a Static's
+    # markup=False setting, so untrusted stream content (tool summaries,
+    # prompts) stays safe here the same way it does as a plain str.
+    text = Text()
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        style = _LINE_STYLES.get(stream_line_kind(line), "")
+        text.append(line, style=style)
+        if i != len(lines) - 1:
+            text.append("\n")
+    return text

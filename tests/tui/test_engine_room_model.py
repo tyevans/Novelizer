@@ -256,3 +256,27 @@ def test_trace_detail_shows_prompt_and_produced_domain_events():
     text = trace_detail(call, produced)
     assert "[system]\nWrite." in text
     assert "produced: chapter.created ch-12" in text
+
+
+def test_styled_vitals_includes_glyph_and_vitals_line():
+    from novelizer.tui.widgets.engine_room_model import styled_vitals
+    state = LiveRunState(status="running", agent_name="author", started_at=0.0,
+                         model="m", call_index=1, tokens=5)
+    text = styled_vitals(state, now=2.0)
+    plain = text.plain
+    assert "author" in plain
+    assert "✎" in plain  # author's glyph from identity_for
+
+
+def test_styled_body_applies_tool_style_to_tool_lines():
+    from novelizer.tui.widgets.engine_room_model import styled_body
+    text = styled_body("\n⚒ search_canon(query)\n")
+    # spans carries the style runs; a tool-prefixed line gets the "bold cyan" style
+    styles = [span.style for span in text.spans]
+    assert "bold cyan" in styles
+
+
+def test_styled_body_leaves_prose_unstyled():
+    from novelizer.tui.widgets.engine_room_model import styled_body
+    text = styled_body("plain prose line")
+    assert text.spans == []
