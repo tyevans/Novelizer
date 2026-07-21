@@ -400,6 +400,53 @@ and contested, non-convergent beliefs that neither fiction nor research
 require) is worth building next, or stays backlog until a concrete need
 arises.
 
+**Third-domain decision (2026-07-21): backlog, not build.** Per this
+milestone's own instruction to decide rather than default into more
+construction: no concrete product need for a planning/tasking domain (or
+any third domain) exists yet — M1-M4 were driven by proving the substrate
+generalizes across two domains, not by an active user waiting on a third.
+Building one now would be speculative work against a domain whose actual
+requirements (an exogenous clock, contested non-convergent beliefs) aren't
+yet informed by any real deployment pressure, unlike M4's research domain
+which was scoped directly from the spec's own Findings section. Revisit
+this decision when a concrete planning/tasking need actually surfaces, at
+which point the now-hardened substrate (declarative event-type/gating
+registry, Postgres+pgvector backend, sync-or-async ProjectionCatalog,
+domain-neutral agent-registry shape) should make standing it up
+substantially cheaper than M4's research domain was, since M4 itself is the
+proof of that cost curve.
+
+**M5 status (2026-07-21): done.** Folded back the one genuine substrate gap
+M4 logged: `ProjectionCatalog.recompute_dirty` now accepts either sync or
+async `recompute` callables (detected via `inspect.isawaitable`), with the
+method itself becoming `async def` — a deliberate, narrow breaking change,
+applied consistently to its only three existing call sites in the same
+commit (verified by a full-repo grep during review, not just the diff). The
+other two logged gaps (unbuilt Contradiction Map/Claim Dependency Graph
+projections; real role behavior/`AgentContext` sufficiency) were confirmed
+to be scope notes about deliberately-excluded work, not substrate defects,
+and were left as-is rather than built out — building them now would mean
+doing the very research-domain product work M4's non-goals excluded. **This
+closes the M0-M5 arc**: the substrate (`substrate/`) now provides a
+declarative event-type registry with per-event-type gating (M1, M3), a
+Postgres+pgvector backend proven under concurrent multi-agent writes (M2),
+and a sync-or-async projection catalog (M1, M5) — proven to generalize
+across fiction (Novelizer's existing behavior, unchanged throughout) and a
+second, independent research domain (M4), with `substrate/` and
+`research_domain/` importing nothing from `novelizer.*` throughout.
+
+**Final full-arc regression (2026-07-21):** `pytest tests/` after all six
+milestones: 1985 passed, 6 failed, 7 deselected. Five of the six failures
+are the same pre-existing, already-diagnosed failures documented in M1/M2's
+status notes above (two mock-signature mismatches, one registry-ordering
+assertion, two settings-field-set mismatches — none touched by this
+project's substrate work). The sixth
+(`tests/substrate/test_postgres_fixture.py::test_pgvector_extension_is_available`,
+`ConnectionResetError`) was confirmed as a load-flake from Docker-container
+contention under the full ~2000-test run, not a regression — it passes
+cleanly (2/2) in an isolated re-run, consistent with this project's known
+load-flake pattern (memory: testing-load-flakes).
+
 ## Testing
 
 Each milestone's own verification is stated inline above (M1: existing
