@@ -24,6 +24,7 @@ class WorldEntryDraft(BaseModel):
 
 class WorldEntriesDraft(BaseModel):
     entries: list[WorldEntryDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 
@@ -322,6 +323,7 @@ class ChapterScore(BaseModel):
 
 class StructureAnalystOutput(BaseModel):
     scores: list[ChapterScore] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
 
 
@@ -336,6 +338,7 @@ class PlotterOutput(BaseModel):
     beat_intents: list[BeatIntent] = Field(default_factory=list)
     resolution_plan_intents: list[ResolutionPlanIntent] = Field(default_factory=list)
     promise_intents: list[PromiseIntent] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
 
 
