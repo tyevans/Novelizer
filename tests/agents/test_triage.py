@@ -99,3 +99,8 @@ async def test_noop_when_no_open_flags(stack):
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_flags() == []
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.triage import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "triage_subagent_enabled"
