@@ -207,11 +207,11 @@ async def commit_theme_intents(
                         f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "
                         f"may duplicate existing theme '{duplicate_id}' ('{existing_title}')"
                     )
-                    open_reqs = await read_store.list_flags(category="contradiction", status=FlagStatus.open)
+                    open_reqs = await read_store.list_flags(category="thematic", status=FlagStatus.open)
                     seen_descriptions = {r.description for r in open_reqs}
                     if description not in seen_descriptions:
                         req = Flag(
-                            category="contradiction",
+                            category="thematic",
                             description=description,
                             related_entry_ids=[theme_id, duplicate_id],
                             proposed_resolution="",
