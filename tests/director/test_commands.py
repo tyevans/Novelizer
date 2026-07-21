@@ -377,3 +377,47 @@ def test_find_command_matches_by_name_and_returns_none_for_unknown():
     assert commands.find_command("seed") is not None
     assert commands.find_command("seed").description
     assert commands.find_command("frobnicate") is None
+
+
+class FakeMuse:
+    """Minimal muse mock for testing reroll."""
+    async def deal_fresh_hand(self):
+        return type('Hand', (), {'names': ['card1', 'card2', 'card3']})()
+
+
+async def test_muse_reroll_with_trailing_tokens(stack):
+    """Regression test: 'muse reroll now' should trigger reroll, not fall through to status."""
+    events, proj, read = stack
+    sched = FakeScheduler()
+    rt = FakeRuntime(events, sched)
+    rt.read = read
+    rt.muse = FakeMuse()
+
+    result = await commands.dispatch(rt, "muse reroll now")
+    await proj.catch_up()
+
+    # Should trigger reroll and return "Rerolled. New hand: ..."
+    assert "rerolled" in result.lower()
+    assert "new hand" in result.lower()
+    # Verify the InspirationHandSuperseded event was appended
+    # (there are no prior hands, so no event, but the result proves reroll path executed)
+
+
+async def test_dispatch_preserves_unknown_command_verbatim_text(stack):
+    """Regression test: unknown command returns preserves exact user input (casing, colon)."""
+    events, proj, read = stack
+    sched = FakeScheduler()
+    rt = FakeRuntime(events, sched)
+    rt.read = read
+
+    # Test with colon prefix and uppercase
+    result = await commands.dispatch(rt, ":SEED")
+    assert result == "Unknown command: :SEED", f"Expected 'Unknown command: :SEED' but got '{result}'"
+
+    # Test with mixed case and no colon (recognized command, missing args)
+    result2 = await commands.dispatch(rt, "focus")
+    assert result2 == "Unknown command: focus", f"Expected 'Unknown command: focus' but got '{result2}'"
+
+    # Test with unknown command preserving exact casing
+    result3 = await commands.dispatch(rt, ":FrObNiCaTe xyz")
+    assert result3 == "Unknown command: :FrObNiCaTe xyz", f"Expected 'Unknown command: :FrObNiCaTe xyz' but got '{result3}'"

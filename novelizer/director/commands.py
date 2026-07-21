@@ -24,11 +24,11 @@ from novelizer.store.models import DirectorSignal, SignalKind
 class Command:
     """One entry point reachable from both the colon-bar and the command
     palette. `callback` takes (runtime, raw_args_string) and returns the
-    result text shown in the feed."""
+    result text shown in the feed, or None if required args are missing."""
 
     name: str
     description: str
-    callback: Callable[[object, str], Awaitable[str]]
+    callback: Callable[[object, str], Awaitable[str | None]]
     takes_args: bool = True
 
 
@@ -184,40 +184,40 @@ async def _dispatch_decision(runtime, proposal_id: str, action: str) -> str:
     return f"Rejected proposal {proposal_id} ({proposal.target_event_type})"
 
 
-async def _cmd_seed(runtime, args: str) -> str:
+async def _cmd_seed(runtime, args: str) -> str | None:
     if not args:
-        return "Unknown command: seed"
+        return None
     await seed(runtime.events, args)
     return f"Seed injected: {args}"
 
 
-async def _cmd_focus(runtime, args: str) -> str:
+async def _cmd_focus(runtime, args: str) -> str | None:
     if not args:
-        return "Unknown command: focus"
+        return None
     await focus(runtime.events, args)
     return f"Focus set: {args}"
 
 
-async def _cmd_pause(runtime, args: str) -> str:
+async def _cmd_pause(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: pause"
+        return None
     pause(runtime.scheduler, parts[0])
     return f"Paused: {parts[0]}"
 
 
-async def _cmd_resume(runtime, args: str) -> str:
+async def _cmd_resume(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: resume"
+        return None
     resume(runtime.scheduler, parts[0])
     return f"Resumed: {parts[0]}"
 
 
-async def _cmd_autonomy(runtime, args: str) -> str:
+async def _cmd_autonomy(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: autonomy"
+        return None
     level_str = parts[0]
     agent = parts[1] if len(parts) > 1 else None
     try:
@@ -236,10 +236,10 @@ async def _cmd_autonomy(runtime, args: str) -> str:
     return f"Global autonomy set to {level.value}"
 
 
-async def _cmd_retarget(runtime, args: str) -> str:
+async def _cmd_retarget(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: retarget"
+        return None
     try:
         n = int(parts[0])
     except ValueError:
@@ -247,22 +247,23 @@ async def _cmd_retarget(runtime, args: str) -> str:
     return await retarget_blueprint(runtime.events, runtime.read, n)
 
 
-async def _cmd_approve(runtime, args: str) -> str:
+async def _cmd_approve(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: approve"
+        return None
     return await _dispatch_decision(runtime, parts[0], "approve")
 
 
-async def _cmd_reject(runtime, args: str) -> str:
+async def _cmd_reject(runtime, args: str) -> str | None:
     parts = args.split(maxsplit=1)
     if not parts:
-        return "Unknown command: reject"
+        return None
     return await _dispatch_decision(runtime, parts[0], "reject")
 
 
-async def _cmd_muse(runtime, args: str) -> str:
-    if args.strip().lower() == "reroll":
+async def _cmd_muse(runtime, args: str) -> str | None:
+    parts = args.split(maxsplit=1)
+    if parts and parts[0].lower() == "reroll":
         active = await runtime.read.get_active_hand()
         if active is not None:
             await runtime.events.append(
@@ -313,4 +314,7 @@ async def dispatch(runtime, line: str) -> str:
     command = find_command(cmd)
     if command is None:
         return f"Unknown command: {line.strip()}"
-    return await command.callback(runtime, rest)
+    result = await command.callback(runtime, rest)
+    if result is None:
+        return f"Unknown command: {line.strip()}"
+    return result
