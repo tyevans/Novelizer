@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS kg_entity_mentions (
     event_fingerprint TEXT NOT NULL,
     PRIMARY KEY(entity_id, event_fingerprint)
 );
+
+CREATE TABLE IF NOT EXISTS kg_relation_mentions (
+    relation_id INTEGER NOT NULL REFERENCES kg_relations(id),
+    event_fingerprint TEXT NOT NULL,
+    PRIMARY KEY(relation_id, event_fingerprint)
+);
 """
 
 
@@ -114,6 +120,45 @@ class KGStore:
         )
         await self._conn.commit()
         return ids
+
+    async def has_mentions(self, entity_id: int) -> bool:
+        cur = await self._conn.execute(
+            "SELECT 1 FROM kg_entity_mentions WHERE entity_id=? LIMIT 1", (entity_id,)
+        )
+        return (await cur.fetchone()) is not None
+
+    async def link_relation_mention(self, relation_id: int, event_fingerprint: str) -> None:
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO kg_relation_mentions (relation_id, event_fingerprint) "
+            "VALUES (?, ?)",
+            (relation_id, event_fingerprint),
+        )
+        await self._conn.commit()
+
+    async def clear_relation_mentions_for_fingerprint(self, event_fingerprint: str) -> list[int]:
+        cur = await self._conn.execute(
+            "SELECT relation_id FROM kg_relation_mentions WHERE event_fingerprint=?",
+            (event_fingerprint,),
+        )
+        ids = [r[0] for r in await cur.fetchall()]
+        await self._conn.execute(
+            "DELETE FROM kg_relation_mentions WHERE event_fingerprint=?", (event_fingerprint,)
+        )
+        await self._conn.commit()
+        return ids
+
+    async def relation_has_mentions(self, relation_id: int) -> bool:
+        cur = await self._conn.execute(
+            "SELECT 1 FROM kg_relation_mentions WHERE relation_id=? LIMIT 1", (relation_id,)
+        )
+        return (await cur.fetchone()) is not None
+
+    async def delete_relation(self, relation_id: int) -> None:
+        await self._conn.execute("DELETE FROM kg_relations WHERE id=?", (relation_id,))
+        await self._conn.execute(
+            "DELETE FROM kg_relation_mentions WHERE relation_id=?", (relation_id,)
+        )
+        await self._conn.commit()
 
     async def find_entity_by_name(self, name: str, entity_type: str) -> Optional[dict]:
         cur = await self._conn.execute(

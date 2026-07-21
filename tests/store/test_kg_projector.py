@@ -96,3 +96,139 @@ async def test_chapter_revised_reflows_prose_extracted_entities(wiring, tmp_path
     # to garbage-collect per this task -- see docstring in kg_projector.py).
     hits = await emb.search("Salted Gull", kinds=["entity"])
     assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_chapter_revised_keeps_entity_mentioned_in_another_chapter(wiring, tmp_path):
+    events, projector, read, kg, emb = wiring
+    from novelizer.agents.schemas import KGExtractionOutput, KGExtractedEntity
+
+    await events.append_raw(EventType.CHAPTER_CREATED, "ch1", {
+        "id": "ch1", "title": "Ch 1", "prose": "Eldara enters The Salted Gull.",
+    })
+    await events.append_raw(EventType.CHAPTER_CREATED, "ch2", {
+        "id": "ch2", "title": "Ch 2", "prose": "The Salted Gull burns down.",
+    })
+    await projector.catch_up()
+
+    gull = KGExtractedEntity(name="The Salted Gull", entity_type="location")
+    runner = FakeExtractionRunner(KGExtractionOutput(entities=[gull]))
+    cursor_path = str(tmp_path / "kg_cursor.json")
+    kgp = KGProjector(events, read, kg, emb, runner, cursor_path)
+    await kgp.catch_up()  # indexes both ch1 and ch2, each mentioning the tavern
+
+    entity = await kg.find_entity_by_name("The Salted Gull", "location")
+    assert entity is not None
+    entity_id = entity["id"]
+
+    # Revise ch1 to drop the tavern; ch2 still mentions it, so the entity
+    # must survive (both in kg_entity_mentions and the embedding).
+    await events.append_raw(EventType.CHAPTER_REVISED, "ch1", {
+        "chapter_id": "ch1", "title": "Ch 1", "prose": "Eldara stays home.",
+    })
+    await projector.catch_up()
+    runner._output = KGExtractionOutput(entities=[])
+    await kgp.catch_up()
+
+    assert await kg.has_mentions(entity_id) is True
+    hits = await emb.search("Salted Gull", kinds=["entity"])
+    assert len(hits) == 1
+
+    # Now revise ch2 to also drop it -- only then should it disappear.
+    await events.append_raw(EventType.CHAPTER_REVISED, "ch2", {
+        "chapter_id": "ch2", "title": "Ch 2", "prose": "Nothing burns.",
+    })
+    await projector.catch_up()
+    await kgp.catch_up()
+
+    assert await kg.has_mentions(entity_id) is False
+    hits = await emb.search("Salted Gull", kinds=["entity"])
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_chapter_revised_reflows_prose_extracted_relation(wiring, tmp_path):
+    events, projector, read, kg, emb = wiring
+    from novelizer.agents.schemas import KGExtractionOutput, KGExtractedEntity, KGExtractedRelation
+
+    await events.append_raw(EventType.CHAPTER_CREATED, "ch1", {
+        "id": "ch1", "title": "Ch 1", "prose": "Eldara distrusts Kessa.",
+    })
+    await projector.catch_up()
+
+    with_relation = KGExtractionOutput(
+        entities=[
+            KGExtractedEntity(name="Eldara", entity_type="character"),
+            KGExtractedEntity(name="Kessa", entity_type="character"),
+        ],
+        relations=[
+            KGExtractedRelation(source="Eldara", target="Kessa", relation_type="distrusts"),
+        ],
+    )
+    runner = FakeExtractionRunner(with_relation)
+    cursor_path = str(tmp_path / "kg_cursor.json")
+    kgp = KGProjector(events, read, kg, emb, runner, cursor_path)
+    await kgp.catch_up()
+
+    eldara = await kg.find_entity_by_name("Eldara", "character")
+    kessa = await kg.find_entity_by_name("Kessa", "character")
+    assert eldara is not None and kessa is not None
+    relations = await kg.entity_relations(eldara["id"])
+    assert any(r["relation_type"] == "distrusts" and r["other_name"] == "Kessa" for r in relations)
+
+    # Revise the chapter so the relation no longer holds; both entities
+    # still appear, but without the relation between them.
+    await events.append_raw(EventType.CHAPTER_REVISED, "ch1", {
+        "chapter_id": "ch1", "title": "Ch 1", "prose": "Eldara and Kessa never meet.",
+    })
+    await projector.catch_up()
+    runner._output = KGExtractionOutput(
+        entities=[
+            KGExtractedEntity(name="Eldara", entity_type="character"),
+            KGExtractedEntity(name="Kessa", entity_type="character"),
+        ],
+        relations=[],
+    )
+    await kgp.catch_up()
+
+    relations_after = await kg.entity_relations(eldara["id"])
+    assert not any(r["relation_type"] == "distrusts" for r in relations_after)
+
+    # A relation that survives the revision (re-extracted each time) keeps working.
+    runner._output = with_relation
+    await events.append_raw(EventType.CHAPTER_REVISED, "ch1", {
+        "chapter_id": "ch1", "title": "Ch 1", "prose": "Eldara distrusts Kessa still.",
+    })
+    await projector.catch_up()
+    await kgp.catch_up()
+
+    relations_survived = await kg.entity_relations(eldara["id"])
+    assert any(r["relation_type"] == "distrusts" and r["other_name"] == "Kessa" for r in relations_survived)
+
+
+@pytest.mark.asyncio
+async def test_prose_extracted_entity_links_to_existing_character(wiring, tmp_path):
+    events, projector, read, kg, emb = wiring
+    from novelizer.agents.schemas import KGExtractionOutput, KGExtractedEntity
+
+    await events.append_raw(EventType.CHARACTER_CREATED, "c1", {
+        "id": "c1", "name": "Eldara", "traits": "sharp-tongued",
+    })
+    await events.append_raw(EventType.CHAPTER_CREATED, "ch1", {
+        "id": "ch1", "title": "Ch 1", "prose": "Eldara walks the docks.",
+    })
+    await projector.catch_up()
+
+    # Extraction LLM labels her "person" (not "character"), so this lands as
+    # a separate kg_entities row from the structured-source one -- but it
+    # should still get canon_id linked back to c1.
+    runner = FakeExtractionRunner(KGExtractionOutput(
+        entities=[KGExtractedEntity(name="Eldara", entity_type="person")],
+    ))
+    cursor_path = str(tmp_path / "kg_cursor.json")
+    kgp = KGProjector(events, read, kg, emb, runner, cursor_path)
+    await kgp.catch_up()
+
+    prose_entity = await kg.find_entity_by_name("Eldara", "person")
+    assert prose_entity is not None
+    assert prose_entity["canon_id"] == "c1"

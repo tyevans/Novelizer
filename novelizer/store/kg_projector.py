@@ -101,10 +101,15 @@ class KGProjector:
         # Reflow: clear this chapter's prior prose-extracted mentions before
         # re-extracting, so a revision that drops a detail also drops its
         # entity's searchability (see class docstring on orphan rows).
+        cleared_relation_ids = await self._kg.clear_relation_mentions_for_fingerprint(fingerprint)
+        for relation_id in cleared_relation_ids:
+            if not await self._kg.relation_has_mentions(relation_id):
+                await self._kg.delete_relation(relation_id)
+
         cleared_entity_ids = await self._kg.clear_mentions_for_fingerprint(fingerprint)
         for entity_id in cleared_entity_ids:
             remaining = await self._kg.entity_relations(entity_id)
-            still_mentioned = await self._entity_has_other_mentions(entity_id)
+            still_mentioned = await self._kg.has_mentions(entity_id)
             if not remaining and not still_mentioned:
                 await self._emb.delete_entity(str(entity_id))
 
@@ -115,10 +120,18 @@ class KGProjector:
         if out is None:
             return
 
+        canon_ids_by_name = {
+            c.name.lower(): c.id for c in await self._read.list_characters()
+        }
+        canon_ids_by_name.update({
+            e.title.lower(): e.id for e in await self._read.list_world_entries()
+        })
+
         name_to_id: dict[str, int] = {}
         for entity in out.entities:
             entity_id = await self._kg.upsert_entity(
-                entity.name, entity.entity_type, entity.description, seq=seq,
+                entity.name, entity.entity_type, entity.description,
+                canon_id=canon_ids_by_name.get(entity.name.lower()), seq=seq,
             )
             name_to_id[entity.name] = entity_id
             await self._kg.link_mention(entity_id, fingerprint)
@@ -130,17 +143,10 @@ class KGProjector:
             target_id = name_to_id.get(relation.target)
             if source_id is None or target_id is None:
                 continue
-            await self._kg.upsert_relation(source_id, target_id, relation.relation_type, seq=seq)
-
-    async def _entity_has_other_mentions(self, entity_id: int) -> bool:
-        # Structured-source entities (character/world_entry) are re-linked
-        # under a stable fingerprint ("character:<id>") every time they're
-        # indexed, independent of any chapter fingerprint -- so a chapter
-        # reflow never deletes an entity that also has a structured source.
-        entity = await self._kg.get_entity(entity_id)
-        if entity and entity.get("canon_id"):
-            return True
-        return False
+            relation_id = await self._kg.upsert_relation(
+                source_id, target_id, relation.relation_type, seq=seq
+            )
+            await self._kg.link_relation_mention(relation_id, fingerprint)
 
     @staticmethod
     def _format_entity_detail(name: str, entity_type: str, description: str, relations: list[dict]) -> str:
@@ -166,4 +172,7 @@ class KGProjector:
             target = await self._kg.find_entity_by_name(rel.target_name, rel.target_type)
             if target is None:
                 continue
-            await self._kg.upsert_relation(source_id, target["id"], rel.relation_type, seq=seq)
+            relation_id = await self._kg.upsert_relation(
+                source_id, target["id"], rel.relation_type, seq=seq
+            )
+            await self._kg.link_relation_mention(relation_id, fingerprint)
