@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, BeforeValidator, Field
 
 
@@ -335,6 +335,11 @@ class Flag(BaseModel):
     category via a small owner map, catch-alling anything unmapped.
     `triage_passes` counts unresolved catch-all Triage passes over an unowned
     flag; past a threshold it is marked `stale` rather than looping forever.
+    `severity` is assessed by Triage alongside its real/dismiss verdict.
+    `escalated` mirrors whether an unresolved FLAG_ESCALATED currently
+    applies (cleared by FLAG_ESCALATION_CLEARED or flag resolution).
+    `failed_attempts` counts owning-agent decline/fail cycles; past a
+    threshold it triggers escalation regardless of original severity.
     """
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)
@@ -346,6 +351,9 @@ class Flag(BaseModel):
     filed_by: str = ""
     resolved_by: Optional[str] = None
     triage_passes: int = 0
+    severity: Optional[Literal["minor", "major", "critical"]] = None
+    escalated: bool = False
+    failed_attempts: int = 0
 
 
 def _tolerant_signal_kind(v: object) -> object:
