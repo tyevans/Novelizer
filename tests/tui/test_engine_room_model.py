@@ -2,8 +2,8 @@ from hypothesis import given, strategies as st
 from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, seed_state, strip_line, vitals_line,
-    live_body, trace_line, trace_detail,
+    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    strip_line, vitals_line, live_body, trace_line, trace_detail,
 )
 
 
@@ -105,6 +105,35 @@ def test_trace_line_formats_key_event_shapes():
     assert "✗" in trace_line(fail) and "TimeoutError" in trace_line(fail)
     picked = _ev(5, TelemetryEventType.SCHEDULER_PICKED, {"agent_name": "author"})
     assert "picked author" in trace_line(picked)
+
+
+def test_route_agent_reads_agent_name_from_token_deltas_and_events():
+    assert route_agent(TokenDelta(run_id="r1", agent_name="author", text="x")) == "author"
+    started = _ev(1, TelemetryEventType.AGENT_RUN_STARTED,
+                  {"run_id": "r1", "agent_name": "editor"})
+    assert route_agent(started) == "editor"
+    assert route_agent(TokenDelta(run_id="r1", agent_name="", text="x")) is None
+    assert route_agent("not a bus item") is None
+
+
+def test_seed_states_keeps_concurrent_agents_isolated():
+    """Two agents can be running at once (max_concurrent_agents > 1): seeding
+    must not let one agent's replayed run clobber another's bucket."""
+    events = [
+        _ev(1, TelemetryEventType.AGENT_RUN_STARTED, {"run_id": "r1", "agent_name": "author"}),
+        _ev(2, TelemetryEventType.AGENT_RUN_STARTED, {"run_id": "r2", "agent_name": "editor"}),
+        _ev(3, TelemetryEventType.TOOL_CALL_STARTED,
+           {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+            "input_summary": "dragons"}),
+        _ev(4, TelemetryEventType.TOOL_CALL_STARTED,
+           {"run_id": "r2", "agent_name": "editor", "tool_name": "read",
+            "input_summary": "ch1.md"}),
+    ]
+    states = seed_states(events, now=10.0)
+    assert set(states) == {"author", "editor"}
+    assert "search_web" in states["author"].text and "read" not in states["author"].text
+    assert "ch1.md" in states["editor"].text and "search_web" not in states["editor"].text
+    assert states["author"].run_id == "r1" and states["editor"].run_id == "r2"
 
 
 def test_apply_bus_item_folds_llm_call_boundaries_into_the_live_text_stream():

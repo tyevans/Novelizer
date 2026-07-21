@@ -22,9 +22,10 @@
 #body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
 #body.engine #feed, #body.engine #proposals_banner,
 #body.engine #brain { display: none; }
-#er_vitals { height: 1; background: $boost; padding: 0 1; }
-#er_stream_scroll { height: 2fr; }
-#er_stream { height: auto; }
+#er_tabs TabPane { padding: 0 1; }
+.er-vitals { height: 1; background: $boost; padding: 0 1; }
+.er-stream-scroll { height: 2fr; }
+.er-stream { height: auto; }
 #er_prompt { height: auto; max-height: 12; border: round $secondary; padding: 0 1; }
 #er_trace { height: 1fr; }
 #er_detail { height: auto; max-height: 14; border: round $secondary; padding: 0 1; }

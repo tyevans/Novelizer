@@ -213,6 +213,36 @@ async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequen
         assert not any("telemetry error" in m for m in app.messages)
 
 
+async def test_agent_tabs_show_only_their_own_agents_activity(rt):
+    """Two agents running concurrently (scheduler allows max_concurrent_agents
+    > 1) must not clobber each other's tab -- each keeps its own live feed,
+    and the "All" tab still tracks whichever run is most recent (today's
+    single-global-state behavior, unchanged)."""
+    from textual.widgets import Static
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="the sea"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="editor"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r2", agent_name="editor", text="looks good"))
+        await pilot.pause(0.8)
+
+        author_body = app.query_one("#er_stream_author", Static).renderable
+        editor_body = app.query_one("#er_stream_editor", Static).renderable
+        assert "the sea" in str(author_body) and "looks good" not in str(author_body)
+        assert "looks good" in str(editor_body) and "the sea" not in str(editor_body)
+
+        # The "All" tab reflects the most-recently-started run (today's
+        # single-global-state behavior) -- editor started last.
+        all_body = app.query_one("#er_stream", Static).renderable
+        assert "looks good" in str(all_body)
+        assert not any("telemetry error" in m for m in app.messages)
+
+
 # Prose/prompt text is untrusted: real agent prompts contain sequences like
 # "[system]" and "key=value" inside brackets that Textual's markup parser
 # rejects (MarkupError: "Expected markup value"), which crashed the telemetry

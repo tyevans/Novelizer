@@ -29,7 +29,8 @@ from novelizer.tui.widgets.feed_model import (
 from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, seed_state, trace_line, trace_detail,
+    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    trace_line, trace_detail,
 )
 
 
@@ -79,6 +80,7 @@ class NovelizerApp(App):
         self._chapter_count = 0
         self.messages: list[str] = []
         self._live_state = LiveRunState()
+        self._agent_live_states: dict[str, LiveRunState] = {}
         self._trace_events: deque = deque(maxlen=200)
 
     def compose(self) -> ComposeResult:
@@ -308,8 +310,12 @@ class NovelizerApp(App):
             recent = await self.runtime.telemetry_store.events_tail(200)
             self._trace_events.extend(recent)
             self._live_state = seed_state(recent[-50:], time.monotonic())
+            self._agent_live_states = seed_states(recent[-50:], time.monotonic())
             self._refresh_strip()
-            self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+            engine_room = self.query_one("#engine_room", EngineRoom)
+            engine_room.render_live(self._live_state)
+            for agent, state in self._agent_live_states.items():
+                engine_room.render_agent_live(agent, state)
             self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
@@ -317,12 +323,20 @@ class NovelizerApp(App):
         while True:
             try:
                 item = await q.get()
-                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                now = time.monotonic()
+                self._live_state = apply_bus_item(self._live_state, item, now)
+                agent = route_agent(item)
+                if agent:
+                    self._agent_live_states[agent] = apply_bus_item(
+                        self._agent_live_states.get(agent, LiveRunState()), item, now)
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                engine_room = self.query_one("#engine_room", EngineRoom)
+                engine_room.render_live(self._live_state)
+                if agent:
+                    engine_room.render_agent_live(agent, self._agent_live_states[agent], now)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
 
@@ -330,7 +344,11 @@ class NovelizerApp(App):
         while True:
             try:
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                engine_room = self.query_one("#engine_room", EngineRoom)
+                engine_room.render_live(self._live_state)
+                now = time.monotonic()
+                for agent, state in self._agent_live_states.items():
+                    engine_room.render_agent_live(agent, state, now)
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)

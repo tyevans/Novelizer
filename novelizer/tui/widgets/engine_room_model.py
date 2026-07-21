@@ -21,6 +21,14 @@ _VERBS = {
     "structure_analyst": "scoring structure",
 }
 
+# Mirrors AGENT_REGISTRY's scheduling order in novelizer/agents/registry.py --
+# kept as a plain tuple (not imported) so this module stays free of the heavy
+# agent-construction import chain. Keep in sync if agents are added/removed.
+AGENT_NAMES = (
+    "world_architect", "character_keeper", "muse", "plotter", "author",
+    "editor", "continuity_checker", "retconner", "structure_analyst",
+)
+
 
 @dataclass(frozen=True)
 class LiveRunState:
@@ -93,6 +101,28 @@ def seed_state(recent: list[StoredEvent], now: float) -> LiveRunState:
         # restart is gone — say so instead of pretending to stream.
         state = replace(state, stream_attached=False)
     return state
+
+
+def route_agent(item) -> str | None:
+    """Which agent a bus item (TokenDelta or StoredEvent) belongs to, for
+    fanning a single stream out into per-agent buckets."""
+    if isinstance(item, TokenDelta):
+        return item.agent_name or None
+    if isinstance(item, StoredEvent):
+        return item.payload.get("agent_name") or None
+    return None
+
+
+def seed_states(recent: list[StoredEvent], now: float) -> dict[str, LiveRunState]:
+    """Per-agent counterpart to seed_state: groups replayed events by agent
+    and folds each group independently, so one agent's run doesn't clobber
+    another's on replay."""
+    by_agent: dict[str, list[StoredEvent]] = {}
+    for ev in recent:
+        agent = route_agent(ev)
+        if agent:
+            by_agent.setdefault(agent, []).append(ev)
+    return {agent: seed_state(events, now) for agent, events in by_agent.items()}
 
 
 def _fmt_tokens(n: int) -> str:

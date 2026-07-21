@@ -9,26 +9,44 @@ import time
 from rich.markup import escape
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
-from textual.widgets import DataTable, Static
-from novelizer.tui.widgets.engine_room_model import LiveRunState, live_body, vitals_line
+from textual.widgets import DataTable, Static, TabbedContent, TabPane
+from novelizer.tui.widgets.engine_room_model import (
+    AGENT_NAMES, LiveRunState, live_body, vitals_line,
+)
 
 
 class EngineRoom(Vertical):
-    """The thick machinery view: live vitals + token stream on top, the
-    durable trace below (rows filled by the app), prompt pane toggleable
+    """The thick machinery view: live vitals + token stream on top (an "All"
+    tab plus one tab per agent so concurrent runs don't clobber each other),
+    the durable trace below (rows filled by the app), prompt pane toggleable
     with `p` (off by default)."""
 
-    _rendered_body: str = ""
+    _rendered_body: dict[str, str]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._rendered_body = {}
 
     def compose(self) -> ComposeResult:
         # markup=False throughout: these panes show raw prompts, token streams,
         # and payload text — untrusted content full of "[...]" sequences that
         # Textual's markup parser rejects (MarkupError crashes the telemetry
         # loops otherwise).
-        yield Static("idle — waiting for the scheduler", id="er_vitals", markup=False)
-        with VerticalScroll(id="er_stream_scroll"):
-            yield Static("", id="er_stream", markup=False)
-        yield Static("", id="er_prompt", markup=False)
+        with TabbedContent(id="er_tabs"):
+            with TabPane("All", id="er_tab_all"):
+                yield Static("idle — waiting for the scheduler", id="er_vitals",
+                            classes="er-vitals", markup=False)
+                with VerticalScroll(id="er_stream_scroll", classes="er-stream-scroll"):
+                    yield Static("", id="er_stream", classes="er-stream", markup=False)
+                yield Static("", id="er_prompt", markup=False)
+            for agent_name in AGENT_NAMES:
+                with TabPane(agent_name, id=f"er_tab_{agent_name}"):
+                    yield Static("idle — waiting for the scheduler",
+                                id=f"er_vitals_{agent_name}", classes="er-vitals", markup=False)
+                    with VerticalScroll(id=f"er_stream_scroll_{agent_name}",
+                                       classes="er-stream-scroll"):
+                        yield Static("", id=f"er_stream_{agent_name}",
+                                    classes="er-stream", markup=False)
         yield DataTable(id="er_trace", cursor_type="row")
         yield Static("", id="er_detail", markup=False)
 
@@ -44,14 +62,24 @@ class EngineRoom(Vertical):
         now = time.monotonic() if now is None else now
         self.query_one("#er_vitals", Static).update(vitals_line(state, now))
         body = live_body(state)
-        if body != self._rendered_body:
+        if body != self._rendered_body.get("__all__"):
             self.query_one("#er_stream", Static).update(body)
-            self._rendered_body = body
+            self._rendered_body["__all__"] = body
             self.query_one("#er_stream_scroll", VerticalScroll).scroll_end(animate=False)
         self.query_one("#er_prompt", Static).update(state.prompt or "(no call in flight)")
 
+    def render_agent_live(self, agent_name: str, state: LiveRunState,
+                          now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        self.query_one(f"#er_vitals_{agent_name}", Static).update(vitals_line(state, now))
+        body = live_body(state)
+        if body != self._rendered_body.get(agent_name):
+            self.query_one(f"#er_stream_{agent_name}", Static).update(body)
+            self._rendered_body[agent_name] = body
+            self.query_one(f"#er_stream_scroll_{agent_name}", VerticalScroll).scroll_end(animate=False)
+
     def stream_text(self) -> str:
-        return self._rendered_body
+        return self._rendered_body.get("__all__", "")
 
     def toggle_prompt(self) -> bool:
         pane = self.query_one("#er_prompt", Static)
