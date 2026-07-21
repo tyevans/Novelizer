@@ -6,7 +6,7 @@ from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
-from novelizer.store.models import WorldEntry, RetconStatus
+from novelizer.store.models import WorldEntry, FlagStatus
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +70,11 @@ class Retconner(BaseAgent):
         self._deferred: set[str] = set()
 
     async def readiness(self) -> float:
-        open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
-        return min(1.0, open_retcons / 3)
+        open_flags = len(await self._read.list_flags(category="contradiction", status=FlagStatus.open))
+        return min(1.0, open_flags / 3)
 
     async def poll(self) -> dict:
-        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+        open_reqs = await self._read.list_flags(category="contradiction", status=FlagStatus.open)
         self._deferred &= {r.id for r in open_reqs}
         candidates = [r for r in open_reqs if r.id not in self._deferred]
         if not candidates and open_reqs:
@@ -88,7 +88,7 @@ class Retconner(BaseAgent):
         req = ctx["target"]
         if req is None:
             return None
-        conflicting = [e for e in ctx["world"] if e.id in req.conflicting_entry_ids]
+        conflicting = [e for e in ctx["world"] if e.id in req.related_entry_ids]
         text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
         cast = self._guarded_line("In character", self.personality)
         msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}{cast}"
@@ -100,11 +100,11 @@ class Retconner(BaseAgent):
         it: nothing was repaired, and the filing agent's log should say so."""
         logger.info("retconner: declining request %s (%s): %s", req.id, resolution, reason)
         rejected = req.model_copy(update={
-            "status": RetconStatus.rejected,
+            "status": FlagStatus.rejected,
             "resolved_by": self.name,
             "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
         })
-        await self._committer.commit(self.name, EventType.RETCON_REQUEST_REJECTED, req.id, rejected)
+        await self._committer.commit(self.name, EventType.FLAG_REJECTED, req.id, rejected)
 
     async def commit(self, out: RetconAmendments | None, ctx: dict) -> None:
         req = ctx["target"]
@@ -117,8 +117,8 @@ class Retconner(BaseAgent):
         for e in out.amended_entries:
             entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags, supersedes_id=e.supersedes_id)
             await self._committer.commit(self.name, EventType.WORLD_ENTRY_SUPERSEDED, entry.id, entry)
-        resolved = req.model_copy(update={"status": RetconStatus.resolved, "resolved_by": self.name})
-        await self._committer.commit(self.name, EventType.RETCON_REQUEST_RESOLVED, req.id, resolved)
+        resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
+        await self._committer.commit(self.name, EventType.FLAG_RESOLVED, req.id, resolved)
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
@@ -131,11 +131,11 @@ class Retconner(BaseAgent):
         # mint an entry that supersedes nothing. An EMPTY id list is not
         # out-of-lane -- the filer may have described the conflict in prose
         # only, and the model can still work from the description.
-        named = req.conflicting_entry_ids
+        named = req.related_entry_ids
         if named and not any(e.id in named for e in ctx["world"]):
             await self._decline(
                 req, "out_of_lane",
-                "conflicting_entry_ids name no world entry; the Retconner only amends world entries",
+                "related_entry_ids name no world entry; the Retconner only amends world entries",
             )
             self._deferred.discard(req.id)
             return

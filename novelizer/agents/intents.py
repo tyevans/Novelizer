@@ -19,7 +19,7 @@ from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
     BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
-from novelizer.store.models import RetconRequest, RetconStatus, ChapterBriefRecord
+from novelizer.store.models import Flag, FlagStatus, ChapterBriefRecord
 
 logger = logging.getLogger(__name__)
 
@@ -207,16 +207,17 @@ async def commit_theme_intents(
                         f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "
                         f"may duplicate existing theme '{duplicate_id}' ('{existing_title}')"
                     )
-                    open_reqs = await read_store.list_retcon_requests(status=RetconStatus.open)
+                    open_reqs = await read_store.list_flags(category="contradiction", status=FlagStatus.open)
                     seen_descriptions = {r.description for r in open_reqs}
                     if description not in seen_descriptions:
-                        req = RetconRequest(
+                        req = Flag(
+                            category="contradiction",
                             description=description,
-                            conflicting_entry_ids=[theme_id, duplicate_id],
+                            related_entry_ids=[theme_id, duplicate_id],
                             proposed_resolution="",
                         )
                         await committer.commit(
-                            agent_name, EventType.RETCON_REQUEST_CREATED, req.id, req
+                            agent_name, EventType.FLAG_CREATED, req.id, req
                         )
             continue
         theme_id = _normalize_id(intent.id)

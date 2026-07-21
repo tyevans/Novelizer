@@ -3,8 +3,8 @@
 Two defects this covers:
   * Every non-None result was marked RESOLVED, so "repaired", "already fine"
     and "this request is nonsense" were indistinguishable in the log --
-    while RETCON_REQUEST_REJECTED existed unused.
-  * Voice-drift retcons carry CHARACTER ids in conflicting_entry_ids, but
+    while FLAG_REJECTED existed unused.
+  * Voice-drift retcons carry CHARACTER ids in related_entry_ids, but
     poll() only loads world entries and commit() always built a WorldEntry,
     producing an entry that supersedes nothing.
 
@@ -24,7 +24,7 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.store.models import Character, RetconRequest, RetconStatus, WorldEntry
+from novelizer.store.models import Character, Flag, FlagStatus, WorldEntry
 
 
 class FakeRunner:
@@ -55,14 +55,15 @@ async def stack():
 
 
 async def _file_request(events, proj, **kw):
-    req = RetconRequest(
+    req = Flag(
         id=kw.pop("id", "r1"),
+        category="contradiction",
         description=kw.pop("description", "two suns vs one sun"),
-        conflicting_entry_ids=kw.pop("conflicting_entry_ids", ["w1"]),
+        related_entry_ids=kw.pop("related_entry_ids", ["w1"]),
         proposed_resolution=kw.pop("proposed_resolution", "make it one sun"),
         **kw,
     )
-    await events.append(EventType.RETCON_REQUEST_CREATED, req.id, req)
+    await events.append(EventType.FLAG_CREATED, req.id, req)
     await proj.catch_up()
     return req
 
@@ -83,7 +84,7 @@ class TestDeclinePath:
             e for e in await read.list_world_entries() if e.id == "w1"
         ]
         assert len(await read.list_world_entries()) == 1
-        assert await read.list_retcon_requests(status=RetconStatus.open) == []
+        assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
 
     async def test_amend_still_supersedes_and_resolves(self, stack):
         events, proj, read, committer = stack
@@ -100,7 +101,7 @@ class TestDeclinePath:
         await proj.catch_up()
         bodies = [e.body for e in await read.list_world_entries()]
         assert "One sun." in bodies
-        assert await read.list_retcon_requests(status=RetconStatus.open) == []
+        assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
 
     async def test_default_resolution_is_amend_for_back_compat(self):
         assert RetconAmendments().resolution == "amend"
@@ -113,19 +114,19 @@ class TestLaneGuard:
         model."""
         events, proj, read, committer = stack
         await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
-        await _file_request(events, proj, conflicting_entry_ids=["mara"])
+        await _file_request(events, proj, related_entry_ids=["mara"])
         runner = FakeRunner(RetconAmendments())
         r = Retconner(runner, read, committer)
         await r.run_once()
         await proj.catch_up()
         assert runner.calls == []
         assert await read.list_world_entries() == []
-        assert await read.list_retcon_requests(status=RetconStatus.open) == []
+        assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
 
     async def test_request_naming_a_world_entry_still_runs(self, stack):
         events, proj, read, committer = stack
         await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Sky", body="Two suns."))
-        await _file_request(events, proj, conflicting_entry_ids=["w1"])
+        await _file_request(events, proj, related_entry_ids=["w1"])
         runner = FakeRunner(RetconAmendments(resolution="already_consistent", reason="fine"))
         r = Retconner(runner, read, committer)
         await r.run_once()

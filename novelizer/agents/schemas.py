@@ -247,16 +247,17 @@ class ArcIntent(BaseModel):
     note: str = ""
 
 
-class RetconDraft(BaseModel):
+class FlagDraft(BaseModel):
+    category: str
     description: str
-    conflicting_entry_ids: list[str] = Field(default_factory=list)
+    related_entry_ids: list[str] = Field(default_factory=list)
     proposed_resolution: str = ""
 
 
 class KeeperOutput(BaseModel):
     new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
-    retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    retcon_requests: list[FlagDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     arc_intents: list[ArcIntent] = Field(default_factory=list)
     feed_note: str = ""
@@ -289,7 +290,7 @@ class EditorVerdict(BaseModel):
 
 
 class ContinuityOutput(BaseModel):
-    retcon_requests: list[RetconDraft] = Field(default_factory=list)
+    retcon_requests: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 
