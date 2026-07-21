@@ -145,7 +145,7 @@ class WorldArchitect(BaseAgent):
             self._clear_watermark()
 
 
-def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
+def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -158,7 +158,7 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=WorldEntriesDraft,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -169,12 +169,13 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=WorldEntriesDraft)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> WorldArchitect:
     enabled = ctx.settings.world_architect_tools_enabled
-    builder = ctx.tooled(build_world_architect_runner, enabled)
+    subagent_enabled = ctx.settings.world_architect_subagent_enabled
+    builder = ctx.tooled(build_world_architect_runner, enabled, subagent_enabled, "world_architect")
     runner = ctx.runner_for("world_architect", builder)
     return WorldArchitect(
         runner, ctx.read, ctx.committer,
@@ -186,5 +187,6 @@ def _construct(ctx: AgentContext) -> WorldArchitect:
 SPEC = AgentSpec(
     name="world_architect",
     tool_grant=ToolGrant(enabled_setting="world_architect_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="world_architect_subagent_enabled"),
     construct=_construct,
 )
