@@ -151,7 +151,7 @@ class Retconner(BaseAgent):
         self._deferred.discard(req.id)
 
 
-def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
+def build_retconner_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     from novelizer.agents.middleware import ExcludeToolsMiddleware
@@ -164,7 +164,7 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=RetconAmendments,
-            backend=backend, tools=tools,
+            backend=backend, tools=tools, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
@@ -175,12 +175,13 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None):
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Retconner:
     enabled = ctx.settings.retconner_tools_enabled
-    builder = ctx.tooled(build_retconner_runner, enabled)
+    subagent_enabled = ctx.settings.retconner_subagent_enabled
+    builder = ctx.tooled(build_retconner_runner, enabled, subagent_enabled, "retconner")
     runner = ctx.runner_for("retconner", builder)
     return Retconner(
         runner, ctx.read, ctx.committer,
@@ -192,5 +193,6 @@ def _construct(ctx: AgentContext) -> Retconner:
 SPEC = AgentSpec(
     name="retconner",
     tool_grant=ToolGrant(enabled_setting="retconner_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="retconner_subagent_enabled"),
     construct=_construct,
 )
