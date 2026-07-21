@@ -12,6 +12,15 @@ class ToolGrant:
         return bool(getattr(settings, self.enabled_setting))
 
 
+@dataclass(frozen=True)
+class SubagentGrant:
+    """Declares which Settings field gates an agent's subagent-dispatch access."""
+    enabled_setting: str
+
+    def is_enabled(self, settings: Any) -> bool:
+        return bool(getattr(settings, self.enabled_setting))
+
+
 @dataclass
 class AgentContext:
     """Shared construction state passed to every AgentSpec.construct(ctx).
@@ -39,3 +48,4 @@ class AgentSpec:
     name: str
     tool_grant: ToolGrant | None
     construct: Callable[[AgentContext], Any]
+    subagent_grant: SubagentGrant | None = None
