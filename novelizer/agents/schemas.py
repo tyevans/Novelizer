@@ -447,3 +447,22 @@ class MinedFactsOutput(BaseModel):
     inspiration_facts: list[MinedInspirationFact] = Field(default_factory=list)
     promise_progress_facts: list[PromiseProgressFact] = Field(default_factory=list)
     feed_note: str = ""
+
+
+class KGExtractedEntity(BaseModel):
+    name: str
+    entity_type: str
+    description: str = ""
+
+
+class KGExtractedRelation(BaseModel):
+    source: str
+    target: str
+    relation_type: str
+
+
+class KGExtractionOutput(BaseModel):
+    """Structured output from the chapter-prose knowledge-graph extraction pass."""
+
+    entities: list[KGExtractedEntity] = Field(default_factory=list)
+    relations: list[KGExtractedRelation] = Field(default_factory=list)
