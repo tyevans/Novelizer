@@ -69,7 +69,10 @@ class ReadStore:
         row = await cur.fetchone()
         return Character.model_validate_json(row[0]) if row else None
 
-    async def list_flags(self, category: Optional[str] = None, status: Optional[str] = None) -> list[Flag]:
+    async def list_flags(
+        self, category: Optional[str] = None, status: Optional[str] = None,
+        escalated: Optional[bool] = None,
+    ) -> list[Flag]:
         clauses, params = [], []
         if category:
             clauses.append("category=?")
@@ -77,6 +80,9 @@ class ReadStore:
         if status:
             clauses.append("status=?")
             params.append(status)
+        if escalated is not None:
+            clauses.append("escalated=?")
+            params.append(int(escalated))
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         cur = await self._conn.execute(f"SELECT data FROM flags{where} ORDER BY rowid", params)
         return [Flag.model_validate_json(r[0]) for r in await cur.fetchall()]

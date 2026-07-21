@@ -52,6 +52,10 @@ _NEVER_GATED = {
     EventType.ARC_ADVANCED,
     EventType.ARC_RESOLVED,
     EventType.BOOK_COMPLETED,
+    # escalation is a visibility signal, not a routing gate — same class as
+    # the other bookkeeping events above.
+    EventType.FLAG_ESCALATED,
+    EventType.FLAG_ESCALATION_CLEARED,
 }
 
 _GATED_SETS: dict[AutonomyLevel, set[str]] = {

@@ -56,6 +56,8 @@ feed_note — never in the amendment text, which must read as plain canon."""
 
 
 class Retconner(BaseAgent):
+    _FAILURE_ESCALATION_THRESHOLD = 3
+
     def __init__(
         self,
         runner: Runner,
@@ -99,12 +101,17 @@ class Retconner(BaseAgent):
         """Close a request without amending anything. Distinct from resolving
         it: nothing was repaired, and the filing agent's log should say so."""
         logger.info("retconner: declining request %s (%s): %s", req.id, resolution, reason)
+        attempts = req.failed_attempts + 1
         rejected = req.model_copy(update={
             "status": FlagStatus.rejected,
             "resolved_by": self.name,
             "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
+            "failed_attempts": attempts,
         })
         await self._committer.commit(self.name, EventType.FLAG_REJECTED, req.id, rejected)
+        if attempts >= self._FAILURE_ESCALATION_THRESHOLD and not rejected.escalated:
+            escalated = rejected.model_copy(update={"escalated": True})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, req.id, escalated)
 
     async def commit(self, out: RetconAmendments | None, ctx: dict) -> None:
         req = ctx["target"]
@@ -119,6 +126,9 @@ class Retconner(BaseAgent):
             await self._committer.commit(self.name, EventType.WORLD_ENTRY_SUPERSEDED, entry.id, entry)
         resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
         await self._committer.commit(self.name, EventType.FLAG_RESOLVED, req.id, resolved)
+        if resolved.escalated:
+            cleared = resolved.model_copy(update={"escalated": False, "escalation_cleared_by": "agent"})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, req.id, cleared)
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:

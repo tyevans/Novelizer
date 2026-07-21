@@ -171,3 +171,13 @@ async def test_other_blueprint_events_are_never_gated(level, event_type):
 async def test_book_completed_is_never_gated(level):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("plotter", EventType.BOOK_COMPLETED) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.FLAG_ESCALATED, EventType.FLAG_ESCALATION_CLEARED,
+])
+async def test_flag_escalation_events_are_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("triage", event_type) is False
+    assert await policy.is_gated("author", event_type) is False
