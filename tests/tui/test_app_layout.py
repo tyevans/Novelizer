@@ -301,6 +301,52 @@ async def test_detail_border_title_follows_selection_and_resets():
 
 
 @pytest.mark.asyncio
+async def test_tool_call_finish_triggers_a_summary_that_lands_in_the_live_state():
+    from unittest.mock import AsyncMock, patch
+    from novelizer.canon.events import StoredEvent
+    from novelizer.telemetry.events import TelemetryEventType
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    for name in ["world_architect", "character_keeper", "author", "editor",
+                 "continuity_checker", "retconner", "structure_analyst"]:
+        rt.scheduler.pause_agent(name)
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch("novelizer.tui.app.summarize_tool_call",
+                       new=AsyncMock(return_value="skimmed the outline")):
+                run_started = StoredEvent(
+                    sequence=1, id="e0", event_type=TelemetryEventType.AGENT_RUN_STARTED,
+                    aggregate_id="r1", created_at="2026-07-20T23:59:59+00:00",
+                    payload={"run_id": "r1", "agent_name": "author"})
+                started = StoredEvent(
+                    sequence=2, id="e1", event_type=TelemetryEventType.TOOL_CALL_STARTED,
+                    aggregate_id="r1", created_at="2026-07-21T00:00:00+00:00",
+                    payload={"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                            "input_summary": "ch3.md"})
+                finished = StoredEvent(
+                    sequence=3, id="e2", event_type=TelemetryEventType.TOOL_CALL_FINISHED,
+                    aggregate_id="r1", created_at="2026-07-21T00:00:01+00:00",
+                    payload={"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                            "input_summary": "ch3.md", "duration_s": 0.5,
+                            "output_summary": "chapter text..."})
+                app.runtime.telemetry_bus.publish(run_started)
+                app.runtime.telemetry_bus.publish(started)
+                app.runtime.telemetry_bus.publish(finished)
+                await pilot.pause()
+                await pilot.pause()  # let the background summarizer worker complete
+                block = app._live_state.blocks[-1]
+                assert block.tool_name == "read_file"
+                assert block.summary == "skimmed the outline"
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
 async def test_projector_loop_tick_also_runs_index_catch_up():
     # Pins that the app's periodic projector tick keeps canon embeddings
     # current by also awaiting Runtime.index_catch_up() each cycle.
