@@ -122,17 +122,109 @@ async def test_followup_input_prefills_and_dispatches_on_submit():
         await rt.close(); os.unlink(path)
 
 
+def _expected_command_names_from_bindings():
+    import re
+    from novelizer.tui.app import NovelizerApp
+
+    brain_tab_re = re.compile(r"^brain_tab\('(?P<pane>tab_\w+)'\)$")
+    names = set()
+    for binding in NovelizerApp.BINDINGS:
+        action = binding[1]
+        if action == "quit":
+            # quit has an APP_COMMANDS entry too, so include it directly.
+            names.add("quit")
+            continue
+        match = brain_tab_re.match(action)
+        if match:
+            names.add(f"brain_tab_{match.group('pane')[len('tab_'):]}")
+            continue
+        names.add(action)
+    # "settings" has no keybinding (only reachable via the palette / :settings
+    # command-line), so it isn't derivable from BINDINGS -- add it explicitly.
+    names.add("settings")
+    return names
+
+
 @pytest.mark.asyncio
 async def test_app_commands_cover_every_binding_action():
-    from novelizer.tui.app import APP_COMMANDS, NovelizerApp
+    from novelizer.tui.app import APP_COMMANDS
 
     covered = {c.name for c in APP_COMMANDS}
-    # Every non-command, non-quit BINDINGS action must have a same-named
-    # entry in APP_COMMANDS so the palette can reach it.
-    expected = {
-        "approvals", "toggle_room", "toggle_engine", "toggle_prompt",
-        "toggle_reading", "quit", "settings",
-        "brain_tab_shape", "brain_tab_threads", "brain_tab_secrets",
-        "brain_tab_causeway", "brain_tab_outline", "brain_tab_arcs",
-    }
+    # Every BINDINGS action (mapped through the brain_tab('tab_X') ->
+    # brain_tab_X convention) must have a same-named entry in APP_COMMANDS
+    # so the palette can reach it. This is derived from BINDINGS itself so
+    # a new keybinding added without a matching APP_COMMANDS entry fails
+    # this test.
+    expected = _expected_command_names_from_bindings()
     assert covered == expected
+
+
+@pytest.mark.asyncio
+async def test_command_provider_search_narrows_to_matching_commands():
+    from novelizer.tui.app import NovelizerCommandProvider
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            provider = NovelizerCommandProvider(app.screen)
+            all_hits = [hit async for hit in provider.discover()]
+            hits = [hit async for hit in provider.search("seed")]
+            names = {hit.text for hit in hits}
+            assert names, "expected at least one match for 'seed'"
+            assert names < {h.text for h in all_hits}, (
+                "search should narrow results, not return the full list"
+            )
+            assert "seed" in names
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_command_provider_run_dispatches_args_command_to_followup():
+    from novelizer.tui.app import NovelizerCommandProvider
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            from textual.widgets import Input
+
+            provider = NovelizerCommandProvider(app.screen)
+            hits = [hit async for hit in provider.search("seed")]
+            hit = next(h for h in hits if h.text == "seed")
+            hit.command()
+            await pilot.pause()
+            box = app.query_one("#command_followup", Input)
+            assert box.value == "seed "
+            assert box.display is True
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_command_provider_run_executes_zero_arg_command():
+    from novelizer.tui.app import NovelizerCommandProvider
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            provider = NovelizerCommandProvider(app.screen)
+            hits = [hit async for hit in provider.discover()]
+            hit = next(h for h in hits if h.text == "toggle_room")
+            assert not app.query_one("#body").has_class("room")
+            hit.command()
+            await pilot.pause()
+            assert app.query_one("#body").has_class("room")
+    finally:
+        await rt.close(); os.unlink(path)

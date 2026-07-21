@@ -351,7 +351,7 @@ class NovelizerApp(App):
         _app_toggle_prompt(self)
 
     def action_brain_tab(self, pane_id: str) -> None:
-        self.query_one("#brain", BrainPanel).activate_tab(pane_id)
+        _app_brain_tab(self, pane_id)
 
     def open_command_followup(self, name: str) -> None:
         box = self.query_one("#command_followup", Input)
@@ -375,10 +375,7 @@ class NovelizerApp(App):
             return
         cmd = line.strip().lstrip(":").split(maxsplit=1)
         if cmd and cmd[0].lower() == "settings":
-            from novelizer.tui.settings_screen import SettingsScreen
-
-            story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
-            self.push_screen(SettingsScreen(story_dir, lambda: self.runtime.settings))
+            _app_open_settings(self)
             return
         result = await commands.dispatch(self.runtime, line)
         log = self.query_one("#feed", RichLog)
@@ -485,6 +482,10 @@ def _app_toggle_prompt(app: NovelizerApp) -> None:
         app.query_one("#engine_room", EngineRoom).toggle_prompt()
 
 
+def _app_brain_tab(app: NovelizerApp, pane_id: str) -> None:
+    app.query_one("#brain", BrainPanel).activate_tab(pane_id)
+
+
 def _app_open_settings(app: NovelizerApp) -> None:
     from novelizer.tui.settings_screen import SettingsScreen
 
@@ -506,27 +507,27 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_shape"),
+        lambda app, pid="tab_shape": _app_brain_tab(app, pid),
     ),
     AppCommand(
         "brain_tab_threads", "Story Brain: Threads tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_threads"),
+        lambda app, pid="tab_threads": _app_brain_tab(app, pid),
     ),
     AppCommand(
         "brain_tab_secrets", "Story Brain: Secrets tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_secrets"),
+        lambda app, pid="tab_secrets": _app_brain_tab(app, pid),
     ),
     AppCommand(
         "brain_tab_causeway", "Story Brain: Cause tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_causeway"),
+        lambda app, pid="tab_causeway": _app_brain_tab(app, pid),
     ),
     AppCommand(
         "brain_tab_outline", "Story Brain: Outline tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_outline"),
+        lambda app, pid="tab_outline": _app_brain_tab(app, pid),
     ),
     AppCommand(
         "brain_tab_arcs", "Story Brain: Arcs tab",
-        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_arcs"),
+        lambda app, pid="tab_arcs": _app_brain_tab(app, pid),
     ),
 ]
 
@@ -564,7 +565,7 @@ class NovelizerCommandProvider(Provider):
                     score,
                     matcher.highlight(text),
                     lambda n=name, a=takes_args: self._run(n, a),
-                    text=text,
+                    text=name,
                     help=description,
                 )
 
