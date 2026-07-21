@@ -86,7 +86,35 @@ def test_format_agent_remarked_falls_back_for_unknown_agent_name():
 def test_room_toggle_still_works_after_agent_remarked_rendering_change():
     # action_toggle_room is a pure CSS-class toggle on #body; regression guard
     # that adding the agent.remarked branch to format_event didn't touch it.
-    import inspect
-    from novelizer.tui.app import NovelizerApp
-    src = inspect.getsource(NovelizerApp.action_toggle_room)
-    assert 'toggle_class("room")' in src
+    # Asserts real behavior (the toggle function's CSS-class mutation) rather
+    # than source text, so it survives the delegation refactor that routes
+    # action_toggle_room through app.py's module-level _app_toggle_room.
+    from novelizer.tui.app import _app_toggle_room
+
+    class _FakeBody:
+        def __init__(self):
+            self.classes: set[str] = set()
+
+        def remove_class(self, name: str) -> None:
+            self.classes.discard(name)
+
+        def toggle_class(self, name: str) -> None:
+            if name in self.classes:
+                self.classes.discard(name)
+            else:
+                self.classes.add(name)
+
+    class _FakeApp:
+        def __init__(self, body):
+            self._body = body
+
+        def query_one(self, selector):
+            assert selector == "#body"
+            return self._body
+
+    body = _FakeBody()
+    app = _FakeApp(body)
+    _app_toggle_room(app)
+    assert "room" in body.classes
+    _app_toggle_room(app)
+    assert "room" not in body.classes
