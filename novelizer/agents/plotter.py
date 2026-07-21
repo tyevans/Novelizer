@@ -303,10 +303,12 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
+        from novelizer.agents.middleware import TodoContextMiddleware
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
             backend=backend, tools=tools, skills=PLOTTER_SKILLS,
+            middleware=[TodoContextMiddleware()],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
