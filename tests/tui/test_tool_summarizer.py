@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from novelizer.tui.tool_summarizer import summarize_tool_call
@@ -34,3 +35,13 @@ def test_summarize_tool_call_uses_the_error_line_when_the_call_failed():
     assert result == "failed to reach the search API"
     assert "TimeoutError: proxy" in captured["prompt"]
     assert "dragons" in captured["prompt"]
+
+
+def test_summarize_tool_call_propagates_llm_errors():
+    """Verify that exceptions from model.ainvoke() propagate to the caller."""
+    fake_model = SimpleNamespace(ainvoke=AsyncMock(
+        side_effect=RuntimeError("LLM unavailable")))
+    with patch("novelizer.tui.tool_summarizer.build_chat_model", return_value=fake_model):
+        with pytest.raises(RuntimeError, match="LLM unavailable"):
+            asyncio.run(summarize_tool_call(
+                _settings(), "search_web", "test", "result", ""))
