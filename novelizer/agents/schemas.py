@@ -290,7 +290,7 @@ class EditorVerdict(BaseModel):
 
 
 class ContinuityOutput(BaseModel):
-    retcon_requests: list[FlagDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
 

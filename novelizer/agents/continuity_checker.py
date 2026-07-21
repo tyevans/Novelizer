@@ -14,7 +14,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType, ChapterMined, InspirationUptakeRecorded
-from novelizer.store.models import RetconRequest, RetconStatus
+from novelizer.store.models import Flag, FlagStatus
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ class ContinuityChecker(BaseAgent):
         self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
-        open_retcons = len(await self._read.list_retcon_requests(status=RetconStatus.open))
+        open_retcons = len(await self._read.list_flags(category="contradiction", status=FlagStatus.open))
         return await self._gate_on_watermark(max(0.1, 1.0 - open_retcons / 5))
 
     async def _fingerprint(self) -> tuple:
@@ -148,7 +148,7 @@ class ContinuityChecker(BaseAgent):
                              EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
         )
         return {
-            "open_retcons": await self._read.list_retcon_requests(status=RetconStatus.open),
+            "open_retcons": await self._read.list_flags(category="contradiction", status=FlagStatus.open),
             "world": await self._read.list_world_entries(),
             "characters": await self._read.list_characters(),
             "chapters": chapters[-10:],
@@ -283,7 +283,7 @@ class ContinuityChecker(BaseAgent):
                     "character %r in chapter %r escalated to retcon",
                     self.name, fact.action, fact.id, fact.character_id, chapter_id,
                 )
-                await self._file_mined_retcon(
+                await self._file_mined_flag(
                     f"mined secret {fact.action} fact citing unrecognized/unknown secret id "
                     f"'{fact.id}' for character '{fact.character_id}' in chapter '{chapter_id}'",
                     [fact.id, fact.character_id, chapter_id],
@@ -313,7 +313,7 @@ class ContinuityChecker(BaseAgent):
                 "%s: mined secret reveal fact for %r in chapter %r escalated to retcon, never auto-committed",
                 self.name, fact.id, chapter_id,
             )
-            await self._file_mined_retcon(
+            await self._file_mined_flag(
                 f"mined secret reveal fact citing id '{fact.id}' in chapter '{chapter_id}'",
                 [fact.id, chapter_id],
                 seen_descriptions,
@@ -325,7 +325,7 @@ class ContinuityChecker(BaseAgent):
                     "%s: mined thread %s fact citing unrecognized/unknown thread id %r in "
                     "chapter %r escalated to retcon", self.name, fact.action, fact.id, chapter_id,
                 )
-                await self._file_mined_retcon(
+                await self._file_mined_flag(
                     f"mined thread {fact.action} fact citing unrecognized/unknown thread id "
                     f"'{fact.id}' in chapter '{chapter_id}'",
                     [fact.id, chapter_id],
@@ -391,41 +391,43 @@ class ContinuityChecker(BaseAgent):
             self.name, EventType.CHAPTER_MINED, chapter_id, ChapterMined(chapter_id=chapter_id)
         )
 
-    async def _file_mined_retcon(
+    async def _file_mined_flag(
         self, detail: str, conflicting_entry_ids: list[str], seen_descriptions: set[str],
     ) -> None:
-        """File a mined-fact escalation retcon, deduped by description against
+        """File a mined-fact escalation flag, deduped by description against
         `seen_descriptions` — the open queue plus everything filed this cycle.
         The live miner emitted the same fact twice in one output and both were
         filed; a crash before the chapter.mined stamp re-files on the next pass.
         """
         description = f"{MINED_SOURCE_TAG} {detail}"
         if description in seen_descriptions:
-            logger.info("%s: skipped duplicate mined retcon %r", self.name, description)
+            logger.info("%s: skipped duplicate mined flag %r", self.name, description)
             return
         seen_descriptions.add(description)
-        req = RetconRequest(
+        flag = Flag(
+            category="contradiction",
+            filed_by=self.name,
             description=description,
-            conflicting_entry_ids=conflicting_entry_ids,
+            related_entry_ids=conflicting_entry_ids,
             proposed_resolution="Review the mined fact and add a covering event, or dismiss if not applicable.",
         )
-        await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+        await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
 
     async def commit(
         self, out: ContinuityOutput | None, ctx: dict, mined_facts: dict[str, MinedFactsOutput] | None = None,
     ) -> None:
-        open_reqs = await self._read.list_retcon_requests(status=RetconStatus.open)
+        open_reqs = await self._read.list_flags(category="contradiction", status=FlagStatus.open)
         seen_descriptions = {r.description for r in open_reqs}
         deterministic_filed = 0
 
         if out is not None and not out.no_action:
-            for r in out.retcon_requests:
+            for r in out.flags:
                 if r.description in seen_descriptions:
                     continue
                 seen_descriptions.add(r.description)
-                req = RetconRequest(description=r.description, conflicting_entry_ids=r.conflicting_entry_ids,
-                                    proposed_resolution=r.proposed_resolution)
-                await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+                flag = Flag(category=r.category, filed_by=self.name, description=r.description,
+                            related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             await self._remark(out.feed_note)
 
         for leak in find_leaks(ctx.get("secret_references", []), ctx.get("knowledge_matrix", {})):
@@ -433,12 +435,14 @@ class ContinuityChecker(BaseAgent):
             if description in seen_descriptions:
                 continue
             seen_descriptions.add(description)
-            req = RetconRequest(
+            flag = Flag(
+                category="contradiction",
+                filed_by=self.name,
                 description=description,
-                conflicting_entry_ids=[leak.secret_id, leak.character_id, leak.chapter_id],
+                related_entry_ids=[leak.secret_id, leak.character_id, leak.chapter_id],
                 proposed_resolution="Review whether the reference should be removed or a learn/reveal event added.",
             )
-            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+            await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             deterministic_filed += 1
 
         for paradox in find_paradoxes(ctx.get("causal_edges", []), ctx.get("chapter_order", [])):
@@ -446,12 +450,14 @@ class ContinuityChecker(BaseAgent):
             if description in seen_descriptions:
                 continue
             seen_descriptions.add(description)
-            req = RetconRequest(
+            flag = Flag(
+                category="contradiction",
+                filed_by=self.name,
                 description=description,
-                conflicting_entry_ids=[paradox.cause_chapter_id, paradox.effect_chapter_id],
+                related_entry_ids=[paradox.cause_chapter_id, paradox.effect_chapter_id],
                 proposed_resolution="Review the causal edge for an ordering or cycle correction.",
             )
-            await self._committer.commit(self.name, EventType.RETCON_REQUEST_CREATED, req.id, req)
+            await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             deterministic_filed += 1
 
         for chapter_id, mined_out in (mined_facts or {}).items():
