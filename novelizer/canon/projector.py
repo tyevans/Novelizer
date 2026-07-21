@@ -296,8 +296,9 @@ class Projector:
             aliased.setdefault("filed_by", "")
             aliased.setdefault("triage_passes", 0)
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category) VALUES (?,?,?,?)",
-                (aliased["id"], json.dumps(aliased), legacy_status, "contradiction"),
+                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                (aliased["id"], json.dumps(aliased), legacy_status, "contradiction",
+                 int(aliased.get("escalated", False))),
             )
         elif t == EventType.PROPOSAL_CREATED:
             await self._conn.execute(

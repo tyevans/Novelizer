@@ -99,3 +99,26 @@ async def test_flag_escalation_cleared_unsets_escalated_column(stack):
     assert flags == []
     all_flags = await read.list_flags()
     assert any(f.id == "f2" for f in all_flags)
+
+
+async def test_legacy_retcon_request_resolved_preserves_escalated(stack):
+    """The legacy retcon_request.* alias branch must also preserve `escalated`,
+    the same as the four flag.* handlers, since it writes the same flags row."""
+    from novelizer.canon.events import EventType as ET
+    events, proj, read = stack
+    legacy_payload = {
+        "id": "r1", "created_at": "2026-01-01T00:00:00+00:00",
+        "description": "two vs one sun", "conflicting_entry_ids": ["w1"],
+        "proposed_resolution": "one sun", "status": "open", "resolved_by": None,
+    }
+    await events.append_raw(ET.RETCON_REQUEST_CREATED, "r1", legacy_payload)
+    await proj.catch_up()
+
+    resolved_payload = dict(legacy_payload, status="resolved", resolved_by="continuity_guardian",
+                             escalated=True)
+    await events.append_raw(ET.RETCON_REQUEST_RESOLVED, "r1", resolved_payload)
+    await proj.catch_up()
+
+    flags = await read.list_flags(escalated=True)
+    assert len(flags) == 1
+    assert flags[0].id == "r1"
