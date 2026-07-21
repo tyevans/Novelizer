@@ -1,5 +1,6 @@
 import os
 import tempfile
+import shutil
 from pathlib import Path
 
 import pytest
@@ -26,20 +27,26 @@ async def _app_with_chapters():
 @pytest.mark.asyncio
 async def test_export_screen_writes_epub_and_reports_path():
     app, rt, db_path = await _app_with_chapters()
-    async with app.run_test() as pilot:
-        await app.push_screen(ExportScreen(rt))
-        await pilot.pause()
-        screen = app.screen
-        assert isinstance(screen, ExportScreen)
-        screen.title_value = "The Drowned Bell"
-        screen.author_value = "A. Author"
-        screen.status_value = "final"
-        await screen.do_export()
-        await pilot.pause()
+    try:
+        async with app.run_test() as pilot:
+            await app.push_screen(ExportScreen(rt))
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, ExportScreen)
+            screen.title_value = "The Drowned Bell"
+            screen.author_value = "A. Author"
+            screen.status_value = "final"
+            await screen.do_export()
+            await pilot.pause()
 
-    story_root = Path(db_path).parent
-    export_dir = story_root / "export"
-    files = list(export_dir.glob("*.epub"))
-    assert len(files) == 1
-    assert files[0].stat().st_size > 0
-    await rt.close()
+        story_root = Path(db_path).parent
+        export_dir = story_root / "export"
+        files = list(export_dir.glob("*.epub"))
+        assert len(files) == 1
+        assert files[0].stat().st_size > 0
+    finally:
+        await rt.close()
+        os.unlink(db_path)
+        export_dir = Path(db_path).parent / "export"
+        if export_dir.exists():
+            shutil.rmtree(export_dir)

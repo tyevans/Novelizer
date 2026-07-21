@@ -142,6 +142,9 @@ def _expected_command_names_from_bindings():
     # "settings" has no keybinding (only reachable via the palette / :settings
     # command-line), so it isn't derivable from BINDINGS -- add it explicitly.
     names.add("settings")
+    # "export_epub" has no keybinding (only reachable via the palette / Ctrl+K),
+    # so it isn't derivable from BINDINGS -- add it explicitly.
+    names.add("export_epub")
     return names
 
 
@@ -228,3 +231,10 @@ async def test_command_provider_run_executes_zero_arg_command():
             assert app.query_one("#body").has_class("room")
     finally:
         await rt.close(); os.unlink(path)
+
+
+def test_export_epub_command_is_registered():
+    from novelizer.tui.app import APP_COMMANDS
+
+    names = [c.name for c in APP_COMMANDS]
+    assert "export_epub" in names
