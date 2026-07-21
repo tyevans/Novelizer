@@ -19,7 +19,6 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "world_architect_tools_enabled", "character_keeper_tools_enabled", "editor_tools_enabled",
     "retconner_tools_enabled", "structure_analyst_tools_enabled",
     "plotter_interval", "plotter_tools_enabled",
-    "triage_interval", "triage_tools_enabled",
     "world_architect_subagent_enabled", "character_keeper_subagent_enabled",
     "editor_subagent_enabled", "retconner_subagent_enabled", "structure_analyst_subagent_enabled",
     "plotter_subagent_enabled", "author_subagent_enabled", "checker_subagent_enabled",
