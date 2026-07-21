@@ -1,9 +1,13 @@
 from __future__ import annotations
 import asyncio
 import logging
+import time
 from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Footer, Input, RichLog, Tab, Tabs
+
+from novelizer.tui.widgets.engine_room_model import LiveRunState, apply_bus_item, route_agent
+from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +33,31 @@ class ChatScreen(Screen):
         self._seen: dict[str, int] = {}
         self._errors: dict[str, list[str]] = {}
         self._last_render_key: tuple = ()
+        self._live_state = LiveRunState()
 
     def compose(self) -> ComposeResult:
         yield Tabs(Tab(f"@{self.agent_name}", id=f"chat-{self.agent_name}"), id="chat_tabs")
+        yield LiveStreamPanel(id="chat_live")
         yield RichLog(highlight=False, markup=False, id="chat_log")
         yield Input(id="chat_input", placeholder=f"message @{self.agent_name}…", compact=True)
         yield Footer()
 
     async def on_mount(self) -> None:
         self.run_worker(self._poll_loop(), exclusive=False)
+        self.run_worker(self._telemetry_loop(), exclusive=False, group="telemetry")
         self.set_focus(self.query_one("#chat_input", Input))
+
+    async def _telemetry_loop(self) -> None:
+        q = self.runtime.telemetry_bus.subscribe()
+        try:
+            while True:
+                item = await q.get()
+                if route_agent(item) != f"chat:{self.agent_name}":
+                    continue
+                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                self.query_one(LiveStreamPanel).render(self._live_state)
+        finally:
+            self.runtime.telemetry_bus.unsubscribe(q)
 
     # -- public API used by the app --------------------------------------
 
@@ -46,6 +65,8 @@ class ChatScreen(Screen):
         """Switch the screen to another agent's conversation (used by @mention
         routing while the screen is already open)."""
         self.agent_name = agent_name
+        self._live_state = LiveRunState()
+        self.query_one(LiveStreamPanel).render(self._live_state)
         if agent_name not in self._agents:
             self._agents.append(agent_name)
         await self._sync_tabs()
@@ -125,6 +146,8 @@ class ChatScreen(Screen):
             agent = tab_id.removeprefix("chat-")
             if agent != self.agent_name:
                 self.agent_name = agent
+                self._live_state = LiveRunState()
+                self.query_one(LiveStreamPanel).render(self._live_state)
                 self._last_render_key = ()
                 self.query_one("#chat_input", Input).placeholder = f"message @{agent}…"
 

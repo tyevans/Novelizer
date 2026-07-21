@@ -10,18 +10,18 @@ import textwrap
 
 from rich.text import Text
 
-from novelizer.agents.editor import VOICE_SOURCE_TAG
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
 from novelizer.brain.mining import MINED_SOURCE_TAG
 from novelizer.brain.paradoxes import PARADOX_SOURCE_TAG
 from novelizer.canon.events import EventType, StoredEvent
 from novelizer.tui.identity import SPEAKER_WIDTH, identity_for
 
-# The four alarm sources map to short badges instead of printing
-# "[source: voice_drift]" raw in the feed. Keys are the imported constants —
-# if a tag string ever changes at its source, the mapping follows.
+# The remaining tag-based alarm sources map to short badges instead of
+# printing their raw "[source: ...]" prefix in the feed. Voice-drift no
+# longer uses a description tag (it's Flag(category="voice_drift") now) so
+# it has no entry here. Keys are the imported constants — if a tag string
+# ever changes at its source, the mapping follows.
 SOURCE_BADGES: dict[str, str] = {
-    VOICE_SOURCE_TAG: "[drift]",
     LEAK_SOURCE_TAG: "[leak]",
     PARADOX_SOURCE_TAG: "[paradox]",
     MINED_SOURCE_TAG: "[mined]",

@@ -8,6 +8,10 @@ from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.chat.schemas import ChatReply
 from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent
 from novelizer.store.models import Chapter
+from novelizer.telemetry.bus import TelemetryBus
+from novelizer.telemetry.recorder import TelemetryRecorder
+from novelizer.canon.event_store import EventStore
+from novelizer.telemetry.events import TelemetryEventType
 
 
 class _R:
@@ -172,5 +176,38 @@ async def test_persona_forbidden_intents_are_dropped(db_path):
         log = await rt.events.events_since(0)
         assert not [e for e in log if e.event_type == EventType.THREAD_PLANTED]
         assert [e for e in log if e.event_type == EventType.CHAT_AGENT_REPLIED]
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_tags_telemetry_with_chat_prefixed_identity(db_path, tmp_path):
+    telemetry_store = EventStore(str(tmp_path / "telemetry.db"))
+    await telemetry_store.init()
+    bus = TelemetryBus()
+    telemetry = TelemetryRecorder(telemetry_store, bus)
+    q = bus.subscribe()
+
+    runner = _R(ChatReply(reply_text="hi"))
+    rt = await _runtime(db_path, {"chat_author": runner})
+    rt.chat._telemetry = telemetry  # inject after construction; Runtime wiring is Task 4's own concern, not retested here
+    try:
+        mid = await rt.chat.send("author", "hello?")
+        await rt.chat.generate_reply("author", replying_to=mid)
+        started = q.get_nowait()
+        assert started.event_type == TelemetryEventType.AGENT_RUN_STARTED
+        assert started.payload["agent_name"] == "chat:author"
+        finished = q.get_nowait()
+        assert finished.event_type == TelemetryEventType.AGENT_RUN_FINISHED
+    finally:
+        await rt.close()
+        await telemetry_store.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_wires_telemetry_into_chat_service(db_path):
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="hi"))})
+    try:
+        assert rt.chat._telemetry is rt.telemetry
     finally:
         await rt.close()

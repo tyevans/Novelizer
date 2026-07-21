@@ -141,6 +141,25 @@ async def test_commit_propagates_validation_error_and_commits_nothing_for_the_ba
     assert [e for e in log if e.event_type == EventType.ANNOTATION_STRUCTURE_SCORED] == []
 
 
+async def test_flags_from_structured_output_are_filed(stack):
+    events, proj, read, committer = stack
+    from novelizer.agents.schemas import FlagDraft
+
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    out = StructureAnalystOutput(scores=[ChapterScore(chapter_id="c1", tension=0.5, pacing_label="steady")], flags=[
+        FlagDraft(category="pacing", description="Act 2 sags for six chapters",
+                  related_entry_ids=[], proposed_resolution="cut or merge two middle chapters"),
+    ])
+    analyst = StructureAnalyst(FakeRunner(out), read, committer)
+    await analyst.run_once()
+    await proj.catch_up()
+    flags = await read.list_flags(category="pacing", status="open")
+    assert len(flags) == 1
+    assert flags[0].description == "Act 2 sags for six chapters"
+    assert flags[0].filed_by == "structure_analyst"
+
+
 class _FakeSettings:
     agent_model = "gpt-4o-mini"
     llm_base_url = None

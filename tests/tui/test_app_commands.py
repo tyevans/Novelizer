@@ -142,6 +142,9 @@ def _expected_command_names_from_bindings():
     # "settings" has no keybinding (only reachable via the palette / :settings
     # command-line), so it isn't derivable from BINDINGS -- add it explicitly.
     names.add("settings")
+    # "export_epub" has no keybinding (only reachable via the palette / Ctrl+K),
+    # so it isn't derivable from BINDINGS -- add it explicitly.
+    names.add("export_epub")
     return names
 
 
@@ -226,5 +229,30 @@ async def test_command_provider_run_executes_zero_arg_command():
             hit.command()
             await pilot.pause()
             assert app.query_one("#body").has_class("room")
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+def test_export_epub_command_is_registered():
+    from novelizer.tui.app import APP_COMMANDS
+
+    names = [c.name for c in APP_COMMANDS]
+    assert "export_epub" in names
+
+
+@pytest.mark.asyncio
+async def test_ctrl_r_opens_research_screen():
+    from novelizer.tui.research_screen import ResearchScreen
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+r")
+            await pilot.pause(0.1)
+            assert isinstance(app.screen, ResearchScreen)
     finally:
         await rt.close(); os.unlink(path)

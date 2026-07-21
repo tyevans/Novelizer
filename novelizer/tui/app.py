@@ -13,12 +13,14 @@ from novelizer.canon.events import StoredEvent, EventType
 from novelizer.chat.personas import CHAT_PERSONAS, resolve_agent_name
 from novelizer.director import commands
 from novelizer.tui.chat_screen import ChatScreen
+from novelizer.tui.research_screen import ResearchScreen
 from novelizer.settings import StoryDirectory, TOMLFileError, global_config_path, load_effective_settings
 from novelizer.tui.widgets.roster import status_strip
 from novelizer.tui.widgets.browser import StoryBrowser
 from novelizer.tui.widgets.browser_model import detail_view
 from novelizer.tui.widgets.proposals_model import banner_line
 from novelizer.tui.approval_screen import ApprovalScreen
+from novelizer.tui.export_screen import ExportScreen
 from novelizer.tui.widgets.brain_panel import BrainPanel
 from novelizer.tui.widgets.feed_model import (
     render_event,
@@ -29,7 +31,8 @@ from novelizer.tui.widgets.feed_model import (
 from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, seed_state, trace_line, trace_detail,
+    AGENT_NAMES, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    trace_line, trace_detail,
 )
 
 
@@ -66,6 +69,7 @@ class NovelizerApp(App):
         ("4", "brain_tab('tab_causeway')", "Cause"),
         ("5", "brain_tab('tab_outline')", "Outline"),
         ("6", "brain_tab('tab_arcs')", "Arcs"),
+        ("ctrl+r", "talk_to_project", "Talk to Project"),
         ("q", "quit", "Quit"),
     ]
     # COMMANDS is set below, after NovelizerCommandProvider is defined at
@@ -79,6 +83,7 @@ class NovelizerApp(App):
         self._chapter_count = 0
         self.messages: list[str] = []
         self._live_state = LiveRunState()
+        self._agent_live_states: dict[str, LiveRunState] = {}
         self._trace_events: deque = deque(maxlen=200)
 
     def compose(self) -> ComposeResult:
@@ -144,6 +149,10 @@ class NovelizerApp(App):
                 await self.runtime.index_catch_up()
             except Exception as e:
                 self._report_worker_error("indexer", e)
+            try:
+                await self.runtime.kg_catch_up()
+            except Exception as e:
+                self._report_worker_error("kg", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:
@@ -308,8 +317,13 @@ class NovelizerApp(App):
             recent = await self.runtime.telemetry_store.events_tail(200)
             self._trace_events.extend(recent)
             self._live_state = seed_state(recent[-50:], time.monotonic())
+            self._agent_live_states = seed_states(recent[-50:], time.monotonic())
             self._refresh_strip()
-            self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+            engine_room = self.query_one("#engine_room", EngineRoom)
+            engine_room.render_live(self._live_state)
+            for agent, state in self._agent_live_states.items():
+                if agent in AGENT_NAMES:
+                    engine_room.render_agent_live(agent, state)
             self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
@@ -317,12 +331,20 @@ class NovelizerApp(App):
         while True:
             try:
                 item = await q.get()
-                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                now = time.monotonic()
+                self._live_state = apply_bus_item(self._live_state, item, now)
+                agent = route_agent(item)
+                if agent:
+                    self._agent_live_states[agent] = apply_bus_item(
+                        self._agent_live_states.get(agent, LiveRunState()), item, now)
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                engine_room = self.query_one("#engine_room", EngineRoom)
+                engine_room.render_live(self._live_state)
+                if agent in AGENT_NAMES:
+                    engine_room.render_agent_live(agent, self._agent_live_states[agent], now)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
 
@@ -330,7 +352,12 @@ class NovelizerApp(App):
         while True:
             try:
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                engine_room = self.query_one("#engine_room", EngineRoom)
+                engine_room.render_live(self._live_state)
+                now = time.monotonic()
+                for agent, state in self._agent_live_states.items():
+                    if agent in AGENT_NAMES:
+                        engine_room.render_agent_live(agent, state, now)
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)
@@ -349,6 +376,9 @@ class NovelizerApp(App):
 
     def action_toggle_prompt(self) -> None:
         _app_toggle_prompt(self)
+
+    def action_talk_to_project(self) -> None:
+        _app_open_research(self)
 
     def action_brain_tab(self, pane_id: str) -> None:
         _app_brain_tab(self, pane_id)
@@ -493,8 +523,18 @@ def _app_open_settings(app: NovelizerApp) -> None:
     app.push_screen(SettingsScreen(story_dir, lambda: app.runtime.settings))
 
 
+def _app_open_export(app: NovelizerApp) -> None:
+    if app.screen is not app.default_screen:
+        return
+    app.push_screen(ExportScreen(app.runtime))
+
+
 def _app_quit(app: NovelizerApp) -> None:
     app.exit()
+
+
+def _app_open_research(app: NovelizerApp) -> None:
+    app.push_screen(ResearchScreen(app.runtime))
 
 
 APP_COMMANDS: list[AppCommand] = [
@@ -504,6 +544,8 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("toggle_prompt", "Toggle the Engine Room prompt panel", _app_toggle_prompt),
     AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
     AppCommand("settings", "Open settings", _app_open_settings),
+    AppCommand("export_epub", "Export EPUB", _app_open_export),
+    AppCommand("talk_to_project", "Talk to the Project (research)", _app_open_research),
     AppCommand("quit", "Quit Novelizer", _app_quit),
     AppCommand(
         "brain_tab_shape", "Story Brain: Shape tab",

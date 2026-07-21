@@ -6,8 +6,10 @@ apply_bus_item and re-renders.
 """
 from __future__ import annotations
 from dataclasses import dataclass, replace
+from rich.text import Text
 from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+from novelizer.tui.identity import identity_for
 
 TEXT_CAP = 8000
 
@@ -20,6 +22,14 @@ _VERBS = {
     "retconner": "retconning",
     "structure_analyst": "scoring structure",
 }
+
+# Mirrors AGENT_REGISTRY's scheduling order in novelizer/agents/registry.py --
+# kept as a plain tuple (not imported) so this module stays free of the heavy
+# agent-construction import chain. Keep in sync if agents are added/removed.
+AGENT_NAMES = (
+    "world_architect", "character_keeper", "muse", "plotter", "author",
+    "editor", "continuity_checker", "retconner", "structure_analyst",
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,9 @@ class LiveRunState:
     call_index: int = 0
     error: str = ""
     stream_attached: bool = True
+    last_kind: str = ""  # "" | "text" | "thinking" — tracks stream-segment
+    # boundaries so a switch between reasoning and answer content gets a
+    # visible marker instead of running together unlabeled.
 
 
 def _append(state: LiveRunState, line: str) -> LiveRunState:
@@ -47,8 +60,15 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if isinstance(item, TokenDelta):
         if state.status != "running" or item.run_id != state.run_id:
             return state
-        text = (state.text + item.text)[-TEXT_CAP:]
-        return replace(state, text=text, tokens=state.tokens + 1)
+        kind = item.kind or "text"
+        marker = ""
+        if kind != state.last_kind:
+            if kind == "thinking":
+                marker = "\n💭 "
+            elif state.last_kind == "thinking":
+                marker = "\n"
+        text = (state.text + marker + item.text)[-TEXT_CAP:]
+        return replace(state, text=text, tokens=state.tokens + 1, last_kind=kind)
     if not isinstance(item, StoredEvent):
         return state
     p = item.payload
@@ -95,6 +115,28 @@ def seed_state(recent: list[StoredEvent], now: float) -> LiveRunState:
     return state
 
 
+def route_agent(item) -> str | None:
+    """Which agent a bus item (TokenDelta or StoredEvent) belongs to, for
+    fanning a single stream out into per-agent buckets."""
+    if isinstance(item, TokenDelta):
+        return item.agent_name or None
+    if isinstance(item, StoredEvent):
+        return item.payload.get("agent_name") or None
+    return None
+
+
+def seed_states(recent: list[StoredEvent], now: float) -> dict[str, LiveRunState]:
+    """Per-agent counterpart to seed_state: groups replayed events by agent
+    and folds each group independently, so one agent's run doesn't clobber
+    another's on replay."""
+    by_agent: dict[str, list[StoredEvent]] = {}
+    for ev in recent:
+        agent = route_agent(ev)
+        if agent:
+            by_agent.setdefault(agent, []).append(ev)
+    return {agent: seed_state(events, now) for agent, events in by_agent.items()}
+
+
 def _fmt_tokens(n: int) -> str:
     return f"{n / 1000:.1f}k tok" if n >= 1000 else f"{n} tok"
 
@@ -139,6 +181,19 @@ def live_body(state: LiveRunState) -> str:
     if state.status == "failed" and state.text:
         return state.text + "\n\n✗ crashed"
     return state.text or "(waiting for first token…)"
+
+
+def stream_line_kind(line: str) -> str:
+    """Classify a live_body() line for widget-level styling. Pure/text-only
+    so it stays testable without Rich or Textual."""
+    s = line.strip()
+    if s.startswith("⚒"):
+        return "tool"
+    if s.startswith("▸") or s.startswith("↳"):
+        return "call"
+    if s.startswith("💭"):
+        return "thinking"
+    return "prose"
 
 
 def _t(ev: StoredEvent) -> str:
@@ -193,3 +248,28 @@ def trace_detail(ev: StoredEvent, produced: list[StoredEvent]) -> str:
     if prompt is not None:
         lines += ["", "─ prompt ─", prompt]
     return "\n".join(lines)
+
+
+# Rich styles per stream_line_kind(); "" leaves prose in the theme default so
+# the agent's own accent color (applied to the vitals bar) stays the visual
+# anchor rather than competing with a wall of colored prose.
+_LINE_STYLES = {"tool": "bold cyan", "call": "dim", "thinking": "italic dim magenta"}
+
+
+def styled_vitals(state: LiveRunState, now: float) -> Text:
+    ident = identity_for(state.agent_name)
+    return Text(f"{ident.glyph} {vitals_line(state, now)}", style=ident.style)
+
+
+def styled_body(body: str) -> Text:
+    # Text objects are never markup-parsed regardless of a Static's
+    # markup=False setting, so untrusted stream content (tool summaries,
+    # prompts) stays safe here the same way it does as a plain str.
+    text = Text()
+    lines = body.split("\n")
+    for i, line in enumerate(lines):
+        style = _LINE_STYLES.get(stream_line_kind(line), "")
+        text.append(line, style=style)
+        if i != len(lines) - 1:
+            text.append("\n")
+    return text

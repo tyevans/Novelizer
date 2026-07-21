@@ -112,3 +112,4 @@ class TokenDelta(BaseModel):
     run_id: str
     agent_name: str
     text: str
+    kind: str = "text"  # "text" (answer content) | "thinking" (reasoning_content)

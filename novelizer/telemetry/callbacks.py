@@ -10,6 +10,19 @@ from novelizer.telemetry.events import (
 )
 
 
+def _reasoning_text(chunk: Any) -> str:
+    """Pull server-side reasoning/thinking text out of a streamed chunk.
+
+    Reasoning-capable OpenAI-compatible endpoints put this in
+    additional_kwargs (key varies by provider: reasoning_content is the
+    common one, reasoning the OpenAI-native one) rather than in .content —
+    on_llm_new_token's `token` argument is just chunk.content, so reasoning
+    text is silently dropped unless read from here explicitly."""
+    msg = getattr(chunk, "message", None)
+    kwargs = getattr(msg, "additional_kwargs", None) or {}
+    return kwargs.get("reasoning_content") or kwargs.get("reasoning") or ""
+
+
 def render_messages(messages) -> str:
     """Render LangChain chat batches to the trace's prompt text: one
     [role] header per message, content stringified."""
@@ -72,13 +85,21 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
                            call_index=state.call_index, model=model, prompt=prompt),
         )
 
-    async def on_llm_new_token(self, token: str, *, run_id: UUID, **kwargs: Any) -> None:
+    async def on_llm_new_token(self, token: str, *, chunk: Any = None,
+                               run_id: UUID, **kwargs: Any) -> None:
         state = self._calls.get(run_id)
         if state is None:
             return
         state.chunks += 1
-        self._recorder.publish_token(
-            TokenDelta(run_id=state.novelizer_run_id, agent_name=state.agent_name, text=token))
+        reasoning = _reasoning_text(chunk)
+        if reasoning:
+            self._recorder.publish_token(
+                TokenDelta(run_id=state.novelizer_run_id, agent_name=state.agent_name,
+                          text=reasoning, kind="thinking"))
+        if token:
+            self._recorder.publish_token(
+                TokenDelta(run_id=state.novelizer_run_id, agent_name=state.agent_name,
+                          text=token, kind="text"))
 
     async def on_llm_end(self, response, *, run_id: UUID, **kwargs: Any) -> None:
         state = self._calls.pop(run_id, None)

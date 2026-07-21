@@ -6,6 +6,7 @@ from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, AnnotationStructureScored
+from novelizer.store.models import Flag
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,16 @@ class StructureAnalyst(BaseAgent):
                 chapter_id=score.chapter_id, tension=score.tension, pacing_label=score.pacing_label
             )
             await self._committer.commit(self.name, EventType.ANNOTATION_STRUCTURE_SCORED, score.chapter_id, payload)
+        if out.flags:
+            open_flags = await self._read.list_flags(status="open")
+            seen_descriptions = {f.description for f in open_flags}
+            for r in out.flags:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
+                flag = Flag(category=r.category, filed_by=self.name, description=r.description,
+                            related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:

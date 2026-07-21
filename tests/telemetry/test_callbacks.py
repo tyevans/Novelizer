@@ -84,6 +84,27 @@ def test_new_token_publishes_delta_and_llm_end_reports_usage_tokens():
     assert payload.duration_s >= 0.0
 
 
+def test_new_token_extracts_reasoning_content_from_the_chunk_as_a_thinking_delta():
+    """Reasoning-capable OpenAI-compatible endpoints put reasoning text in
+    additional_kwargs, not .content -- on_llm_new_token's `token` arg alone
+    would silently drop it, so it must be read from the chunk explicitly."""
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def go():
+        await h.on_chat_model_start({"kwargs": {}}, [[HumanMessage(content="x")]], run_id=lc_run)
+        reasoning_chunk = SimpleNamespace(
+            message=SimpleNamespace(additional_kwargs={"reasoning_content": "let me think"}))
+        await h.on_llm_new_token("", chunk=reasoning_chunk, run_id=lc_run)
+        answer_chunk = SimpleNamespace(message=SimpleNamespace(additional_kwargs={}))
+        await h.on_llm_new_token("The sea", chunk=answer_chunk, run_id=lc_run)
+    _in_run(go)
+    assert [(d.text, d.kind) for d in rec.tokens] == [
+        ("let me think", "thinking"), ("The sea", "text"),
+    ]
+
+
 def test_llm_end_without_usage_falls_back_to_streamed_chunk_count():
     rec = FakeRecorder()
     h = TelemetryCallbackHandler(rec)

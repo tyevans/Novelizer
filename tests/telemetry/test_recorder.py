@@ -76,3 +76,61 @@ async def test_next_call_index_counts_per_run_and_resets_at_run_end(rig):
     await rec.emit(TelemetryEventType.AGENT_RUN_FINISHED, "r1",
                    AgentRunFinished(run_id="r1", agent_name="author", duration_s=1.0))
     assert rec.next_call_index("r1") == 1  # bookkeeping cleared
+
+
+from novelizer.telemetry.recorder import run_with_identity
+from novelizer.run_context import current_agent_name, current_run_id
+
+
+async def test_run_with_identity_emits_started_then_finished(rig):
+    store, bus, rec = rig
+    q = bus.subscribe()
+    async with run_with_identity(rec, "research") as run_id:
+        assert current_agent_name.get() == "research"
+        assert current_run_id.get() == run_id
+    started = q.get_nowait()
+    finished = q.get_nowait()
+    assert started.event_type == TelemetryEventType.AGENT_RUN_STARTED
+    assert started.payload["agent_name"] == "research"
+    assert started.payload["run_id"] == run_id
+    assert finished.event_type == TelemetryEventType.AGENT_RUN_FINISHED
+    assert finished.payload["run_id"] == run_id
+
+
+async def test_run_with_identity_emits_failed_and_reraises(rig):
+    store, bus, rec = rig
+    q = bus.subscribe()
+    with pytest.raises(ValueError):
+        async with run_with_identity(rec, "chat:author"):
+            raise ValueError("boom")
+    q.get_nowait()  # started
+    failed = q.get_nowait()
+    assert failed.event_type == TelemetryEventType.AGENT_RUN_FAILED
+    assert failed.payload["error_type"] == "ValueError"
+    assert failed.payload["error_message"] == "boom"
+
+
+async def test_run_with_identity_resets_context_vars_after(rig):
+    store, bus, rec = rig
+    assert current_agent_name.get() == ""
+    assert current_run_id.get() is None
+    async with run_with_identity(rec, "research"):
+        pass
+    assert current_agent_name.get() == ""
+    assert current_run_id.get() is None
+
+
+async def test_run_with_identity_resets_context_vars_on_exception(rig):
+    store, bus, rec = rig
+    with pytest.raises(RuntimeError):
+        async with run_with_identity(rec, "research"):
+            raise RuntimeError("x")
+    assert current_agent_name.get() == ""
+    assert current_run_id.get() is None
+
+
+async def test_run_with_identity_is_a_no_op_with_no_telemetry():
+    async with run_with_identity(None, "research") as run_id:
+        assert current_agent_name.get() == "research"
+        assert run_id  # still a real generated id, just nothing emitted
+    assert current_agent_name.get() == ""

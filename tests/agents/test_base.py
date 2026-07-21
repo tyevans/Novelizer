@@ -538,7 +538,7 @@ async def test_commit_theme_intents_noop_on_empty_list(stack):
 
 async def test_commit_theme_intents_introduce_files_similarity_suggestion_retcon(stack, tmp_path):
     from novelizer.store.embeddings import EmbeddingStore
-    from novelizer.store.models import RetconStatus
+    from novelizer.store.models import FlagStatus
     from tests.conftest import FakeEmbeddingFunction
 
     events, proj, read, committer = stack
@@ -561,8 +561,9 @@ async def test_commit_theme_intents_introduce_files_similarity_suggestion_retcon
     new_theme = await read.get_theme("the-price-of-ambition")
     assert new_theme is not None
 
-    reqs = await read.list_retcon_requests(status=RetconStatus.open)
+    reqs = await read.list_flags(category="thematic", status=FlagStatus.open)
     assert len(reqs) == 1
+    assert reqs[0].category == "thematic"
     assert "[source: theme_similarity]" in reqs[0].description
     assert "loss" in reqs[0].description
     assert "The Cost of Ambition" in reqs[0].description

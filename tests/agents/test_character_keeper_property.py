@@ -7,14 +7,14 @@ import os
 import tempfile
 from hypothesis import given, settings, strategies as st
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import CharacterUpdate, KeeperOutput, KnowledgeIntent, NewCharacter, RetconDraft
+from novelizer.agents.schemas import CharacterUpdate, KeeperOutput, KnowledgeIntent, NewCharacter, FlagDraft
 from novelizer.canon.characters import slugify_character_name
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.store.models import Chapter, RetconStatus
+from novelizer.store.models import Chapter, FlagStatus
 
 
 class FakeRunner:
@@ -92,7 +92,7 @@ async def _run_pass(out: KeeperOutput) -> None:
         # However populated the lists, a pass never mutates canon:
         # the only event beyond the seeded chapter may be one agent.remarked.
         assert await read.list_characters() == []
-        assert await read.list_retcon_requests(status=RetconStatus.open) == []
+        assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
         log = await events.events_since(0)
         assert {e.event_type for e in log} <= {EventType.CHAPTER_CREATED, EventType.AGENT_REMARKED}
         assert sum(1 for e in log if e.event_type == EventType.AGENT_REMARKED) <= 1
@@ -114,7 +114,7 @@ _texts = st.text(max_size=12)
         feed_note=_texts,
         new_characters=st.lists(st.builds(NewCharacter, name=st.text(min_size=1, max_size=12)), max_size=4),
         updated_characters=st.lists(st.builds(CharacterUpdate, id=_texts), max_size=4),
-        retcon_requests=st.lists(st.builds(RetconDraft, description=st.text(min_size=1, max_size=12)), max_size=4),
+        flags=st.lists(st.builds(FlagDraft, category=st.just("contradiction"), description=st.text(min_size=1, max_size=12)), max_size=4),
         knowledge_intents=st.lists(
             st.builds(KnowledgeIntent, action=st.just("learn"), id=_texts, character_id=_texts), max_size=4
         ),

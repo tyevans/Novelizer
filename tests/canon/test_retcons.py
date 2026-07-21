@@ -5,7 +5,7 @@ from novelizer.canon.event_store import EventStore
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.events import EventType
-from novelizer.store.models import RetconRequest, RetconStatus, Character
+from novelizer.store.models import Flag, FlagStatus, Character
 
 
 @pytest.fixture
@@ -20,16 +20,16 @@ async def stack():
 
 async def test_retcon_created_then_resolved(stack):
     events, proj, read = stack
-    req = RetconRequest(id="r1", description="scar hand mismatch",
-                        conflicting_entry_ids=["a", "b"], proposed_resolution="left hand")
-    await events.append(EventType.RETCON_REQUEST_CREATED, "r1", req)
+    req = Flag(id="r1", category="contradiction", description="scar hand mismatch",
+               related_entry_ids=["a", "b"], proposed_resolution="left hand")
+    await events.append(EventType.FLAG_CREATED, "r1", req)
     await proj.catch_up()
-    assert [r.id for r in await read.list_retcon_requests(status=RetconStatus.open)] == ["r1"]
-    resolved = req.model_copy(update={"status": RetconStatus.resolved, "resolved_by": "retconner"})
+    assert [r.id for r in await read.list_flags(category="contradiction", status=FlagStatus.open)] == ["r1"]
+    resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": "retconner"})
     await events.append(EventType.RETCON_REQUEST_RESOLVED, "r1", resolved)
     await proj.catch_up()
-    assert await read.list_retcon_requests(status=RetconStatus.open) == []
-    assert [r.id for r in await read.list_retcon_requests(status=RetconStatus.resolved)] == ["r1"]
+    assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
+    assert [r.id for r in await read.list_flags(category="contradiction", status=FlagStatus.resolved)] == ["r1"]
 
 
 async def test_get_character(stack):

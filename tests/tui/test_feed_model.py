@@ -1,12 +1,11 @@
 from hypothesis import given, strategies as st
 
-from novelizer.agents.editor import VOICE_SOURCE_TAG
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
 from novelizer.brain.mining import MINED_SOURCE_TAG
 from novelizer.brain.paradoxes import PARADOX_SOURCE_TAG
 from novelizer.tui.widgets.feed_model import SOURCE_BADGES, parse_source_badge
 
-_ALL_TAGS = [VOICE_SOURCE_TAG, LEAK_SOURCE_TAG, PARADOX_SOURCE_TAG, MINED_SOURCE_TAG]
+_ALL_TAGS = [LEAK_SOURCE_TAG, PARADOX_SOURCE_TAG, MINED_SOURCE_TAG]
 
 
 def test_every_source_tag_constant_has_a_badge():
@@ -14,7 +13,6 @@ def test_every_source_tag_constant_has_a_badge():
 
 
 def test_badges_are_the_spec_short_forms():
-    assert SOURCE_BADGES[VOICE_SOURCE_TAG] == "[drift]"
     assert SOURCE_BADGES[LEAK_SOURCE_TAG] == "[leak]"
     assert SOURCE_BADGES[PARADOX_SOURCE_TAG] == "[paradox]"
     assert SOURCE_BADGES[MINED_SOURCE_TAG] == "[mined]"
@@ -150,13 +148,13 @@ def test_render_remark_unknown_agent_uses_title_case_fallback():
 
 
 def test_render_retcon_created_is_alarm_with_parsed_badge():
-    from novelizer.agents.editor import VOICE_SOURCE_TAG
+    from novelizer.brain.leaks import LEAK_SOURCE_TAG
     text = render_event(_ev(EventType.RETCON_REQUEST_CREATED,
-                            {"description": f"{VOICE_SOURCE_TAG} clean and neutral violated"}))
+                            {"description": f"{LEAK_SOURCE_TAG} clean and neutral violated"}))
     assert text.plain.startswith("↺ Retconner")
     assert "⚠" in text.plain
-    assert "[drift]" in text.plain
-    assert "[source: voice_drift]" not in text.plain
+    assert "[leak]" in text.plain
+    assert "[source: leak_detector]" not in text.plain
     assert any(str(span.style) == ALARM_STYLE for span in text.spans)
 
 

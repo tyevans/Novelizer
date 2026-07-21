@@ -15,6 +15,7 @@ from novelizer.canon.events import BookCompleted, ChapterBriefSuperseded, EventT
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.muse.prompts import inspiration_note
+from novelizer.store.models import Flag
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +229,16 @@ class Plotter(BaseAgent):
         await self._commit_promise_intents(
             out.promise_intents, active_promise_ids, active_thread_ids, chapter_id=""
         )
+        if out.flags:
+            open_flags = await self._read.list_flags(status="open")
+            seen_descriptions = {f.description for f in open_flags}
+            for r in out.flags:
+                if r.description in seen_descriptions:
+                    continue
+                seen_descriptions.add(r.description)
+                flag = Flag(category=r.category, filed_by=self.name, description=r.description,
+                            related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
         await self._remark(out.feed_note)
         await self._consume_signals(ctx["signals"])
 
@@ -292,10 +303,12 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None):
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
+        from novelizer.agents.middleware import TodoContextMiddleware
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
             backend=backend, tools=tools, skills=PLOTTER_SKILLS,
+            middleware=[TodoContextMiddleware()],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

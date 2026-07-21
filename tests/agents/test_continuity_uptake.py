@@ -78,4 +78,4 @@ async def test_undealt_item_is_dropped_not_retconned(stack):
     await _checker(read, committer, events, out).run_once()
     await proj.catch_up()
     assert await read.list_uptake() == []
-    assert await read.list_retcon_requests(status="open") == []
+    assert await read.list_flags(category="contradiction", status="open") == []

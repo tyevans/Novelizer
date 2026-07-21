@@ -17,7 +17,9 @@ _RETRIEVAL_NOTE_PREFIX = (
     "You have file tools over the story canon (ls, read_file, grep, glob) and semantic "
     "search (search_canon). Work index-then-read: grep/glob for an exact name, slug, or "
     "phrase, search_canon for a theme or 'where did X happen' when you don't know the "
-    "words — locate the file, then read_file the span you need. "
+    "words — locate the file, then read_file the span you need. Chapter files are named "
+    "by ordinal and title slug, not by chapter number: `chapters/001-the-salt-road.md`, "
+    "never `chapters/ch01.md` or `chapters/ch1.md`. Use `chapters/*.md` to list them all. "
 )
 
 # Only for agents whose pushed context carries a chapter index; without one the

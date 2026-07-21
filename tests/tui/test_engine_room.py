@@ -213,6 +213,96 @@ async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequen
         assert not any("telemetry error" in m for m in app.messages)
 
 
+async def test_agent_tabs_carry_glyph_and_color_from_the_identity_registry(rt):
+    from textual.widgets import Static
+    from novelizer.tui.identity import identity_for
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="hi"))
+        await pilot.pause(0.8)
+
+        ident = identity_for("author")
+        vitals = app.query_one("#er_vitals_author", Static).renderable
+        assert ident.glyph in str(vitals)
+        assert vitals.style == ident.style
+
+
+async def test_agent_tab_titles_carry_glyph_and_color():
+    """A plain str TabPane title gets markup-parsed (Widget.render_str ->
+    Content.from_markup) and silently loses any style not spelled as markup
+    -- titles must be pre-styled Content, not str, or they render colorless."""
+    from novelizer.tui.widgets.engine_room import EngineRoom
+    from novelizer.tui.identity import identity_for
+    from textual.content import Content
+    from textual.widgets import TabbedContent
+    from textual.app import App
+
+    class _Harness(App):
+        def compose(self):
+            yield EngineRoom(id="engine_room")
+
+    app = _Harness()
+    async with app.run_test() as pilot:
+        tabs = app.query_one("#er_tabs", TabbedContent)
+        author_tab = tabs.query_one("#er_tab_author")._title
+        ident = identity_for("author")
+        assert isinstance(author_tab, Content)
+        assert author_tab.plain == f"{ident.glyph} {ident.label}"
+        assert any(span.style == ident.style for span in author_tab.spans)
+
+
+async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt):
+    from textual.widgets import Static
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="pondering the tide", kind="thinking"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="The lighthouse", kind="text"))
+        await pilot.pause(0.8)
+        body = app.query_one("#er_stream_author", Static).renderable
+        assert "💭 pondering the tide" in str(body)
+        assert "The lighthouse" in str(body)
+
+
+async def test_agent_tabs_show_only_their_own_agents_activity(rt):
+    """Two agents running concurrently (scheduler allows max_concurrent_agents
+    > 1) must not clobber each other's tab -- each keeps its own live feed,
+    and the "All" tab still tracks whichever run is most recent (today's
+    single-global-state behavior, unchanged)."""
+    from textual.widgets import Static
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="the sea"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="editor"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r2", agent_name="editor", text="looks good"))
+        await pilot.pause(0.8)
+
+        author_body = app.query_one("#er_stream_author", Static).renderable
+        editor_body = app.query_one("#er_stream_editor", Static).renderable
+        assert "the sea" in str(author_body) and "looks good" not in str(author_body)
+        assert "looks good" in str(editor_body) and "the sea" not in str(editor_body)
+
+        # The "All" tab reflects the most-recently-started run (today's
+        # single-global-state behavior) -- editor started last.
+        all_body = app.query_one("#er_stream", Static).renderable
+        assert "looks good" in str(all_body)
+        assert not any("telemetry error" in m for m in app.messages)
+
+
 # Prose/prompt text is untrusted: real agent prompts contain sequences like
 # "[system]" and "key=value" inside brackets that Textual's markup parser
 # rejects (MarkupError: "Expected markup value"), which crashed the telemetry
@@ -261,6 +351,22 @@ async def test_trace_rows_tolerate_markup_hostile_tool_summaries(rt):
         table = app.query_one("#er_trace", DataTable)
         rows = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
         assert any("read" in r for r in rows)
+
+
+async def test_non_autonomous_identities_dont_crash_the_telemetry_loop(rt):
+    """chat:<agent> and research telemetry identities have no Engine Room
+    tab (only the fixed AGENT_NAMES seven do) — the app's global telemetry
+    loop must skip rendering them into Engine Room instead of crashing on
+    a missing #er_vitals_<agent> widget."""
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="research"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="research", text="hi"))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="chat:author"))
+        await pilot.pause(0.8)
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
 
 
 async def test_seeded_trace_survives_restart(rt):

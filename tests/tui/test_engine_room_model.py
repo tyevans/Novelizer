@@ -2,8 +2,8 @@ from hypothesis import given, strategies as st
 from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, seed_state, strip_line, vitals_line,
-    live_body, trace_line, trace_detail,
+    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    strip_line, stream_line_kind, vitals_line, live_body, trace_line, trace_detail,
 )
 
 
@@ -107,6 +107,58 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_apply_bus_item_marks_the_boundary_between_thinking_and_answer_text():
+    """Reasoning-model chunks arrive as separate thinking/text deltas: the
+    switch between them must be visible, not silently concatenated."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="let me consider", kind="thinking"), now=1.0)
+    assert s.text == "\n💭 let me consider"
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text=" the tide.", kind="thinking"), now=1.1)
+    assert s.text == "\n💭 let me consider the tide."
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="The lighthouse", kind="text"), now=1.2)
+    assert s.text == "\n💭 let me consider the tide.\nThe lighthouse"
+
+
+def test_stream_line_kind_classifies_marker_lines():
+    assert stream_line_kind("⚒ search_web(dragons)") == "tool"
+    assert stream_line_kind("   ↳ done in 1.2s") == "call"
+    assert stream_line_kind("▸ call 1 (qwen)") == "call"
+    assert stream_line_kind("💭 thinking about it") == "thinking"
+    assert stream_line_kind("Once upon a time") == "prose"
+
+
+def test_route_agent_reads_agent_name_from_token_deltas_and_events():
+    assert route_agent(TokenDelta(run_id="r1", agent_name="author", text="x")) == "author"
+    started = _ev(1, TelemetryEventType.AGENT_RUN_STARTED,
+                  {"run_id": "r1", "agent_name": "editor"})
+    assert route_agent(started) == "editor"
+    assert route_agent(TokenDelta(run_id="r1", agent_name="", text="x")) is None
+    assert route_agent("not a bus item") is None
+
+
+def test_seed_states_keeps_concurrent_agents_isolated():
+    """Two agents can be running at once (max_concurrent_agents > 1): seeding
+    must not let one agent's replayed run clobber another's bucket."""
+    events = [
+        _ev(1, TelemetryEventType.AGENT_RUN_STARTED, {"run_id": "r1", "agent_name": "author"}),
+        _ev(2, TelemetryEventType.AGENT_RUN_STARTED, {"run_id": "r2", "agent_name": "editor"}),
+        _ev(3, TelemetryEventType.TOOL_CALL_STARTED,
+           {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+            "input_summary": "dragons"}),
+        _ev(4, TelemetryEventType.TOOL_CALL_STARTED,
+           {"run_id": "r2", "agent_name": "editor", "tool_name": "read",
+            "input_summary": "ch1.md"}),
+    ]
+    states = seed_states(events, now=10.0)
+    assert set(states) == {"author", "editor"}
+    assert "search_web" in states["author"].text and "read" not in states["author"].text
+    assert "ch1.md" in states["editor"].text and "search_web" not in states["editor"].text
+    assert states["author"].run_id == "r1" and states["editor"].run_id == "r2"
+
+
 def test_apply_bus_item_folds_llm_call_boundaries_into_the_live_text_stream():
     """Fix: on tool-calling turns the model may emit zero streamed tokens, so
     call start/finish must be visible on their own or the feed goes blank."""
@@ -204,3 +256,27 @@ def test_trace_detail_shows_prompt_and_produced_domain_events():
     text = trace_detail(call, produced)
     assert "[system]\nWrite." in text
     assert "produced: chapter.created ch-12" in text
+
+
+def test_styled_vitals_includes_glyph_and_vitals_line():
+    from novelizer.tui.widgets.engine_room_model import styled_vitals
+    state = LiveRunState(status="running", agent_name="author", started_at=0.0,
+                         model="m", call_index=1, tokens=5)
+    text = styled_vitals(state, now=2.0)
+    plain = text.plain
+    assert "author" in plain
+    assert "✎" in plain  # author's glyph from identity_for
+
+
+def test_styled_body_applies_tool_style_to_tool_lines():
+    from novelizer.tui.widgets.engine_room_model import styled_body
+    text = styled_body("\n⚒ search_canon(query)\n")
+    # spans carries the style runs; a tool-prefixed line gets the "bold cyan" style
+    styles = [span.style for span in text.spans]
+    assert "bold cyan" in styles
+
+
+def test_styled_body_leaves_prose_unstyled():
+    from novelizer.tui.widgets.engine_room_model import styled_body
+    text = styled_body("plain prose line")
+    assert text.spans == []

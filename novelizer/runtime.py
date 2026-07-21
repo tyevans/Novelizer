@@ -35,6 +35,8 @@ from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
 from novelizer.store.embeddings import EmbeddingStore
 from novelizer.store.indexer import CanonIndexer
+from novelizer.store.kg_store import KGStore
+from novelizer.store.kg_projector import KGProjector
 
 # Agents pinned into Runtime._tooling_pinned. author and continuity_checker are
 # deliberately excluded here even though their SPECs carry a tool_grant (needed
@@ -80,8 +82,11 @@ class Runtime:
         self.active_prose_profile = None
         self.chat: Optional[ChatService] = None
         self._chat_runner_cache: dict[str, object] = {}
+        self._research_runner_cache = None
         self.embeddings = embedding_store   # None => built in start()
         self.indexer = None
+        self.kg_store = None
+        self.kg_projector = None
 
     def _runner_for(self, name: str, builder, fallback_name: str | None = None):
         if self._runners is not None:
@@ -125,7 +130,7 @@ class Runtime:
                 "/workspace/": StateBackend(),
             },
         )
-        tools = [build_search_canon_tool(self.embeddings, self.read)]
+        tools = [build_search_canon_tool(self.embeddings, self.read, self.kg_store)]
         return backend, tools
 
     def _tooled(self, builder, enabled: bool):
@@ -160,6 +165,20 @@ class Runtime:
                 self._chat_runner_cache[key] = build_chat_runner(self.settings, agent_name)
         return self._chat_runner_cache[key]
 
+    def _research_runner_for(self):
+        """Lazy research runner, built once and cached. Injected fakes use
+        key 'research' in the runners dict."""
+        if self._runners is not None and "research" in self._runners:
+            return self._runners["research"]
+        if self._research_runner_cache is None:
+            from novelizer.research.runner import build_research_runner
+            self._research_runner_cache = build_research_runner(
+                self.settings, callbacks=self._llm_callbacks,
+                backend=self._canon_backend, tools=self._canon_tools,
+                read_store=self.read,
+            )
+        return self._research_runner_cache
+
     async def start(self) -> None:
         await self.events.init()
         await self.projector.init()
@@ -178,6 +197,15 @@ class Runtime:
             str(Path(self.settings.db_path).with_name("embed_cursor.json")),
         )
         await self.index_catch_up()  # backfill; failure-tolerant by contract
+        self.kg_store = KGStore(self.settings.db_path)
+        await self.kg_store.init()
+        from novelizer.agents.kg_extraction import build_kg_extraction_runner
+        kg_runner = build_kg_extraction_runner(self.settings, callbacks=self._llm_callbacks)
+        self.kg_projector = KGProjector(
+            self.events, self.read, self.kg_store, self.embeddings, kg_runner,
+            str(Path(self.settings.db_path).with_name("kg_cursor.json")),
+        )
+        await self.kg_catch_up()  # backfill; failure-tolerant by contract
         self.policy = AutonomyPolicy(self.read)
         self.committer = GatingCommitter(self.events, self.policy)
         self.proposals = ProposalService(self.events)
@@ -225,8 +253,10 @@ class Runtime:
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
-            pull_mode=s.chat_tools_enabled,
+            pull_mode=s.chat_tools_enabled, telemetry=self.telemetry,
         )
+        from novelizer.research.service import ResearchService
+        self.research = ResearchService(self._research_runner_for, telemetry=self.telemetry)
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -339,8 +369,17 @@ class Runtime:
             return
         await self.indexer.catch_up()
 
+    async def kg_catch_up(self) -> None:
+        """Periodic-caller-safe KG catch-up: no-op without a projector, and
+        never raises (KGProjector.catch_up swallows batch failures)."""
+        if self.kg_projector is None:
+            return
+        await self.kg_projector.catch_up()
+
     async def close(self) -> None:
         await self.read.close()
         await self.projector.close()
         await self.telemetry_store.close()
         await self.events.close()
+        if self.kg_store is not None:
+            await self.kg_store.close()

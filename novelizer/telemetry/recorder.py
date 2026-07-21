@@ -1,12 +1,17 @@
 from __future__ import annotations
 import logging
+import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pydantic import BaseModel
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import StoredEvent
+from novelizer.run_context import current_agent_name, current_run_id
 from novelizer.telemetry.bus import TelemetryBus
-from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+from novelizer.telemetry.events import (
+    AgentRunFailed, AgentRunFinished, AgentRunStarted, TelemetryEventType, TokenDelta,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,3 +65,43 @@ class TelemetryRecorder:
         elif event_type in _RUN_END_TYPES:
             self._open_calls.discard(run_id)
             self._call_counts.pop(run_id, None)
+
+
+@asynccontextmanager
+async def run_with_identity(telemetry, name: str):
+    """Bracket a block of work with ambient run identity (current_run_id /
+    current_agent_name) and AGENT_RUN_* telemetry — the same contract
+    BaseAgent.run_once gives autonomous agents, reusable for call sites
+    that aren't a BaseAgent (chat, research). `telemetry` may be None: the
+    context vars are still set/reset, nothing is emitted."""
+    run_id = str(uuid.uuid4())
+    started = time.monotonic()
+    rid_token = current_run_id.set(run_id)
+    name_token = current_agent_name.set(name)
+    if telemetry is not None:
+        await telemetry.emit(
+            TelemetryEventType.AGENT_RUN_STARTED, run_id,
+            AgentRunStarted(run_id=run_id, agent_name=name),
+        )
+    try:
+        yield run_id
+    except Exception as e:
+        if telemetry is not None:
+            phase = "llm_call" if telemetry.in_llm_call(run_id) else "agent"
+            await telemetry.emit(
+                TelemetryEventType.AGENT_RUN_FAILED, run_id,
+                AgentRunFailed(
+                    run_id=run_id, agent_name=name, error_type=type(e).__name__,
+                    error_message=str(e), phase=phase, duration_s=time.monotonic() - started,
+                ),
+            )
+        raise
+    else:
+        if telemetry is not None:
+            await telemetry.emit(
+                TelemetryEventType.AGENT_RUN_FINISHED, run_id,
+                AgentRunFinished(run_id=run_id, agent_name=name, duration_s=time.monotonic() - started),
+            )
+    finally:
+        current_run_id.reset(rid_token)
+        current_agent_name.reset(name_token)

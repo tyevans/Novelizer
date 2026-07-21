@@ -7,6 +7,7 @@ from novelizer.store.models import (
     WorldEntry, Character, Chapter, ThemeRecord, ThreadRecord, SecretRecord,
     PromiseRecord, ChapterBriefRecord, ArcRecord,
 )
+from novelizer.text_chunk import chunk_prose
 
 
 @dataclass
@@ -42,20 +43,6 @@ def _cap(text: str) -> str:
     return text[:_MAX_EMBED_CHARS]
 
 
-def _chunk_prose(text: str) -> list[str]:
-    if len(text) <= _CHAPTER_CHUNK_CHARS:
-        return [text]
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + _CHAPTER_CHUNK_CHARS
-        chunks.append(text[start:end])
-        if end >= len(text):
-            break
-        start = end - _CHAPTER_CHUNK_OVERLAP
-    return chunks
-
-
 def _chunk_id(chapter_id: str, index: int) -> str:
     return f"{chapter_id}#{index}"
 
@@ -85,6 +72,7 @@ class EmbeddingStore:
         self._promises = self._client.get_or_create_collection("promises", embedding_function=ef)
         self._briefs = self._client.get_or_create_collection("briefs", embedding_function=ef)
         self._arcs = self._client.get_or_create_collection("arcs", embedding_function=ef)
+        self._entities = self._client.get_or_create_collection("entities", embedding_function=ef)
         # Writes ARE reachable concurrently: agent intent commits
         # (novelizer/agents/intents.py) run as concurrent background tasks,
         # and CanonIndexer.catch_up() runs on every TUI tick. chromadb's
@@ -112,7 +100,7 @@ class EmbeddingStore:
             )
 
     async def upsert_chapter(self, chapter: Chapter) -> None:
-        chunks = _chunk_prose(chapter.prose)
+        chunks = chunk_prose(chapter.prose, _CHAPTER_CHUNK_CHARS, _CHAPTER_CHUNK_OVERLAP)
         ids = [_chunk_id(chapter.id, i) for i in range(len(chunks))]
         metadatas = [
             {"title": chapter.title, "chapter_id": chapter.id, "chunk_index": i}
@@ -179,6 +167,17 @@ class EmbeddingStore:
                 metadatas=[{"title": f"Arc: {arc.character_id}"}],
             )
 
+    async def upsert_entity(self, entity_id: str, name: str, detail: str) -> None:
+        text = _cap(f"{name}\n{detail}")
+        async with self._write_lock:
+            await asyncio.to_thread(
+                self._entities.upsert, ids=[entity_id], documents=[text],
+                metadatas=[{"title": name}],
+            )
+
+    async def delete_entity(self, entity_id: str) -> None:
+        await self.delete(entity_id, "entities")
+
     async def delete(self, entity_id: str, collection: str) -> None:
         col = {
             "world_entries": self._world,
@@ -190,6 +189,7 @@ class EmbeddingStore:
             "promises": self._promises,
             "briefs": self._briefs,
             "arcs": self._arcs,
+            "entities": self._entities,
         }[collection]
         # Offload to a thread: this is a synchronous chromadb/HTTP call that
         # would otherwise block the whole asyncio loop (see upsert_* -- same
@@ -275,6 +275,7 @@ class EmbeddingStore:
             "promise": self._promises,
             "brief": self._briefs,
             "arc": self._arcs,
+            "entity": self._entities,
         }
 
     @staticmethod
