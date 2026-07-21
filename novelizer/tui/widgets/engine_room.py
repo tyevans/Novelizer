@@ -9,6 +9,7 @@ import time
 from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.content import Content
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Static, TabbedContent, TabPane
 from novelizer.tui.identity import identity_for
@@ -67,7 +68,12 @@ class EngineRoom(Vertical):
                 yield Static("", id="er_prompt", markup=False)
             for agent_name in AGENT_NAMES:
                 ident = identity_for(agent_name)
-                with TabPane(f"{ident.glyph} {ident.label}", id=f"er_tab_{agent_name}"):
+                # A plain str title is markup-parsed by TabPane (Widget.render_str
+                # -> Content.from_markup), which silently drops any style not
+                # spelled out as markup tags -- pass a pre-styled Content instead
+                # so the tab title actually carries the agent's color.
+                title = Content.styled(f"{ident.glyph} {ident.label}", ident.style)
+                with TabPane(title, id=f"er_tab_{agent_name}"):
                     yield Static("idle — waiting for the scheduler",
                                 id=f"er_vitals_{agent_name}", classes="er-vitals", markup=False)
                     with VerticalScroll(id=f"er_stream_scroll_{agent_name}",

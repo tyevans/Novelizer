@@ -1,5 +1,35 @@
 from __future__ import annotations
-from langchain.chat_models import init_chat_model
+from langchain_openai import ChatOpenAI
+
+
+class _ReasoningAwareChatOpenAI(ChatOpenAI):
+    """ChatOpenAI, plus surfacing provider-specific reasoning/thinking deltas
+    into additional_kwargs.
+
+    langchain_openai's own module docstring is explicit that plain ChatOpenAI
+    targets the official OpenAI API only: non-standard streamed fields like
+    reasoning_content (what vLLM and other local reasoning-enabled OpenAI-
+    compatible servers send) are "not extracted or preserved" -- they're
+    silently dropped in _convert_delta_to_message_chunk before a callback
+    ever sees them. This override re-reads the raw delta dict streamed
+    alongside content and stashes reasoning_content (or the OpenAI-native
+    `reasoning` key some proxies use instead) back onto the chunk, so
+    TelemetryCallbackHandler.on_llm_new_token can read it via
+    chunk.message.additional_kwargs."""
+
+    def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info):
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info)
+        if generation_chunk is None:
+            return generation_chunk
+        choices = chunk.get("choices") or chunk.get("chunk", {}).get("choices", [])
+        if not choices:
+            return generation_chunk
+        delta = choices[0].get("delta") or {}
+        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+        if reasoning:
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation_chunk
 
 
 def build_chat_model(
@@ -20,8 +50,8 @@ def build_chat_model(
     """
     if streaming is None:
         streaming = callbacks is not None
-    return init_chat_model(
-        f"openai:{model}",
+    return _ReasoningAwareChatOpenAI(
+        model=model,
         base_url=base_url,
         api_key=api_key,
         temperature=temperature,
