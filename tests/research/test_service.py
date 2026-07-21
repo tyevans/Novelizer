@@ -1,6 +1,11 @@
+import os
+import tempfile
+
 import pytest
 from novelizer.research.schemas import ResearchAnswer
 from novelizer.research.service import ResearchAnswerError, ResearchService
+from novelizer.settings import EffectiveSettings as Settings
+from novelizer.runtime import Runtime
 
 
 class _R:
@@ -50,3 +55,24 @@ async def test_ask_raises_when_runner_returns_no_structured_response():
 
     with pytest.raises(ResearchAnswerError):
         await service.ask("anything?", history=[])
+
+
+@pytest.fixture
+def db_path():
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    yield path
+    os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_runtime_wires_a_research_service(db_path):
+    runner = _R(ResearchAnswer(answer_text="No leaks found."))
+    settings = Settings(db_path=db_path, projector_interval=0.05)
+    rt = Runtime(settings, runners={"research": runner})
+    await rt.start()
+    try:
+        answer = await rt.research.ask("any leaks?", history=[])
+        assert answer == "No leaks found."
+    finally:
+        await rt.close()
