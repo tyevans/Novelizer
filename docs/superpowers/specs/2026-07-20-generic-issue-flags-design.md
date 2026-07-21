@@ -102,3 +102,5 @@ not request type, so it continues to work unchanged.
   correctly as `category="contradiction"` Flags.
 - `triage_passes` / stale-threshold test: an unowned flag that survives N
   catch-all passes without resolution ends up `stale`, not looping forever.
+
+**Status:** implemented, see docs/superpowers/plans/2026-07-20-generic-issue-flags.md
