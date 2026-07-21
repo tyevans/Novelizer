@@ -8,6 +8,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.world_architect import WorldArchitect
 from novelizer.agents.schemas import WorldEntriesDraft, WorldEntryDraft
+from novelizer.store.models import Chapter
 
 
 class FakeRunner:
@@ -113,11 +114,85 @@ async def test_architect_pass_ignored_when_director_seed_pending(stack):
     assert agent._backoff_until == 0.0
 
 
-async def test_architect_readiness_floor_unchanged(stack):
+async def test_architect_readiness_ignores_watermark_when_seed_pending(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import DirectorSignal, SignalKind
+    agent = WorldArchitect(FakeRunner(WorldEntriesDraft()), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    # Unchanged world -- watermark alone would gate this to 0.0.
+    assert await agent.readiness() == 0.0
+    sig = DirectorSignal(kind=SignalKind.seed, body="a drowned city", target_agent="world_architect")
+    await events.append(EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
+    await proj.catch_up()
+    # A pending seed must wake the Architect even though the fingerprint
+    # (chapters only) hasn't moved -- it isn't tracked by the watermark.
+    assert await agent.readiness() == 1.0
+
+
+async def test_architect_readiness_floor_when_state_changed(stack):
     events, proj, read, committer = stack
     agent = WorldArchitect(FakeRunner(WorldEntriesDraft()), read, committer)
     await agent.run_once()
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
     assert await agent.readiness() >= 0.2
+
+
+async def test_architect_readiness_zero_when_state_unchanged(stack):
+    events, proj, read, committer = stack
+    out = WorldEntriesDraft(entries=[
+        WorldEntryDraft(title="The Brinemarsh", body="A salt flat.", domain="physical", tags=["geo"]),
+    ])
+    agent = WorldArchitect(FakeRunner(out), read, committer)
+    assert await agent.readiness() == 1.0
+    await agent.run_once()
+    await proj.catch_up()
+    # Its own minted entry must not re-trigger it; no new external state.
+    assert await agent.readiness() == 0.0
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0
+
+
+class BoomRunner:
+    async def ainvoke(self, inputs):
+        raise RuntimeError("boom")
+
+
+async def test_architect_failed_run_leaves_watermark_unset(stack):
+    events, proj, read, committer = stack
+    agent = WorldArchitect(BoomRunner(), read, committer)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    assert await agent.readiness() == 1.0
+
+
+class ChapterCommittingRunner(FakeRunner):
+    """Simulates the Author committing a chapter while the Architect's LLM
+    call is in flight."""
+
+    def __init__(self, out, events, proj):
+        super().__init__(out)
+        self._events = events
+        self._proj = proj
+
+    async def ainvoke(self, inputs):
+        await self._events.append(
+            EventType.CHAPTER_CREATED, "ch-midrun",
+            Chapter(id="ch-midrun", title="Mid-run", prose="Arrived during the run."),
+        )
+        await self._proj.catch_up()
+        return await super().ainvoke(inputs)
+
+
+async def test_architect_midrun_chapter_is_not_absorbed_by_watermark(stack):
+    events, proj, read, committer = stack
+    agent = WorldArchitect(ChapterCommittingRunner(WorldEntriesDraft(), events, proj), read, committer)
+    await agent.run_once()
+    # The mid-run chapter was never seen by this run's worldbuilding: the
+    # watermark must stay clear so the next tick re-dispatches.
+    assert await agent.readiness() > 0.0
 
 
 class _FakeSettings:

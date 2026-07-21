@@ -60,6 +60,11 @@ class WorldArchitect(BaseAgent):
         super().__init__(runner, read_store, committer, interval, name="world_architect", personality=personality)
 
     async def readiness(self) -> float:
+        # A pending director seed always wakes the Architect, watermark or
+        # not -- the seed is external input the fingerprint doesn't track,
+        # so gating on it here would risk starving it indefinitely.
+        if await self._read.list_unconsumed_signals(target_agent=self.name):
+            return 1.0
         count = len(await self._read.list_world_entries())
         score = max(0.2, 1.0 - count / 50)
         return await self._gate_on_watermark(score)
@@ -67,14 +72,14 @@ class WorldArchitect(BaseAgent):
     async def _fingerprint(self) -> tuple:
         """Gate on the story moving, not the clock. Without this the Architect
         re-fires on an unchanged novel and pads the world with lore no chapter
-        asked for."""
+        asked for. Chapters only, deliberately: entries are this agent's own
+        writes, and the read-store projection they land in lags a commit by
+        design (see the background projector loop), so comparing a
+        just-committed entry count against a pre-commit snapshot would be
+        comparing stale data against itself. Chapters are purely external --
+        the Architect never writes them -- so they're immune to that lag."""
         chapters = await self._read.list_chapters()
-        entries = await self._read.list_world_entries()
-        signals = await self._read.list_unconsumed_signals(target_agent=self.name)
-        return (
-            len(chapters), chapters[-1].id if chapters else "",
-            len(entries), len(signals),
-        )
+        return (len(chapters), chapters[-1].id if chapters else "")
 
     async def poll(self) -> dict:
         return {
@@ -116,9 +121,18 @@ class WorldArchitect(BaseAgent):
         await self._consume_signals(ctx["signals"])
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         draft = await self.work(ctx)
         await self.commit(draft, ctx)
+        fp_now = await self._fingerprint()
+        # If chapters moved mid-run, this run's worldbuilding did not
+        # account for the newest prose: leave the watermark clear so the
+        # next tick re-dispatches instead of wrongly absorbing it.
+        if fp_now == fp_seen:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
 def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None):
