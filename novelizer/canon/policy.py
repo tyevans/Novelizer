@@ -2,7 +2,7 @@ from __future__ import annotations
 from novelizer.canon.autonomy import AutonomyLevel
 from novelizer.canon.events import EventType
 
-_RETCON_EVENTS = {EventType.WORLD_ENTRY_SUPERSEDED, EventType.RETCON_REQUEST_RESOLVED}
+_RETCON_EVENTS = {EventType.WORLD_ENTRY_SUPERSEDED, EventType.FLAG_RESOLVED}
 _CANON_EVENTS = _RETCON_EVENTS | {
     EventType.WORLD_ENTRY_CREATED,
     EventType.CHARACTER_CREATED,
