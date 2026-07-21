@@ -2,8 +2,9 @@ from hypothesis import given, strategies as st
 from novelizer.canon.events import StoredEvent
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 from novelizer.tui.widgets.engine_room_model import (
-    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    Block, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
     strip_line, stream_line_kind, vitals_line, live_body, trace_line, trace_detail,
+    normalize_input_summary,
 )
 
 
@@ -24,9 +25,10 @@ def _call_started(seq=2):
 
 
 def test_run_started_resets_state_to_a_fresh_running_run():
-    s = apply_bus_item(LiveRunState(text="stale", tokens=9), _run_started(), now=100.0)
+    s = apply_bus_item(LiveRunState(blocks=(Block(kind="prose", text="stale"),), tokens=9),
+                        _run_started(), now=100.0)
     assert s.status == "running" and s.agent_name == "author" and s.run_id == "r1"
-    assert s.tokens == 0 and s.text == "" and s.started_at == 100.0
+    assert s.tokens == 0 and s.blocks == () and s.started_at == 100.0
 
 
 def test_call_started_carries_prompt_model_and_index():
@@ -34,18 +36,13 @@ def test_call_started_carries_prompt_model_and_index():
     assert s.prompt == "[system]\nWrite." and s.model == "qwen" and s.call_index == 1
 
 
-def test_token_deltas_accumulate_text_and_count():
+def test_token_deltas_accumulate_into_a_trailing_prose_block():
     s = LiveRunState(status="running", run_id="r1", agent_name="author")
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="The "), now=1.0)
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="sea"), now=1.1)
-    assert s.text == "The sea" and s.tokens == 2
-
-
-def test_text_is_tail_capped():
-    from novelizer.tui.widgets.engine_room_model import TEXT_CAP
-    s = LiveRunState(status="running", run_id="r1", text="x" * TEXT_CAP)
-    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="END"), now=1.0)
-    assert len(s.text) == TEXT_CAP and s.text.endswith("END")
+    assert len(s.blocks) == 1
+    assert s.blocks[0].kind == "prose" and s.blocks[0].text == "The sea"
+    assert s.tokens == 2
 
 
 def test_run_failed_marks_failed_with_error():
@@ -74,6 +71,139 @@ def test_live_body_stream_not_attached_notice_after_restart_mid_run():
     s = seed_state([_run_started(), _call_started()], now=10.0)
     assert s.status == "running" and s.stream_attached is False
     assert "stream not attached" in live_body(s)
+
+
+def test_apply_bus_item_marks_the_boundary_between_thinking_and_answer_text():
+    """Reasoning-model chunks arrive as separate thinking/text deltas: the
+    switch between them must be visible, not silently concatenated."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="let me consider", kind="thinking"), now=1.0)
+    assert len(s.blocks) == 1 and s.blocks[0].kind == "thinking"
+    assert s.blocks[0].text == "let me consider"
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text=" the tide.", kind="thinking"), now=1.1)
+    assert len(s.blocks) == 1 and s.blocks[0].text == "let me consider the tide."
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
+                                     text="The lighthouse", kind="text"), now=1.2)
+    assert len(s.blocks) == 2
+    assert s.blocks[1].kind == "prose" and s.blocks[1].text == "The lighthouse"
+
+
+def test_apply_bus_item_folds_llm_call_boundaries_into_a_call_block():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, _call_started(), now=1.0)
+    assert len(s.blocks) == 1
+    call = s.blocks[0]
+    assert call.kind == "call" and call.status == "running"
+
+    fin = _ev(3, TelemetryEventType.LLM_CALL_FINISHED,
+              {"run_id": "r1", "agent_name": "author", "call_index": 1,
+               "duration_s": 2.5, "output_tokens": 40})
+    s = apply_bus_item(s, fin, now=3.0)
+    call = s.blocks[0]
+    assert call.status == "done" and call.duration_s == 2.5
+
+
+def test_apply_bus_item_opens_and_closes_a_tool_block():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="prose", text="Once upon a time"),))
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "dragons"})
+    s = apply_bus_item(s, started, now=1.0)
+    assert len(s.blocks) == 2
+    tool = s.blocks[1]
+    assert tool.kind == "tool" and tool.tool_name == "search_web"
+    assert tool.input_summary == "dragons" and tool.status == "running"
+
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2})
+    s = apply_bus_item(s, finished, now=2.0)
+    tool = s.blocks[1]
+    assert tool.status == "done" and tool.duration_s == 1.2
+    assert len(s.blocks) == 2  # no new block created on finish
+
+
+def test_apply_bus_item_marks_a_tool_block_failed():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "dragons"})
+    s = apply_bus_item(s, started, now=1.0)
+    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
+                {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                 "error_type": "ValueError", "duration_s": 0.3})
+    s = apply_bus_item(s, failed, now=1.0)
+    tool = s.blocks[0]
+    assert tool.status == "failed" and tool.error == "ValueError"
+
+
+def test_repeated_identical_tool_calls_collapse_with_a_counter():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    for i in range(3):
+        started = _ev(10 + i * 2, TelemetryEventType.TOOL_CALL_STARTED,
+                      {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                       "input_summary": "ch3.md"})
+        s = apply_bus_item(s, started, now=float(i))
+        finished = _ev(11 + i * 2, TelemetryEventType.TOOL_CALL_FINISHED,
+                       {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                        "duration_s": 0.1})
+        s = apply_bus_item(s, finished, now=float(i) + 0.1)
+    assert len(s.blocks) == 1
+    assert s.blocks[0].repeat_count == 3
+    assert s.blocks[0].status == "done"
+
+
+def test_different_args_do_not_collapse():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    for arg in ("ch3.md", "ch4.md"):
+        started = _ev(1, TelemetryEventType.TOOL_CALL_STARTED,
+                      {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                       "input_summary": arg})
+        s = apply_bus_item(s, started, now=1.0)
+        finished = _ev(2, TelemetryEventType.TOOL_CALL_FINISHED,
+                       {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+                        "duration_s": 0.1})
+        s = apply_bus_item(s, finished, now=1.1)
+    assert len(s.blocks) == 2
+    assert all(b.repeat_count == 1 for b in s.blocks)
+
+
+def test_live_body_renders_a_tool_block_as_a_grouped_multiline_unit():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    started = _ev(1, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "dragons"})
+    s = apply_bus_item(s, started, now=1.0)
+    finished = _ev(2, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2})
+    s = apply_bus_item(s, finished, now=2.0)
+    body = live_body(s)
+    assert "⚒ search_web(dragons)" in body
+    assert "done in 1.2s" in body
+
+
+def test_live_body_shows_repeat_counter_and_summary_once_attached():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="tool", tool_name="read_file", input_summary="ch3.md",
+                                   status="done", duration_s=0.3, repeat_count=3,
+                                   summary="skimmed three chapter drafts"),))
+    body = live_body(s)
+    assert "⚒ read_file(ch3.md) ×3" in body
+    assert "skimmed three chapter drafts" in body
+
+
+def test_text_is_still_tail_capped_via_prose_blocks():
+    from novelizer.tui.widgets.engine_room_model import TEXT_CAP
+    long_prose = "x" * TEXT_CAP
+    s = LiveRunState(status="running", run_id="r1",
+                     blocks=(Block(kind="prose", text=long_prose),))
+    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="END"), now=1.0)
+    assert s.blocks[-1].text.endswith("END")
+    assert len(s.blocks[-1].text) <= TEXT_CAP + 3  # capped roughly at TEXT_CAP
 
 
 def test_seed_state_of_a_finished_run_is_not_stuck_running():
@@ -105,21 +235,6 @@ def test_trace_line_formats_key_event_shapes():
     assert "✗" in trace_line(fail) and "TimeoutError" in trace_line(fail)
     picked = _ev(5, TelemetryEventType.SCHEDULER_PICKED, {"agent_name": "author"})
     assert "picked author" in trace_line(picked)
-
-
-def test_apply_bus_item_marks_the_boundary_between_thinking_and_answer_text():
-    """Reasoning-model chunks arrive as separate thinking/text deltas: the
-    switch between them must be visible, not silently concatenated."""
-    s = LiveRunState(status="running", run_id="r1", agent_name="author")
-    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
-                                     text="let me consider", kind="thinking"), now=1.0)
-    assert s.text == "\n💭 let me consider"
-    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
-                                     text=" the tide.", kind="thinking"), now=1.1)
-    assert s.text == "\n💭 let me consider the tide."
-    s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
-                                     text="The lighthouse", kind="text"), now=1.2)
-    assert s.text == "\n💭 let me consider the tide.\nThe lighthouse"
 
 
 def test_stream_line_kind_classifies_marker_lines():
@@ -154,48 +269,9 @@ def test_seed_states_keeps_concurrent_agents_isolated():
     ]
     states = seed_states(events, now=10.0)
     assert set(states) == {"author", "editor"}
-    assert "search_web" in states["author"].text and "read" not in states["author"].text
-    assert "ch1.md" in states["editor"].text and "search_web" not in states["editor"].text
+    assert states["author"].blocks[0].tool_name == "search_web"
+    assert states["editor"].blocks[0].tool_name == "read"
     assert states["author"].run_id == "r1" and states["editor"].run_id == "r2"
-
-
-def test_apply_bus_item_folds_llm_call_boundaries_into_the_live_text_stream():
-    """Fix: on tool-calling turns the model may emit zero streamed tokens, so
-    call start/finish must be visible on their own or the feed goes blank."""
-    s = LiveRunState(status="running", run_id="r1", agent_name="author")
-    s = apply_bus_item(s, _call_started(), now=1.0)
-    assert "▸ call 1" in s.text and "qwen" in s.text
-
-    fin = _ev(3, TelemetryEventType.LLM_CALL_FINISHED,
-              {"run_id": "r1", "agent_name": "author", "call_index": 1,
-               "duration_s": 2.5, "output_tokens": 40})
-    s = apply_bus_item(s, fin, now=3.0)
-    assert "2.5s" in s.text and "40 tok" in s.text
-
-
-def test_apply_bus_item_folds_tool_calls_into_the_live_text_stream():
-    s = LiveRunState(status="running", run_id="r1", agent_name="author", text="Once upon a time")
-    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
-                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
-                   "input_summary": "dragons"})
-    s = apply_bus_item(s, started, now=1.0)
-    assert "⚒ search_web(dragons)" in s.text
-    assert s.text.startswith("Once upon a time")
-
-    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
-                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
-                    "duration_s": 1.2})
-    s = apply_bus_item(s, finished, now=2.0)
-    assert "done in 1.2s" in s.text
-
-
-def test_apply_bus_item_folds_tool_call_failure_into_the_live_text_stream():
-    s = LiveRunState(status="running", run_id="r1", agent_name="author")
-    failed = _ev(8, TelemetryEventType.TOOL_CALL_FAILED,
-                {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
-                 "error_type": "ValueError"})
-    s = apply_bus_item(s, failed, now=1.0)
-    assert "✗ ValueError" in s.text
 
 
 def test_trace_line_formats_tool_call_events():
@@ -271,7 +347,6 @@ def test_styled_vitals_includes_glyph_and_vitals_line():
 def test_styled_body_applies_tool_style_to_tool_lines():
     from novelizer.tui.widgets.engine_room_model import styled_body
     text = styled_body("\n⚒ search_canon(query)\n")
-    # spans carries the style runs; a tool-prefixed line gets the "bold cyan" style
     styles = [span.style for span in text.spans]
     assert "bold cyan" in styles
 
@@ -280,3 +355,65 @@ def test_styled_body_leaves_prose_unstyled():
     from novelizer.tui.widgets.engine_room_model import styled_body
     text = styled_body("plain prose line")
     assert text.spans == []
+
+
+def test_route_agent_reads_agent_name_from_tool_summary_ready():
+    from novelizer.telemetry.events import ToolSummaryReady
+    item = ToolSummaryReady(run_id="r1", agent_name="editor", tool_name="t",
+                            input_summary="x", summary="s")
+    assert route_agent(item) == "editor"
+
+
+def test_tool_summary_ready_patches_the_matching_finished_block():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="tool", tool_name="search_web",
+                                   input_summary="dragons", status="done", duration_s=1.0),))
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="found three articles")
+    s = apply_bus_item(s, ready, now=5.0)
+    assert s.blocks[0].summary == "found three articles"
+
+
+def test_tool_summary_ready_is_a_no_op_when_the_run_has_moved_on():
+    s = LiveRunState(status="running", run_id="r2", agent_name="author", blocks=())
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="stale")
+    s2 = apply_bus_item(s, ready, now=5.0)
+    assert s2 == s
+
+
+def test_tool_summary_ready_matches_a_multiline_over_120_char_input_summary():
+    """Fix finding #1: the started block's input_summary is normalized via
+    normalize_input_summary; the ToolSummaryReady must use the exact same
+    normalization on the raw payload value, or it never matches and the
+    summary silently never attaches."""
+    raw = ("line one\nline two\nline three " + "x" * 200)
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": raw})
+    s = apply_bus_item(LiveRunState(status="running", run_id="r1", agent_name="author"),
+                        started, now=1.0)
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                    {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                     "duration_s": 1.0})
+    s = apply_bus_item(s, finished, now=2.0)
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary=normalize_input_summary(raw),
+                             summary="found three articles")
+    s = apply_bus_item(s, ready, now=5.0)
+    assert s.blocks[0].summary == "found three articles"
+
+
+def test_tool_summary_ready_skips_a_block_thats_running_again_via_a_repeat():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="tool", tool_name="search_web",
+                                   input_summary="dragons", status="running",
+                                   repeat_count=2),))
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="stale summary for call 1")
+    s2 = apply_bus_item(s, ready, now=5.0)
+    assert s2.blocks[0].summary is None

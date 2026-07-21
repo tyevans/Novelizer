@@ -94,6 +94,8 @@ class ToolCallFinished(BaseModel):
     tool_name: str
     duration_s: float
     output_chars: int
+    input_summary: str = ""
+    output_summary: str = ""
 
 
 class ToolCallFailed(BaseModel):
@@ -103,6 +105,7 @@ class ToolCallFailed(BaseModel):
     duration_s: float
     error_type: str
     error_message: str
+    input_summary: str = ""
 
 
 class TokenDelta(BaseModel):
@@ -113,3 +116,17 @@ class TokenDelta(BaseModel):
     agent_name: str
     text: str
     kind: str = "text"  # "text" (answer content) | "thinking" (reasoning_content)
+
+
+class ToolSummaryReady(BaseModel):
+    """A cheap-LLM one-line summary of a finished/failed tool call, matched
+    back to its block by (run_id, tool_name, input_summary) rather than a
+    synthetic id -- the same event is folded independently into more than
+    one LiveRunState (the merged "All" view and each per-agent view), and
+    those don't share block numbering. Bus-only: NEVER persisted."""
+
+    run_id: str
+    agent_name: str
+    tool_name: str
+    input_summary: str
+    summary: str

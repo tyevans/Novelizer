@@ -164,6 +164,37 @@ def test_tool_end_emits_call_finished_with_duration_and_output_size():
     assert payload.output_chars == len("some output text")
 
 
+def test_tool_end_carries_input_summary_and_a_truncated_output_summary():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def run():
+        await h.on_tool_start({"name": "search_web"}, "dragons", run_id=lc_run)
+        await h.on_tool_end("x" * 500, run_id=lc_run)
+
+    _in_run(run)
+    et, payload = rec.emitted[-1]
+    assert et == TelemetryEventType.TOOL_CALL_FINISHED
+    assert payload.input_summary == "dragons"
+    assert len(payload.output_summary) <= 300
+
+
+def test_tool_error_carries_input_summary():
+    rec = FakeRecorder()
+    h = TelemetryCallbackHandler(rec)
+    lc_run = uuid.uuid4()
+
+    async def run():
+        await h.on_tool_start({"name": "search_web"}, "dragons", run_id=lc_run)
+        await h.on_tool_error(ValueError("bad"), run_id=lc_run)
+
+    _in_run(run)
+    et, payload = rec.emitted[-1]
+    assert et == TelemetryEventType.TOOL_CALL_FAILED
+    assert payload.input_summary == "dragons"
+
+
 def test_tool_error_emits_call_failed():
     rec = FakeRecorder()
     h = TelemetryCallbackHandler(rec)
