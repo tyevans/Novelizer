@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from rich.text import Text
 from novelizer.canon.events import StoredEvent
-from novelizer.telemetry.events import TelemetryEventType, TokenDelta
+from novelizer.telemetry.events import TelemetryEventType, ToolSummaryReady, TokenDelta
 from novelizer.tui.identity import identity_for
 
 TEXT_CAP = 8000
@@ -62,15 +62,6 @@ class LiveRunState:
     last_kind: str = ""  # "" | "text" | "thinking" — tracks stream-segment
     # boundaries so a switch between reasoning and answer content gets a
     # visible marker instead of running together unlabeled.
-
-
-@dataclass(frozen=True)
-class ToolSummaryReady:
-    run_id: str
-    agent_name: str
-    tool_name: str
-    input_summary: str
-    summary: str
 
 
 def _append_text_block(state: LiveRunState, kind: str, text: str) -> LiveRunState:
@@ -179,6 +170,8 @@ def route_agent(item) -> str | None:
     """Which agent a bus item (TokenDelta or StoredEvent) belongs to, for
     fanning a single stream out into per-agent buckets."""
     if isinstance(item, TokenDelta):
+        return item.agent_name or None
+    if isinstance(item, ToolSummaryReady):
         return item.agent_name or None
     if isinstance(item, StoredEvent):
         return item.payload.get("agent_name") or None

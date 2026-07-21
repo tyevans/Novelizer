@@ -354,3 +354,42 @@ def test_styled_body_leaves_prose_unstyled():
     from novelizer.tui.widgets.engine_room_model import styled_body
     text = styled_body("plain prose line")
     assert text.spans == []
+
+
+def test_route_agent_reads_agent_name_from_tool_summary_ready():
+    from novelizer.telemetry.events import ToolSummaryReady
+    item = ToolSummaryReady(run_id="r1", agent_name="editor", tool_name="t",
+                            input_summary="x", summary="s")
+    assert route_agent(item) == "editor"
+
+
+def test_tool_summary_ready_patches_the_matching_finished_block():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="tool", tool_name="search_web",
+                                   input_summary="dragons", status="done", duration_s=1.0),))
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="found three articles")
+    s = apply_bus_item(s, ready, now=5.0)
+    assert s.blocks[0].summary == "found three articles"
+
+
+def test_tool_summary_ready_is_a_no_op_when_the_run_has_moved_on():
+    s = LiveRunState(status="running", run_id="r2", agent_name="author", blocks=())
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="stale")
+    s2 = apply_bus_item(s, ready, now=5.0)
+    assert s2 == s
+
+
+def test_tool_summary_ready_skips_a_block_thats_running_again_via_a_repeat():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author",
+                     blocks=(Block(kind="tool", tool_name="search_web",
+                                   input_summary="dragons", status="running",
+                                   repeat_count=2),))
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary="dragons", summary="stale summary for call 1")
+    s2 = apply_bus_item(s, ready, now=5.0)
+    assert s2.blocks[0].summary is None
