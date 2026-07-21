@@ -447,6 +447,19 @@ async def test_runtime_backfills_and_ticks_indexer(tmp_path):
         await rt.close()
 
 
+async def test_start_wires_kg_projector(settings):
+    """Runtime.start() must wire kg_store/kg_projector the same way it wires
+    the existing indexer, and kg_catch_up() must run cleanly."""
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        assert rt.kg_store is not None
+        assert rt.kg_projector is not None
+        await rt.kg_catch_up()  # idempotent, never raises
+    finally:
+        await rt.close()
+
+
 async def test_mining_runner_falls_back_to_parent_checker_fake(settings):
     """Post-M5.3-merge fix: an injected runners dict WITHOUT a dedicated
     "continuity_checker_mining" key must reuse the parent "continuity_checker"

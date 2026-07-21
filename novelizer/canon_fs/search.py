@@ -9,23 +9,27 @@ from novelizer.canon_fs.paths import build_path_index
 SEARCH_RESULT_CAP = 20
 
 
-def build_search_canon_tool(embedding_store, read_store):
+def build_search_canon_tool(embedding_store, read_store, kg_store):
     """Factory so the tool closes over story-scoped stores (one tool
     instance per runner, mirroring how runners close over settings)."""
 
     @tool
     async def search_canon(query: str, kinds: list[str] | None = None) -> str:
         """Search the story canon by MEANING — chapters, characters, world
-        entries, threads, secrets, themes, promises, chapter briefs, arcs. Use
-        this when you don't know the exact words: "where was the locket last
-        seen", "scenes about betrayal". For an exact name, slug, or quoted
-        phrase use grep instead; it is faster and exact.
+        entries, threads, secrets, themes, promises, chapter briefs, arcs,
+        and knowledge-graph entities (minor places, factions, items, and
+        relations the other kinds don't formalize). Use this when you don't
+        know the exact words: "where was the locket last seen", "scenes
+        about betrayal", "who frequents the Salted Gull". For an exact
+        name, slug, or quoted phrase use grep instead; it is faster and
+        exact.
 
         Returns one line per hit: (kind) <canon file path> — '<title>' [id: <id>].
         Read the file at that path for the full content, and cite the id
-        exactly as shown. Results are ranked and capped; if what you need
-        isn't here, narrow the query or filter by kind, e.g.
-        kinds=["chapter", "secret"].
+        exactly as shown. Entity hits have no file to read — the line
+        already carries their description and relations inline. Results
+        are ranked and capped; if what you need isn't here, narrow the
+        query or filter by kind, e.g. kinds=["thread", "secret"].
 
         Path convention for the M7/M8-deferred kinds, which have no dedicated
         canon_fs file: promises point at the shared outline ledger
@@ -61,12 +65,16 @@ def build_search_canon_tool(embedding_store, read_store):
             "brief": "/outline/briefs/",
             "arc": "(no file — cite id)",
         }
-        lines = [
-            f"({h.kind}) "
-            f"{path_by_id.get(h.id) or FALLBACK_PATH_BY_KIND.get(h.kind, '(no file)')} "
-            f"— '{h.title}' [id: {h.id}]"
-            for h in hits[:SEARCH_RESULT_CAP]
-        ]
+        lines = []
+        for h in hits[:SEARCH_RESULT_CAP]:
+            if h.kind == "entity":
+                lines.append(await _format_entity_hit(h, kg_store))
+                continue
+            lines.append(
+                f"({h.kind}) "
+                f"{path_by_id.get(h.id) or FALLBACK_PATH_BY_KIND.get(h.kind, '(no file)')} "
+                f"— '{h.title}' [id: {h.id}]"
+            )
         if len(hits) > SEARCH_RESULT_CAP:
             # Announce the truncation: a silently-cut list reads as exhaustive,
             # and the agent stops looking for what it never saw.
@@ -77,3 +85,18 @@ def build_search_canon_tool(embedding_store, read_store):
         return "\n".join(lines)
 
     return search_canon
+
+
+async def _format_entity_hit(hit, kg_store) -> str:
+    entity_id = int(hit.id)
+    entity = await kg_store.get_entity(entity_id)
+    if entity is None:
+        return f"(entity) (no file — cite id) — '{hit.title}' [id: {hit.id}]"
+    relations = await kg_store.entity_relations(entity_id)
+    rel_text = ", ".join(f"{r['relation_type']} {r['other_name']}" for r in relations)
+    detail = f"{entity['description']}" if entity["description"] else ""
+    suffix = f" Relations: {rel_text}." if rel_text else ""
+    return (
+        f"(entity) [{entity['entity_type']}] {entity['name']} [id: {hit.id}] "
+        f"— {detail}{suffix}"
+    )

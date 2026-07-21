@@ -149,6 +149,10 @@ class NovelizerApp(App):
                 await self.runtime.index_catch_up()
             except Exception as e:
                 self._report_worker_error("indexer", e)
+            try:
+                await self.runtime.kg_catch_up()
+            except Exception as e:
+                self._report_worker_error("kg", e)
             await asyncio.sleep(self.runtime.settings.projector_interval)
 
     async def _scheduler_loop(self) -> None:
