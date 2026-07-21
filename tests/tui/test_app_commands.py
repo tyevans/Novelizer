@@ -228,3 +228,21 @@ async def test_command_provider_run_executes_zero_arg_command():
             assert app.query_one("#body").has_class("room")
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_ctrl_r_opens_research_screen():
+    from novelizer.tui.research_screen import ResearchScreen
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    settings = Settings(db_path=path, projector_interval=0.1)
+    rt = Runtime(settings, runners=_runners())
+    await rt.start()
+    app = NovelizerApp(rt)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+r")
+            await pilot.pause(0.1)
+            assert isinstance(app.screen, ResearchScreen)
+    finally:
+        await rt.close(); os.unlink(path)
