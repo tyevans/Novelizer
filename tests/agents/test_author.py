@@ -715,7 +715,7 @@ def test_build_author_runner_tooled_branch_passes_author_skills(monkeypatch):
         def with_config(self, config):
             return self
 
-    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None):
+    def fake_create_deep_agent(*, model, system_prompt, response_format, backend=None, tools=None, skills=None, subagents=None):
         captured["skills"] = skills
         return FakeGraph()
 
@@ -898,3 +898,8 @@ def test_author_module_does_not_import_arc_note():
 
     source = inspect.getsource(author_module)
     assert "arc_note" not in source
+
+
+def test_spec_carries_subagent_grant():
+    from novelizer.agents.author import SPEC
+    assert SPEC.subagent_grant.enabled_setting == "author_subagent_enabled"

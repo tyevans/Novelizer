@@ -291,7 +291,7 @@ class Author(BaseAgent):
         await self.commit(draft, ctx)
 
 
-def build_author_runner(settings, callbacks=None, backend=None, tools=None):
+def build_author_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.llm import build_chat_model
     # Tool executions run in the agent graph's ToolNode under invoke-time
@@ -307,7 +307,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
-            backend=backend, tools=tools, skills=AUTHOR_SKILLS,
+            backend=backend, tools=tools, skills=AUTHOR_SKILLS, subagents=subagents,
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
@@ -319,12 +319,13 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None):
     return graph
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Author:
     enabled = ctx.settings.author_tools_enabled
-    builder = ctx.tooled(build_author_runner, enabled)
+    subagent_enabled = ctx.settings.author_subagent_enabled
+    builder = ctx.tooled(build_author_runner, enabled, subagent_enabled, "author")
     runner = ctx.runner_for("author", builder)
     return Author(
         runner, ctx.read, ctx.committer,
@@ -341,5 +342,6 @@ def _construct(ctx: AgentContext) -> Author:
 SPEC = AgentSpec(
     name="author",
     tool_grant=ToolGrant(enabled_setting="author_tools_enabled"),
+    subagent_grant=SubagentGrant(enabled_setting="author_subagent_enabled"),
     construct=_construct,
 )
