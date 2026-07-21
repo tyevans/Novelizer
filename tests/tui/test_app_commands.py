@@ -119,3 +119,19 @@ async def test_command_placeholder_rotates_with_hint_index():
             assert app.query_one("#command", Input).placeholder == PLACEHOLDER_HINTS[2]
     finally:
         await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_app_commands_cover_every_binding_action():
+    from novelizer.tui.app import APP_COMMANDS, NovelizerApp
+
+    covered = {c.name for c in APP_COMMANDS}
+    # Every non-command, non-quit BINDINGS action must have a same-named
+    # entry in APP_COMMANDS so the palette can reach it.
+    expected = {
+        "approvals", "toggle_room", "toggle_engine", "toggle_prompt",
+        "toggle_reading", "quit", "settings",
+        "brain_tab_shape", "brain_tab_threads", "brain_tab_secrets",
+        "brain_tab_causeway", "brain_tab_outline", "brain_tab_arcs",
+    }
+    assert covered == expected

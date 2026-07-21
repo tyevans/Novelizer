@@ -2,7 +2,9 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Awaitable, Callable
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Header, Footer, RichLog, Static, Tree, Input
@@ -28,6 +30,16 @@ from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
     LiveRunState, apply_bus_item, seed_state, trace_line, trace_detail,
 )
+
+
+@dataclass(frozen=True)
+class AppCommand:
+    """A zero-arg UI action reachable from both a keybinding and the
+    command palette. `callback` takes the running NovelizerApp instance."""
+
+    name: str
+    description: str
+    callback: Callable[["NovelizerApp"], "Awaitable[None] | None"]
 
 
 def format_event(ev: StoredEvent) -> str:
@@ -323,33 +335,19 @@ class NovelizerApp(App):
         self.set_focus(self.query_one("#command", Input))
 
     async def action_approvals(self) -> None:
-        # Guard: never stack the modal over itself or over another pushed
-        # screen (e.g. SettingsScreen). App bindings still fire while a modal
-        # is up for keys the modal doesn't consume, so this must be checked.
-        if self.screen is not self.default_screen:
-            return
-        if not await self.runtime.read.list_proposals(status="open"):
-            return
-        self.push_screen(ApprovalScreen(self.runtime))
+        await _app_open_approvals(self)
 
     def action_toggle_room(self) -> None:
-        # Room and reading are mutually exclusive: room hides #right, reading
-        # hides #left — both at once would blank the whole body.
-        body = self.query_one("#body")
-        body.remove_class("reading")
-        body.toggle_class("room")
+        _app_toggle_room(self)
 
     def action_toggle_reading(self) -> None:
-        body = self.query_one("#body")
-        body.remove_class("room")
-        body.toggle_class("reading")
+        _app_toggle_reading(self)
 
     def action_toggle_engine(self) -> None:
-        self.query_one("#body").toggle_class("engine")
+        _app_toggle_engine(self)
 
     def action_toggle_prompt(self) -> None:
-        if self.query_one("#body").has_class("engine"):
-            self.query_one("#engine_room", EngineRoom).toggle_prompt()
+        _app_toggle_prompt(self)
 
     def action_brain_tab(self, pane_id: str) -> None:
         self.query_one("#brain", BrainPanel).activate_tab(pane_id)
@@ -442,3 +440,83 @@ class NovelizerApp(App):
         run_id = ev.payload.get("run_id")
         produced = await self.runtime.events.events_for_run(run_id) if run_id else []
         self.query_one("#engine_room", EngineRoom).show_detail(trace_detail(ev, produced))
+
+
+async def _app_open_approvals(app: NovelizerApp) -> None:
+    # Guard: never stack the modal over itself or over another pushed
+    # screen (e.g. SettingsScreen). App bindings still fire while a modal
+    # is up for keys the modal doesn't consume, so this must be checked.
+    if app.screen is not app.default_screen:
+        return
+    if not await app.runtime.read.list_proposals(status="open"):
+        return
+    app.push_screen(ApprovalScreen(app.runtime))
+
+
+def _app_toggle_room(app: NovelizerApp) -> None:
+    # Room and reading are mutually exclusive: room hides #right, reading
+    # hides #left -- both at once would blank the whole body.
+    body = app.query_one("#body")
+    body.remove_class("reading")
+    body.toggle_class("room")
+
+
+def _app_toggle_reading(app: NovelizerApp) -> None:
+    body = app.query_one("#body")
+    body.remove_class("room")
+    body.toggle_class("reading")
+
+
+def _app_toggle_engine(app: NovelizerApp) -> None:
+    app.query_one("#body").toggle_class("engine")
+
+
+def _app_toggle_prompt(app: NovelizerApp) -> None:
+    if app.query_one("#body").has_class("engine"):
+        app.query_one("#engine_room", EngineRoom).toggle_prompt()
+
+
+def _app_open_settings(app: NovelizerApp) -> None:
+    from novelizer.tui.settings_screen import SettingsScreen
+
+    story_dir = StoryDirectory(root=Path(app.runtime.settings.db_path).parent)
+    app.push_screen(SettingsScreen(story_dir, lambda: app.runtime.settings))
+
+
+def _app_quit(app: NovelizerApp) -> None:
+    app.exit()
+
+
+APP_COMMANDS: list[AppCommand] = [
+    AppCommand("approvals", "Open the approvals screen", _app_open_approvals),
+    AppCommand("toggle_room", "Toggle Room view", _app_toggle_room),
+    AppCommand("toggle_engine", "Toggle Engine Room view", _app_toggle_engine),
+    AppCommand("toggle_prompt", "Toggle the Engine Room prompt panel", _app_toggle_prompt),
+    AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
+    AppCommand("settings", "Open settings", _app_open_settings),
+    AppCommand("quit", "Quit Novelizer", _app_quit),
+    AppCommand(
+        "brain_tab_shape", "Story Brain: Shape tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_shape"),
+    ),
+    AppCommand(
+        "brain_tab_threads", "Story Brain: Threads tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_threads"),
+    ),
+    AppCommand(
+        "brain_tab_secrets", "Story Brain: Secrets tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_secrets"),
+    ),
+    AppCommand(
+        "brain_tab_causeway", "Story Brain: Cause tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_causeway"),
+    ),
+    AppCommand(
+        "brain_tab_outline", "Story Brain: Outline tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_outline"),
+    ),
+    AppCommand(
+        "brain_tab_arcs", "Story Brain: Arcs tab",
+        lambda app: app.query_one("#brain", BrainPanel).activate_tab("tab_arcs"),
+    ),
+]
