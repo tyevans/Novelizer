@@ -1,16 +1,5 @@
 from __future__ import annotations
 import hashlib
-from ebooklib import epub
-
-# Add missing constants for ebooklib items (not defined in current version)
-if not hasattr(epub, 'ITEM_DOCUMENT'):
-    epub.ITEM_DOCUMENT = 9
-if not hasattr(epub, 'ITEM_IMAGE'):
-    epub.ITEM_IMAGE = 1
-if not hasattr(epub, 'ITEM_NCX'):
-    epub.ITEM_NCX = 4
-if not hasattr(epub, 'ITEM_COVER'):
-    epub.ITEM_COVER = 10
 
 
 class FakeEmbeddingFunction:

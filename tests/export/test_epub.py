@@ -1,3 +1,4 @@
+import ebooklib
 import pytest
 from ebooklib import epub
 from novelizer.export.epub import build_epub
@@ -33,7 +34,7 @@ def test_build_epub_toc_matches_chapter_titles_in_order(tmp_path):
 
     docs = [
         item for item in book.get_items()
-        if item.get_type() == epub.ITEM_DOCUMENT and item.file_name != "nav.xhtml"
+        if item.get_type() == ebooklib.ITEM_DOCUMENT and item.file_name != "nav.xhtml"
     ]
     assert len(docs) == 2
 
@@ -46,7 +47,7 @@ def test_build_epub_splits_prose_into_paragraphs(tmp_path):
     book = epub.read_epub(str(out))
     first_chapter = next(
         item for item in book.get_items()
-        if item.get_type() == epub.ITEM_DOCUMENT and item.file_name == "chap_0.xhtml"
+        if item.get_type() == ebooklib.ITEM_DOCUMENT and item.file_name == "chap_0.xhtml"
     )
     content = first_chapter.get_content().decode("utf-8")
     assert content.count("<p>") == 2
