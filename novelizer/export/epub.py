@@ -1,11 +1,12 @@
 from __future__ import annotations
+import html
 from ebooklib import epub
 from novelizer.store.models import Chapter
 
 
 def _paragraphs(prose: str) -> str:
     blocks = [b.strip() for b in prose.split("\n\n") if b.strip()]
-    return "".join(f"<p>{b}</p>" for b in blocks)
+    return "".join(f"<p>{html.escape(b)}</p>" for b in blocks)
 
 
 def build_epub(chapters: list[Chapter], *, title: str, author: str) -> bytes:
@@ -25,7 +26,7 @@ def build_epub(chapters: list[Chapter], *, title: str, author: str) -> bytes:
             file_name=f"chap_{i}.xhtml",
             lang="en",
         )
-        item.content = f"<h1>{chapter.title}</h1>{_paragraphs(chapter.prose)}"
+        item.content = f"<h1>{html.escape(chapter.title)}</h1>{_paragraphs(chapter.prose)}"
         book.add_item(item)
         epub_chapters.append(item)
 

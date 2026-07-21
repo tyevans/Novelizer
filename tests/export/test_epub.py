@@ -56,6 +56,31 @@ def test_build_epub_splits_prose_into_paragraphs(tmp_path):
     assert "<h1>The Drowned Bell</h1>" in content
 
 
+def test_build_epub_escapes_literal_markup_characters_in_title_and_prose(tmp_path):
+    chapters = [
+        Chapter(
+            title="The <Sign>",
+            prose="the door read <CLOSED> & locked",
+        ),
+        Chapter(title="Ashes at Dawn", prose="Only one paragraph here."),
+    ]
+    data = build_epub(chapters, title="The Drowned Bell", author="A. Author")
+    out = tmp_path / "book.epub"
+    out.write_bytes(data)
+
+    book = epub.read_epub(str(out))
+    first_chapter = next(
+        item for item in book.get_items()
+        if item.get_type() == ebooklib.ITEM_DOCUMENT and item.file_name == "chap_0.xhtml"
+    )
+    content = first_chapter.get_content().decode("utf-8")
+
+    assert "&lt;CLOSED&gt;" in content
+    assert "<CLOSED>" not in content
+    assert "&amp;" in content
+    assert "<h1>The &lt;Sign&gt;</h1>" in content
+
+
 def test_build_epub_sets_title_and_author(tmp_path):
     data = build_epub(_chapters(), title="The Drowned Bell", author="A. Author")
     out = tmp_path / "book.epub"
