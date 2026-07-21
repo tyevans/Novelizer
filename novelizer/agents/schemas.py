@@ -257,7 +257,7 @@ class FlagDraft(BaseModel):
 class KeeperOutput(BaseModel):
     new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
-    retcon_requests: list[FlagDraft] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
     knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
     arc_intents: list[ArcIntent] = Field(default_factory=list)
     feed_note: str = ""
