@@ -39,7 +39,11 @@ leave `reclassify_category` blank — it stays a catch-all and ages toward stale
    or has canon already moved past it / was it never actually a problem?
 2. DECIDE: "real" keeps it open. "dismiss" closes it — use this for stale, duplicate-in-substance,
    or simply wrong flags. Give a one-line `reason` either way; it goes in the log.
-3. STOP once you can state the evidence for your verdict.
+3. Every "real" verdict also gets a `severity`: "critical" if it contradicts a resolved arc,
+   breaks a paid-off thread, or spans multiple already-written chapters; "major" if it affects the
+   current chapter's coherence; "minor" otherwise. A "critical" call escalates the flag immediately,
+   so reserve it for issues that can't wait for the owning agent's normal poll.
+4. STOP once you can state the evidence for your verdict.
 
 ## Voice
 Neutral. Put personality only in `feed_note`, never in `reason`."""
@@ -94,10 +98,16 @@ class Triage(BaseAgent):
             await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id, rejected)
             await self._remark(out.feed_note)
             return
+        flag = flag.model_copy(update={"severity": out.severity})
+        if out.severity == "critical" and not flag.escalated:
+            flag = flag.model_copy(update={"escalated": True})
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, flag.id, flag)
         owner = _CATEGORY_OWNERS.get(flag.category)
         if owner is not None:
-            # Owned and verified real: leave it open, untouched, for the
-            # owner's own poll to pick up next cycle. Nothing to commit.
+            # Owned and verified real: persist the assessed severity (and
+            # any escalation above) and leave it open for the owner's own
+            # poll to pick up next cycle.
+            await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             await self._remark(out.feed_note)
             return
         # Unowned catch-all: reclassify if Triage recognized it, else age

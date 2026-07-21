@@ -27,12 +27,15 @@ class TriageVerdict(BaseModel):
     reclassified? `verdict="real"` with a known-owner category just leaves
     the flag open for its owner's own poll; `verdict="dismiss"` rejects it;
     `reclassify_category`, when set, overwrites an unowned flag's category
-    before the owner-routing check runs again next pass.
+    before the owner-routing check runs again next pass. `severity` is
+    assessed on every `real` verdict; `critical` triggers immediate
+    escalation regardless of category ownership.
     """
 
     verdict: Literal["real", "dismiss"] = "real"
     reason: str = ""
     reclassify_category: str = ""
+    severity: Literal["minor", "major", "critical"] = "minor"
     feed_note: str = ""
 
 
