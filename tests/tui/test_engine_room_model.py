@@ -4,6 +4,7 @@ from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 from novelizer.tui.widgets.engine_room_model import (
     Block, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
     strip_line, stream_line_kind, vitals_line, live_body, trace_line, trace_detail,
+    normalize_input_summary,
 )
 
 
@@ -381,6 +382,29 @@ def test_tool_summary_ready_is_a_no_op_when_the_run_has_moved_on():
                              input_summary="dragons", summary="stale")
     s2 = apply_bus_item(s, ready, now=5.0)
     assert s2 == s
+
+
+def test_tool_summary_ready_matches_a_multiline_over_120_char_input_summary():
+    """Fix finding #1: the started block's input_summary is normalized via
+    normalize_input_summary; the ToolSummaryReady must use the exact same
+    normalization on the raw payload value, or it never matches and the
+    summary silently never attaches."""
+    raw = ("line one\nline two\nline three " + "x" * 200)
+    started = _ev(6, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": raw})
+    s = apply_bus_item(LiveRunState(status="running", run_id="r1", agent_name="author"),
+                        started, now=1.0)
+    finished = _ev(7, TelemetryEventType.TOOL_CALL_FINISHED,
+                    {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                     "duration_s": 1.0})
+    s = apply_bus_item(s, finished, now=2.0)
+    from novelizer.telemetry.events import ToolSummaryReady
+    ready = ToolSummaryReady(run_id="r1", agent_name="author", tool_name="search_web",
+                             input_summary=normalize_input_summary(raw),
+                             summary="found three articles")
+    s = apply_bus_item(s, ready, now=5.0)
+    assert s.blocks[0].summary == "found three articles"
 
 
 def test_tool_summary_ready_skips_a_block_thats_running_again_via_a_repeat():

@@ -35,7 +35,7 @@ from novelizer.tui.widgets.activity_strip import ActivityStrip
 from novelizer.tui.widgets.engine_room import EngineRoom
 from novelizer.tui.widgets.engine_room_model import (
     AGENT_NAMES, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
-    trace_line, trace_detail,
+    trace_line, trace_detail, normalize_input_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -359,7 +359,10 @@ class NovelizerApp(App):
     async def _summarize_tool_call(self, ev: StoredEvent) -> None:
         p = ev.payload
         tool_name = p.get("tool_name", "?")
-        input_summary = p.get("input_summary", "")
+        # Normalize identically to apply_bus_item's TOOL_CALL_STARTED handler:
+        # this string is both the LLM prompt's input_summary context and the
+        # ToolSummaryReady match key, so it must match the tool block exactly.
+        input_summary = normalize_input_summary(p.get("input_summary", ""))
         if ev.event_type == TelemetryEventType.TOOL_CALL_FINISHED:
             output_summary, error = p.get("output_summary", ""), ""
         else:

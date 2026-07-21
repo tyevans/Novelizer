@@ -32,6 +32,16 @@ AGENT_NAMES = (
 )
 
 
+def normalize_input_summary(raw) -> str:
+    """Canonical normalization for a tool call's input_summary: newlines
+    swapped for a visible marker so single-line rendering stays intact, and
+    truncated to 120 chars. Used both when TOOL_CALL_STARTED opens a tool
+    block (as the match key) and by app.py's _summarize_tool_call when
+    building the ToolSummaryReady it publishes — the two MUST agree exactly,
+    since apply_bus_item's ToolSummaryReady handler matches on this string."""
+    return str(raw).replace("\n", "␤")[:120]
+
+
 @dataclass(frozen=True)
 class Block:
     kind: str  # "prose" | "thinking" | "call" | "tool"
@@ -86,6 +96,9 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
     if isinstance(item, ToolSummaryReady):
         if item.run_id != state.run_id or not state.blocks:
             return state
+        # NOTE: if two non-collapsed blocks share (tool_name, input_summary),
+        # arrival order can swap which gets which summary — cosmetic only,
+        # both summaries are near-identical for identical calls.
         for i in range(len(state.blocks) - 1, -1, -1):
             b = state.blocks[i]
             if (b.kind == "tool" and b.tool_name == item.tool_name
@@ -126,12 +139,14 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         return replace(state, status="failed", ended_at=now, error=error)
     if et == TelemetryEventType.TOOL_CALL_STARTED:
         tool_name = p.get("tool_name", "?")
-        input_summary = str(p.get("input_summary", "")).replace("\n", "␤")[:120]
+        input_summary = normalize_input_summary(p.get("input_summary", ""))
         if (state.blocks and state.blocks[-1].kind == "tool"
                 and state.blocks[-1].tool_name == tool_name
                 and state.blocks[-1].input_summary == input_summary
                 and state.blocks[-1].status != "running"):
             last = state.blocks[-1]
+            # NOTE: summary reflects whichever ToolSummaryReady arrives first
+            # for this repeat run, not necessarily the most recent call.
             blocks = state.blocks[:-1] + (replace(last, status="running",
                                                   repeat_count=last.repeat_count + 1,
                                                   summary=None),)
@@ -299,7 +314,7 @@ def trace_line(ev: StoredEvent) -> str:
         return (f"{_t(ev)} {p.get('agent_name', '?')} llm call {p.get('call_index', '?')} "
                 f"✗ {p.get('error_type', '?')}")
     if et == TelemetryEventType.TOOL_CALL_STARTED:
-        summary = str(p.get('input_summary', '')).replace("\n", "␤")[:120]
+        summary = normalize_input_summary(p.get('input_summary', ''))
         return (f"{_t(ev)} ⚒ {p.get('agent_name', '?')} → "
                 f"{p.get('tool_name', '?')}({summary})")
     if et == TelemetryEventType.TOOL_CALL_FINISHED:
