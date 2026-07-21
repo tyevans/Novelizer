@@ -90,7 +90,8 @@ class Triage(BaseAgent):
         return result.get("structured_response")
 
     async def commit(self, out: TriageVerdict | None, ctx: dict) -> None:
-        flag = ctx["target"]
+        original = ctx["target"]
+        flag = original
         if flag is None or out is None:
             return
         if out.verdict == "dismiss":
@@ -106,8 +107,12 @@ class Triage(BaseAgent):
         if owner is not None:
             # Owned and verified real: persist the assessed severity (and
             # any escalation above) and leave it open for the owner's own
-            # poll to pick up next cycle.
-            await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
+            # poll to pick up next cycle. Only commit if something actually
+            # changed from what's already persisted — these agents have no
+            # resolve path of their own, so an unconditional commit here
+            # would re-file the same flag forever.
+            if flag.severity != original.severity or flag.escalated != original.escalated:
+                await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
             await self._remark(out.feed_note)
             return
         # Unowned catch-all: reclassify if Triage recognized it, else age

@@ -125,6 +125,42 @@ async def test_verified_owned_flag_persists_minor_severity(stack):
     assert flags[0].status == FlagStatus.open
 
 
+async def test_owned_flag_with_unchanged_severity_does_not_recommit(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.FLAG_CREATED, "f1",
+                        Flag(id="f1", category="worldbuilding", description="no map",
+                             related_entry_ids=[], proposed_resolution="", filed_by="author",
+                             severity="minor"))
+    await proj.catch_up()
+    before = len(await events.events_for_aggregate("f1"))
+    out = TriageVerdict(verdict="real", severity="minor")
+    agent = Triage(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    after = len(await events.events_for_aggregate("f1"))
+    assert after == before
+    flags = await read.list_flags(category="worldbuilding")
+    assert flags[0].severity == "minor"
+    assert flags[0].status == FlagStatus.open
+
+
+async def test_owned_flag_with_changed_severity_recommits(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.FLAG_CREATED, "f1",
+                        Flag(id="f1", category="worldbuilding", description="no map",
+                             related_entry_ids=[], proposed_resolution="", filed_by="author"))
+    await proj.catch_up()
+    before = len(await events.events_for_aggregate("f1"))
+    out = TriageVerdict(verdict="real", severity="minor")
+    agent = Triage(FakeRunner(out), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    after = len(await events.events_for_aggregate("f1"))
+    assert after == before + 1
+    flags = await read.list_flags(category="worldbuilding")
+    assert flags[0].severity == "minor"
+
+
 async def test_noop_when_no_open_flags(stack):
     events, proj, read, committer = stack
     agent = Triage(FakeRunner(TriageVerdict(verdict="real")), read, committer)
