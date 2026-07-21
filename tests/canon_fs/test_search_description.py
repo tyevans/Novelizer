@@ -49,7 +49,7 @@ class _ReadStore:
 
 
 def _tool(hits):
-    return build_search_canon_tool(_Store(hits), _ReadStore())
+    return build_search_canon_tool(_Store(hits), _ReadStore(), None)
 
 
 class TestDescription:
