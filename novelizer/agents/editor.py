@@ -71,9 +71,16 @@ Every issue: quote + where it is + the specific problem + the concrete fix. No q
 restate her hesitation — cut to one and let the next beat land" is. Rank by severity and include at
 most the three or four that matter. A capped, ranked note gets acted on; a dump gets ignored.
 
+Each such issue (other than a voice-drift line, which goes in `voice_drift_flags` instead) is one
+`craft_flags` entry: `category` always "craft", `description` the quote + location + problem,
+`proposed_resolution` the concrete fix. This is the durable, reviewable record of what you found —
+file it regardless of verdict.
+
 ## Output
 - `verdict`: "approve" or "revise", per the bar above.
-- `notes`: the ranked, quoted issues, or the one-line what-works on approve.
+- `notes`: on revise, the Author-facing instructions for the rewrite; on approve, the one-line
+  what-works summary. The full ranked issue list belongs in `craft_flags`, not here.
+- `craft_flags`: the ranked, quoted craft issues from above, capped as described.
 - `thread_intents` / `theme_intents` / `knowledge_intents` / `causal_intents`: ONLY what this prose
   demonstrably enacts, each citing an existing id from the context block. Emit none if the prose
   shows none — an empty list is the correct and common answer.
@@ -256,6 +263,7 @@ class Editor(BaseAgent):
                 flag = Flag(category="voice_drift", filed_by=self.name, description=description,
                             related_entry_ids=[vflag.character_id], proposed_resolution="")
                 await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
+        await self._commit_flag_drafts(verdict.craft_flags, category="craft")
         await self._remark(verdict.feed_note)
 
     async def _run(self) -> None:

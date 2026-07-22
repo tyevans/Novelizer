@@ -8,9 +8,9 @@ from novelizer.agents import prompts
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
-    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
+    BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent, FlagDraft,
 )
-from novelizer.store.models import ChapterBriefRecord
+from novelizer.store.models import ChapterBriefRecord, Flag, FlagStatus
 from novelizer.agents import intents as intent_helpers
 from novelizer.run_context import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
@@ -42,6 +42,11 @@ class ChapterDraft(BaseModel):
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     promise_intents: list[PromiseIntent] = Field(default_factory=list)
+    flags: list[FlagDraft] = Field(default_factory=list)
+    """A concern the Author hit while drafting that it can't resolve itself —
+    a brief contradicting a voice card, a beat it can't service, a promise
+    with nowhere natural to land. Filed as Flag(category=...) at commit time
+    via BaseAgent, same pipeline every other judgment-making agent uses."""
 
 
 class Runner(Protocol):
@@ -174,6 +179,24 @@ class BaseAgent:
         await self._committer.commit(
             self.name, EventType.AGENT_REMARKED, self.name, AgentRemark(agent_name=self.name, note=note)
         )
+
+    async def _commit_flag_drafts(self, drafts: list[FlagDraft], category: str) -> None:
+        """File FlagDrafts as Flag(category=category, filed_by=self.name), deduped
+        by description against the currently open queue in that category — the
+        pattern Continuity Checker's mined-flag filing and the Editor's craft/
+        voice-drift flags all follow, since an agent re-polling the same target
+        every cycle would otherwise re-file the same finding each pass."""
+        if not drafts:
+            return
+        open_flags = await self._read.list_flags(category=category, status=FlagStatus.open)
+        seen_descriptions = {f.description for f in open_flags}
+        for draft in drafts:
+            if draft.description in seen_descriptions:
+                continue
+            seen_descriptions.add(draft.description)
+            flag = Flag(category=category, filed_by=self.name, description=draft.description,
+                        related_entry_ids=draft.related_entry_ids, proposed_resolution=draft.proposed_resolution)
+            await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
 
     async def _commit_thread_intents(
         self,
