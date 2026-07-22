@@ -366,7 +366,10 @@ class NovelizerApp(App):
         # ToolSummaryReady match key, so it must match the tool block exactly.
         input_summary = normalize_input_summary(p.get("input_summary", ""))
         if ev.event_type == TelemetryEventType.TOOL_CALL_FINISHED:
-            output_summary, error = p.get("output_summary", ""), ""
+            # Cap what feeds the cheap-LLM synopsis prompt — the full output
+            # is already rendered verbatim in the block itself (see
+            # engine_room_model.Block.output); this is just prompt hygiene.
+            output_summary, error = p.get("output_summary", "")[:1000], ""
         else:
             output_summary = ""
             error = f"{p.get('error_type', '?')}: {p.get('error_message', '')}"

@@ -164,7 +164,7 @@ def test_tool_end_emits_call_finished_with_duration_and_output_size():
     assert payload.output_chars == len("some output text")
 
 
-def test_tool_end_carries_input_summary_and_a_truncated_output_summary():
+def test_tool_end_carries_input_summary_and_the_full_untruncated_output():
     rec = FakeRecorder()
     h = TelemetryCallbackHandler(rec)
     lc_run = uuid.uuid4()
@@ -177,7 +177,7 @@ def test_tool_end_carries_input_summary_and_a_truncated_output_summary():
     et, payload = rec.emitted[-1]
     assert et == TelemetryEventType.TOOL_CALL_FINISHED
     assert payload.input_summary == "dragons"
-    assert len(payload.output_summary) <= 300
+    assert payload.output_summary == "x" * 500
 
 
 def test_tool_error_carries_input_summary():

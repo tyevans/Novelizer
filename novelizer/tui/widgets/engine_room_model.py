@@ -55,6 +55,7 @@ class Block:
     repeat_count: int = 1
     delegate: str = ""  # subagent name (e.g. "researcher") when this tool
     # call was dispatched by a subagent rather than the parent agent itself
+    output: str = ""  # full untruncated tool output (TOOL_CALL_FINISHED only)
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,8 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
             b = state.blocks[i]
             if b.kind == "tool" and b.tool_name == tool_name and b.status == "running":
                 if et == TelemetryEventType.TOOL_CALL_FINISHED:
-                    updated = replace(b, status="done", duration_s=p.get("duration_s", 0.0))
+                    updated = replace(b, status="done", duration_s=p.get("duration_s", 0.0),
+                                      output=p.get("output_summary", ""))
                 else:
                     updated = replace(b, status="failed", duration_s=p.get("duration_s", 0.0),
                                       error=p.get("error_type", "?"))
@@ -283,6 +285,9 @@ def _render_block(b: Block) -> str:
         lines.append(f"{indent}↳ ✗ {b.error}")
     if b.summary:
         lines.append(f"{indent}↳ {b.summary}")
+    if b.output:
+        for out_line in b.output.split("\n"):
+            lines.append(f"{indent}  {out_line}")
     return "\n".join(lines)
 
 

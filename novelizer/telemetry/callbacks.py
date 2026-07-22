@@ -159,7 +159,7 @@ class TelemetryCallbackHandler(AsyncCallbackHandler):
                              duration_s=time.monotonic() - state.started,
                              output_chars=len(str(output)),
                              input_summary=state.input_summary,
-                             output_summary=str(output)[:300], delegate=state.delegate),
+                             output_summary=str(output), delegate=state.delegate),
         )
 
     async def on_tool_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:

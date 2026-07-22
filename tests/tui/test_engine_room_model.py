@@ -186,6 +186,21 @@ def test_live_body_renders_a_tool_block_as_a_grouped_multiline_unit():
     assert "done in 1.2s" in body
 
 
+def test_live_body_renders_the_full_tool_output_not_a_truncated_snippet():
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    started = _ev(1, TelemetryEventType.TOOL_CALL_STARTED,
+                  {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                   "input_summary": "dragons"})
+    s = apply_bus_item(s, started, now=1.0)
+    long_output = "x" * 500
+    finished = _ev(2, TelemetryEventType.TOOL_CALL_FINISHED,
+                   {"run_id": "r1", "agent_name": "author", "tool_name": "search_web",
+                    "duration_s": 1.2, "output_summary": long_output})
+    s = apply_bus_item(s, finished, now=2.0)
+    body = live_body(s)
+    assert long_output in body
+
+
 def test_live_body_shows_repeat_counter_and_summary_once_attached():
     s = LiveRunState(status="running", run_id="r1", agent_name="author",
                      blocks=(Block(kind="tool", tool_name="read_file", input_summary="ch3.md",
