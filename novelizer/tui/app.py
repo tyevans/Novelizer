@@ -68,6 +68,7 @@ class NovelizerApp(App):
         ("r", "toggle_room", "Room"),
         ("e", "toggle_engine", "Engine Room"),
         ("p", "toggle_prompt", "Prompt"),
+        ("P", "pause_all", "Pause All"),
         ("v", "toggle_reading", "Reading"),
         ("1", "brain_tab('tab_shape')", "Shape"),
         ("2", "brain_tab('tab_threads')", "Threads"),
@@ -92,6 +93,7 @@ class NovelizerApp(App):
         self._live_state = LiveRunState()
         self._agent_live_states: dict[str, LiveRunState] = {}
         self._trace_events: deque = deque(maxlen=200)
+        self._paused_by_toggle: list[str] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -412,6 +414,9 @@ class NovelizerApp(App):
     def action_toggle_prompt(self) -> None:
         _app_toggle_prompt(self)
 
+    def action_pause_all(self) -> None:
+        _app_pause_all(self)
+
     def action_talk_to_project(self) -> None:
         _app_open_research(self)
 
@@ -550,6 +555,17 @@ def _app_toggle_prompt(app: NovelizerApp) -> None:
         app.query_one("#engine_room", EngineRoom).toggle_prompt()
 
 
+def _app_pause_all(app: NovelizerApp) -> None:
+    # Toggle: first press pauses every not-already-paused agent and
+    # remembers which ones it paused; second press resumes only those,
+    # leaving agents that were individually paused beforehand untouched.
+    if app._paused_by_toggle is None:
+        app._paused_by_toggle = app.runtime.scheduler.pause_all()
+    else:
+        app.runtime.scheduler.resume_agents(app._paused_by_toggle)
+        app._paused_by_toggle = None
+
+
 def _app_brain_tab(app: NovelizerApp, pane_id: str) -> None:
     app.query_one("#brain", BrainPanel).activate_tab(pane_id)
 
@@ -584,6 +600,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("toggle_room", "Toggle Room view", _app_toggle_room),
     AppCommand("toggle_engine", "Toggle Engine Room view", _app_toggle_engine),
     AppCommand("toggle_prompt", "Toggle the Engine Room prompt panel", _app_toggle_prompt),
+    AppCommand("pause_all", "Pause/unpause all agents", _app_pause_all),
     AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
     AppCommand("settings", "Open settings", _app_open_settings),
     AppCommand("export_epub", "Export EPUB", _app_open_export),

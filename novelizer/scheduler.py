@@ -49,6 +49,22 @@ class Scheduler:
             if a.name == name:
                 a.resume()
 
+    def pause_all(self) -> list[str]:
+        """Pause every not-yet-paused agent. Returns the names actually
+        paused by this call, so a caller can resume only those later
+        without clobbering agents that were already individually paused."""
+        paused = []
+        for a in self._agents:
+            if not a.paused:
+                a.pause()
+                paused.append(a.name)
+        return paused
+
+    def resume_agents(self, names) -> None:
+        for a in self._agents:
+            if a.name in names:
+                a.resume()
+
     def status(self) -> list:
         now = self._clock()
         return [

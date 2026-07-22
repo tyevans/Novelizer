@@ -93,6 +93,27 @@ async def test_status_reports_paused_and_currently_in_flight():
     assert st["b"]["running"] is False, "running clears once the task completes"
 
 
+async def test_pause_all_only_pauses_currently_active_agents():
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.5)
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    sched.pause_agent("b")
+    paused = sched.pause_all()
+    assert paused == ["a"], "already-paused agents should not be reported as newly paused"
+    st = {s["name"]: s for s in sched.status()}
+    assert st["a"]["paused"] is True and st["b"]["paused"] is True
+
+
+async def test_resume_agents_only_resumes_named_agents():
+    a = StubAgent("a", 0.2); b = StubAgent("b", 0.5)
+    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    sched.pause_agent("b")
+    paused = sched.pause_all()
+    sched.resume_agents(paused)
+    st = {s["name"]: s for s in sched.status()}
+    assert st["a"]["paused"] is False, "agent paused by pause_all should be resumed"
+    assert st["b"]["paused"] is True, "agent paused before the toggle should stay paused"
+
+
 async def test_tick_returns_promptly_without_awaiting_dispatched_agents():
     """tick() creates tasks and returns immediately -- the dispatch cadence,
     not a wait-for-completion cadence."""
