@@ -304,6 +304,13 @@ class EditorVerdict(BaseModel):
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     voice_drift_flags: list[VoiceDriftFlag] = Field(default_factory=list)
     promise_intents: list[PromiseIntent] = Field(default_factory=list)
+    craft_flags: list[FlagDraft] = Field(default_factory=list)
+    """Ranked, quoted prose-craft issues (pacing sag, AI tells, dropped setup,
+    tidy-summary endings) — anything from the 'cite the line, rank, cap'
+    discipline that isn't a voice-drift line. Filed as Flag(category="craft")
+    at commit time so it's visible via the Escalations/Triage pipeline instead
+    of buried in `notes`, which stays scoped to the Author-facing revise
+    signal and the one-line approve summary."""
 
 
 class ContinuityOutput(BaseModel):

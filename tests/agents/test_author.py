@@ -788,6 +788,35 @@ async def test_author_commits_promise_intents_with_validation(stack):
     assert promises[0].state.value == "open"
 
 
+async def test_author_flag_commits_flag_with_craft_category(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import FlagStatus
+    from novelizer.agents.schemas import FlagDraft
+    draft = ChapterDraft(
+        title="T", prose="P",
+        flags=[FlagDraft(category="craft", description="brief conflicts with Mara's voice card",
+                          proposed_resolution="Plotter should revise the brief")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    open_flags = await read.list_flags(category="craft", status=FlagStatus.open)
+    assert len(open_flags) == 1
+    assert open_flags[0].filed_by == "author"
+    assert "voice card" in open_flags[0].description
+
+
+async def test_author_no_flags_commits_no_extra_flag(stack):
+    events, proj, read, committer = stack
+    from novelizer.store.models import FlagStatus
+    draft = ChapterDraft(title="T", prose="P")
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    open_flags = await read.list_flags(category="craft", status=FlagStatus.open)
+    assert open_flags == []
+
+
 async def test_author_system_prompt_mentions_promises():
     from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
     assert "promise" in AUTHOR_SYSTEM_PROMPT.lower()

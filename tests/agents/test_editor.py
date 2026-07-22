@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated, ThemeIntroduced
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, VoiceDriftFlag
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, VoiceDriftFlag, FlagDraft
 from novelizer.store.models import Chapter, EditorialStatus, Character, FlagStatus
 
 
@@ -667,6 +667,59 @@ async def test_editor_voice_drift_flag_dedups_against_open_retcons(stack):
     await proj.catch_up()
     open_flags = await read.list_flags(category="voice_drift", status=FlagStatus.open)
     assert len(open_flags) == 1, f"expected the duplicate drift flag to dedup, got {len(open_flags)} open voice flags"
+
+
+async def test_editor_craft_flag_commits_flag_with_craft_category(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="revise",
+        notes="fix pacing",
+        craft_flags=[
+            FlagDraft(
+                category="craft",
+                description="the three paragraphs from 'She walked...' to '...the door' all "
+                             "restate her hesitation",
+                proposed_resolution="cut to one and let the next beat land",
+            )
+        ],
+    )
+    agent = Editor(FakeRunner(verdict), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_flags = await read.list_flags(category="craft", status=FlagStatus.open)
+    assert len(open_flags) == 1
+    assert open_flags[0].filed_by == "editor"
+    assert "restate her hesitation" in open_flags[0].description
+    assert open_flags[0].proposed_resolution == "cut to one and let the next beat land"
+
+
+async def test_editor_craft_flags_dedup_against_open_queue_across_passes(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    verdict = EditorVerdict(
+        verdict="revise", notes="fix pacing",
+        craft_flags=[FlagDraft(category="craft", description="pacing sags in act two")],
+    )
+    await Editor(FakeRunner(verdict), read, committer).run_once()
+    await proj.catch_up()
+    await Editor(FakeRunner(verdict), read, committer).run_once()
+    await proj.catch_up()
+    open_flags = await read.list_flags(category="craft", status=FlagStatus.open)
+    assert len(open_flags) == 1
+
+
+async def test_editor_no_craft_flags_commits_no_extra_flag(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    agent = Editor(FakeRunner(EditorVerdict(verdict="approve", notes="clean")), read, committer)
+    await agent.run_once()
+    await proj.catch_up()
+    open_flags = await read.list_flags(category="craft", status=FlagStatus.open)
+    assert open_flags == []
 
 
 async def test_editor_constructor_threads_sag_spike_delta_through(stack):

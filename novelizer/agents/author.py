@@ -119,6 +119,16 @@ Leave a list empty rather than padding it: a marginal or invented thread is wors
 none, and every intent you declare is one another agent must reconcile.
 List `character_ids` using the ids shown beside each name in the task notes.
 
+## When something is wrong and you can't fix it by writing
+You do not silently paper over a real problem, and you do not silently drop it either.
+If the brief contradicts a voice card, a targeted beat has no honest way into this
+chapter, or a promise's window is closing with nowhere natural to land it: write the
+best chapter you honestly can, then add one `flags` entry — `category="craft"`,
+`description` naming the specific conflict, `proposed_resolution` if you can see one.
+This is not for ordinary craft trade-offs you resolved yourself; it's for the case
+where the right fix is outside your lane (a brief the Plotter should revise, a voice
+card that no longer fits the character's arc). Leave `flags` empty otherwise.
+
 ## Your feed note
 Do the writing and the note-setting as a craftsperson. Then, last, write `feed_note` —
 one short line in your own voice reacting to the chapter you just made.
@@ -319,6 +329,7 @@ class Author(BaseAgent):
         active_secret_ids = {s.id for s in ctx["secrets"]}
         await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter_id)
         await self._commit_causal_intents(draft.causal_intents, valid_chapter_ids)
+        await self._commit_flag_drafts(draft.flags, category="craft")
         await self._remark(draft.feed_note)
         await self._consume_signals(ctx["signals"])
 
