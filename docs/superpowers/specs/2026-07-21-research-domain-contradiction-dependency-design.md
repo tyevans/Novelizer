@@ -1,6 +1,6 @@
 # Research domain — Contradiction Map & Claim Dependency Graph projections
 
-Status: approved, not yet implemented.
+Status: implemented (2026-07-21).
 
 ## Problem
 
