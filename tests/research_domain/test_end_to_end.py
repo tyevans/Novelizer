@@ -4,7 +4,12 @@ import pytest
 from substrate.postgres.events import PostgresEventStore
 from substrate.policy import is_gated
 from research_domain.event_types import build_research_registry, RESEARCH_TIER_ORDER
-from research_domain.projections import build_source_coverage_catalog
+from research_domain.events import ClaimProposed, ClaimRefuted, ClaimCorrected
+from research_domain.projections import (
+    build_source_coverage_catalog,
+    build_contradiction_map_catalog,
+    build_claim_dependency_catalog,
+)
 from tests.substrate.postgres_fixture import postgres_dsn
 
 
@@ -47,13 +52,6 @@ async def test_research_domain_composes_events_gating_and_projection(postgres_ds
         assert result == {"source-a": 2, "source-b": 1}
     finally:
         await store.close()
-
-
-from research_domain.events import ClaimProposed, ClaimRefuted, ClaimCorrected
-from research_domain.projections import (
-    build_contradiction_map_catalog,
-    build_claim_dependency_catalog,
-)
 
 
 class _TargetClaimEvent:
