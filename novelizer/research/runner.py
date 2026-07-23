@@ -1,6 +1,6 @@
 from __future__ import annotations
 from langchain_core.tools import tool
-from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.research.schemas import ResearchAnswer
 from novelizer.research.tools import (
     check_beat_drift, check_completion, check_leaks, check_paradoxes,
@@ -61,8 +61,8 @@ def _make_diagnostic_tools(read_store):
 
 def build_research_runner(settings, callbacks=None, backend=None, tools=None, read_store=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
-    from novelizer.agents.middleware import ExcludeToolsMiddleware
+    from agent_kit import build_chat_model
+    from agent_kit import ExcludeToolsMiddleware
 
     model = build_chat_model(
         settings.agent_model, settings.llm_base_url, settings.llm_api_key,

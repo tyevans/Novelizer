@@ -9,7 +9,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.store.models import Chapter
-from novelizer.run_context import current_run_id
+from agent_kit import current_run_id
 from novelizer.canon.events import BlueprintAdopted
 from novelizer.canon.proposal_service import ProposalService
 

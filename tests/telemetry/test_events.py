@@ -40,3 +40,22 @@ def test_tool_summary_ready_is_bus_only_shape():
                             input_summary="dragons", summary="found three articles")
     assert item.run_id == "r1" and item.tool_name == "search_web"
     assert item.summary == "found three articles"
+
+
+def test_machinery_vocabulary_is_shared_with_agent_kit():
+    """The five loop/scheduler event types and payload models must BE the
+    agent_kit objects (identity, not just equal shapes) — recorders and
+    tui adapters must agree with what agent_kit.BaseAgent/Scheduler emit."""
+    import agent_kit
+    from novelizer.telemetry import events
+
+    assert events.AgentRunStarted is agent_kit.AgentRunStarted
+    assert events.AgentRunFinished is agent_kit.AgentRunFinished
+    assert events.AgentRunFailed is agent_kit.AgentRunFailed
+    assert events.SchedulerPicked is agent_kit.SchedulerPicked
+    assert events.SchedulerEligibilityChanged is agent_kit.SchedulerEligibilityChanged
+    assert issubclass(events.TelemetryEventType, agent_kit.TelemetryEventType)
+    for const in ("SCHEDULER_PICKED", "SCHEDULER_ELIGIBILITY_CHANGED",
+                  "AGENT_RUN_STARTED", "AGENT_RUN_FINISHED", "AGENT_RUN_FAILED"):
+        assert getattr(events.TelemetryEventType, const) == getattr(
+            agent_kit.TelemetryEventType, const)

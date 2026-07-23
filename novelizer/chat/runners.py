@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.author import RETRIEVAL_NOTE
-from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
@@ -21,8 +21,8 @@ CHAT_SKILLS = CRAFT_SKILLS
 
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
-    from novelizer.agents.middleware import ExcludeToolsMiddleware
+    from agent_kit import build_chat_model
+    from agent_kit import ExcludeToolsMiddleware
     model_name = settings.author_model if agent_name == "author" else settings.agent_model
     model = build_chat_model(
         model_name, settings.llm_base_url, settings.llm_api_key,

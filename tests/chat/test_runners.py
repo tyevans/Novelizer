@@ -126,8 +126,8 @@ def test_build_chat_runner_streams_when_callbacks_provided(monkeypatch):
             pass
         return FakeModel()
 
-    import novelizer.agents.llm as llm_mod
-    monkeypatch.setattr(llm_mod, "build_chat_model", fake_build_chat_model)
+    import agent_kit
+    monkeypatch.setattr(agent_kit, "build_chat_model", fake_build_chat_model)
 
     class FakeGraph:
         def with_config(self, config):

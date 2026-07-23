@@ -8,7 +8,8 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
-from novelizer.scheduler import Scheduler
+from agent_kit import Scheduler
+from novelizer.store.models import SignalKind
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
 from novelizer.telemetry.callbacks import TelemetryCallbackHandler
@@ -47,6 +48,21 @@ _TOOLING_PINNED_NAMES = frozenset({
     "world_architect", "character_keeper", "editor",
     "retconner", "structure_analyst", "plotter",
 })
+
+
+def _make_override_provider(read_store):
+    """agent_kit.Scheduler's override seam, carrying novelizer's Director
+    override semantics: the first unconsumed override signal naming a target
+    agent wins (exactly the branch the deleted novelizer/scheduler.py had
+    inline)."""
+    async def provider() -> str | None:
+        signals = await read_store.list_unconsumed_signals()
+        return next(
+            (s.target_agent for s in signals
+             if s.kind == SignalKind.override and s.target_agent),
+            None,
+        )
+    return provider
 
 
 class Runtime:
@@ -257,8 +273,9 @@ class Runtime:
         for agent in self.agents:
             agent.telemetry = self.telemetry
         self.scheduler = Scheduler(
-            self.agents, self.read,
+            self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
+            override_provider=_make_override_provider(self.read),
         )
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,

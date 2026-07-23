@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from novelizer.agents.middleware import ExcludeToolsMiddleware, TodoContextMiddleware
+from agent_kit import ExcludeToolsMiddleware
+from novelizer.agents.middleware import TodoContextMiddleware
 from novelizer.agents.author import build_author_runner
 from novelizer.agents.plotter import build_plotter_runner
 from novelizer.agents.world_architect import build_world_architect_runner

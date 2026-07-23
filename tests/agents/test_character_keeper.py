@@ -11,7 +11,7 @@ from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter
 from novelizer.agents.character_keeper import SYSTEM_PROMPT
 from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared, ChapterProcessed
 from novelizer.store.models import Character, Chapter, FlagStatus
-from novelizer.agents.base import DEFAULT_PASS_REMARK
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK
 
 
 class FakeRunner:

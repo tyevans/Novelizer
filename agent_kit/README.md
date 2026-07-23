@@ -51,7 +51,12 @@ import-linter contracts — see `[tool.importlinter]` in `pyproject.toml`.
 
 ## Relationship to novelizer
 
-novelizer still runs on its own in-tree copies of this machinery (by
-design — extraction round one left it untouched for stability). A parity
-test (`tests/agent_kit/test_scheduler_parity.py`) keeps dispatch behavior
-identical until the cutover campaign migrates novelizer onto the kit.
+novelizer runs on this kit: its `BaseAgent` subclasses `agent_kit.BaseAgent`
+(adding the fiction-side read/commit surface), its runtime constructs
+`agent_kit.Scheduler` with a Director-override `override_provider`, and its
+telemetry module re-exports the kit's machinery vocabulary. The extraction-era
+duplicates (and the scheduler parity test that guarded them) are gone as of
+the cutover campaign — see
+`docs/superpowers/specs/2026-07-22-agent-kit-cutover-design.md`. Still
+novelizer-side, next in line for extraction: the telemetry recorder and the
+LLM/tool-call event vocabulary it emits.

@@ -1,20 +1,7 @@
-from novelizer.agents.llm import build_chat_model
-
-
-def test_build_chat_model_targets_given_model_and_endpoint():
-    m = build_chat_model("my-model", "http://localhost:1234/v1", "key", temperature=0.5)
-    # ChatOpenAI stores the model name and base URL; no network call is made here.
-    assert m.model_name == "my-model"
-    assert "1234" in str(m.openai_api_base)
-
-
-def test_build_chat_model_caps_max_tokens():
-    m = build_chat_model("my-model", "http://localhost:1234/v1", "key", temperature=0.5, max_tokens=512)
-    assert m.max_tokens == 512
-
-
 import pytest
 from novelizer.settings.models import EffectiveSettings
+
+import agent_kit
 
 
 @pytest.mark.parametrize("module,builder", [
@@ -32,62 +19,19 @@ def test_runner_builders_pass_llm_max_tokens(monkeypatch, module, builder):
     reasoning enabled can ramble past the proxy timeout and never complete."""
     import importlib
     import deepagents
-    import novelizer.agents.llm as llm_mod
     captured = {}
 
-    def fake_build(model, base_url, api_key, temperature=0.8, max_tokens=None, callbacks=None, streaming=None):
+    def fake_build(model, base_url, api_key, temperature=0.8, max_tokens=None,
+                   callbacks=None, streaming=None, context_window_tokens=128_000):
         captured["max_tokens"] = max_tokens
         return object()
 
-    monkeypatch.setattr(llm_mod, "build_chat_model", fake_build)
+    monkeypatch.setattr(agent_kit, "build_chat_model", fake_build)
     monkeypatch.setattr(deepagents, "create_deep_agent", lambda **kw: object())
     settings = EffectiveSettings(llm_max_tokens=1234)
     mod = importlib.import_module(f"novelizer.agents.{module}")
     getattr(mod, builder)(settings)
     assert captured["max_tokens"] == 1234
-
-
-def test_build_chat_model_with_callbacks_enables_streaming():
-    from langchain_core.callbacks.base import BaseCallbackHandler
-    from novelizer.agents.llm import build_chat_model
-
-    handler = BaseCallbackHandler()
-    m = build_chat_model("gpt-x", "http://localhost:1", "k", callbacks=[handler])
-    assert m.streaming is True
-    assert handler in (m.callbacks or [])
-
-
-def test_build_chat_model_without_callbacks_keeps_current_defaults():
-    from novelizer.agents.llm import build_chat_model
-
-    m = build_chat_model("gpt-x", "http://localhost:1", "k")
-    assert m.streaming is False
-    assert not m.callbacks
-
-
-def test_reasoning_content_is_recovered_from_the_raw_streamed_delta():
-    """Plain ChatOpenAI silently drops non-standard streamed fields like
-    reasoning_content (langchain_openai's own module docstring says so) --
-    _ReasoningAwareChatOpenAI must lift it back onto the chunk so
-    TelemetryCallbackHandler can see it via additional_kwargs."""
-    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
-    raw_chunk = {
-        "choices": [{"index": 0, "delta": {"content": "The sea",
-                                           "reasoning_content": "pondering the tide"},
-                    "finish_reason": None}],
-    }
-    from langchain_core.messages import AIMessageChunk
-    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
-    assert gen_chunk.message.content == "The sea"
-    assert gen_chunk.message.additional_kwargs["reasoning_content"] == "pondering the tide"
-
-
-def test_reasoning_content_absent_leaves_chunk_unaffected():
-    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
-    raw_chunk = {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}]}
-    from langchain_core.messages import AIMessageChunk
-    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
-    assert "reasoning_content" not in gen_chunk.message.additional_kwargs
 
 
 def test_every_builder_accepts_a_callbacks_kwarg():

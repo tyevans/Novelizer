@@ -36,7 +36,7 @@ def test_bare_branch_passes_callbacks_as_constructor_arg(module_name, builder_na
         calls.append(kwargs)
         return object()
 
-    monkeypatch.setattr("novelizer.agents.llm.build_chat_model", fake_build_chat_model)
+    monkeypatch.setattr("agent_kit.build_chat_model", fake_build_chat_model)
     class _FakeGraph:
         def with_config(self, config):
             return self

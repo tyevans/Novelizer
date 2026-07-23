@@ -1,5 +1,7 @@
 from __future__ import annotations
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import WorldEntriesDraft
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -160,8 +162,8 @@ class WorldArchitect(BaseAgent):
 
 def build_world_architect_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
-    from novelizer.agents.middleware import ExcludeToolsMiddleware
+    from agent_kit import build_chat_model
+    from agent_kit import ExcludeToolsMiddleware
     if backend is not None:
         model = build_chat_model(
             settings.agent_model, settings.llm_base_url, settings.llm_api_key,

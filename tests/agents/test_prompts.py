@@ -111,12 +111,6 @@ class TestBackCompatReExports:
         assert author.RETRIEVAL_NOTE is prompts.RETRIEVAL_NOTE
         assert author.RETRIEVAL_NOTE_BASE is prompts.RETRIEVAL_NOTE_BASE
 
-    def test_base_still_re_exports_the_pass_instruction(self):
-        from novelizer.agents import base, prompts
-
-        assert base.PASS_PROMPT_INSTRUCTION is prompts.PASS_PROMPT_INSTRUCTION
-        assert base.DEFAULT_PASS_REMARK is prompts.DEFAULT_PASS_REMARK
-
     @pytest.mark.parametrize(
         "module_path",
         [

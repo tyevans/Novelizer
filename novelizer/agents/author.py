@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.agents import prompts
-from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
     stale_threads_note,
@@ -356,7 +357,7 @@ class Author(BaseAgent):
 
 def build_author_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     # Tool executions run in the agent graph's ToolNode under invoke-time
     # config, not constructor callbacks on the chat model -- so telemetry
     # callbacks are bound graph-scope via with_config below (dropped from the

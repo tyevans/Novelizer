@@ -1,6 +1,8 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import arc_note, chapter_map_note, open_retcons_note
@@ -370,8 +372,8 @@ class CharacterKeeper(BaseAgent):
 
 def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
-    from novelizer.agents.middleware import ExcludeToolsMiddleware
+    from agent_kit import build_chat_model
+    from agent_kit import ExcludeToolsMiddleware
     if backend is not None:
         model = build_chat_model(
             settings.agent_model, settings.llm_base_url, settings.llm_api_key,

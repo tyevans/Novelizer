@@ -79,7 +79,7 @@ async def test_next_call_index_counts_per_run_and_resets_at_run_end(rig):
 
 
 from novelizer.telemetry.recorder import run_with_identity
-from novelizer.run_context import current_agent_name, current_run_id
+from agent_kit import current_agent_name, current_run_id
 
 
 async def test_run_with_identity_emits_started_then_finished(rig):

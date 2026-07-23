@@ -1,10 +1,7 @@
 from __future__ import annotations
-import logging
-import time
-import uuid
-from typing import Protocol
+
+from agent_kit import BaseAgent as _KitBaseAgent, PASS_BACKOFF_MULTIPLIER, Runner  # noqa: F401 — Runner and PASS_BACKOFF_MULTIPLIER re-exported for agent imports
 from pydantic import BaseModel, Field
-from novelizer.agents import prompts
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
@@ -12,24 +9,6 @@ from novelizer.agents.schemas import (
 )
 from novelizer.store.models import ChapterBriefRecord, Flag, FlagStatus
 from novelizer.agents import intents as intent_helpers
-from novelizer.run_context import current_run_id, current_agent_name
-from novelizer.telemetry.events import (
-    TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
-)
-
-logger = logging.getLogger(__name__)
-
-# Tool-heavy passes (canon pulls + edits) can exceed LangGraph's default of 25;
-# 50 still tripped in practice, so give agent graphs generous headroom.
-GRAPH_RECURSION_LIMIT = 100
-
-# An agent that ran on fresh material but explicitly chose not to act steps
-# back for this many intervals instead of one, freeing dispatch slots.
-PASS_BACKOFF_MULTIPLIER = 3
-# Re-exported from novelizer.agents.prompts, which is the real home: three agents
-# still import these through here. Migrate those imports, then drop this.
-DEFAULT_PASS_REMARK = prompts.DEFAULT_PASS_REMARK
-PASS_PROMPT_INSTRUCTION = prompts.PASS_PROMPT_INSTRUCTION
 
 
 class ChapterDraft(BaseModel):
@@ -49,12 +28,10 @@ class ChapterDraft(BaseModel):
     via BaseAgent, same pipeline every other judgment-making agent uses."""
 
 
-class Runner(Protocol):
-    async def ainvoke(self, inputs: dict) -> dict: ...
-
-
-class BaseAgent:
-    name: str = "agent"
+class BaseAgent(_KitBaseAgent):
+    """Novelizer's agent chassis: agent_kit's loop (intervals, backoff,
+    watermarking, run_once telemetry bracketing) plus the fiction-side
+    read/commit surface every novelizer agent shares."""
 
     def __init__(
         self,
@@ -65,107 +42,9 @@ class BaseAgent:
         name: str | None = None,
         personality: str = "",
     ) -> None:
-        self._runner = runner
+        super().__init__(runner, interval, name=name, personality=personality)
         self._read = read_store
         self._committer = committer
-        self.interval = interval
-        if name is not None:
-            self.name = name
-        self.personality = personality
-        self.paused = False
-        self._last_run = 0.0
-        self._backoff_until = 0.0
-        self._last_fingerprint: tuple | None = None
-        self.telemetry = None  # TelemetryRecorder; injected by Runtime post-construction
-
-    @staticmethod
-    def _guarded_line(label: str, value: str) -> str:
-        """Return an optional "\n\n{label}: {value}" line, or "" if value is falsy."""
-        return f"\n\n{label}: {value}" if value else ""
-
-    def pause(self) -> None:
-        self.paused = True
-
-    def resume(self) -> None:
-        self.paused = False
-
-    def ready_for_interval(self, now: float) -> bool:
-        return (now - self._last_run) >= self.interval and now >= self._backoff_until
-
-    def mark_ran(self, now: float) -> None:
-        self._last_run = now
-
-    def seconds_until_ready(self, now: float) -> float:
-        return max(0.0, self.interval - (now - self._last_run), self._backoff_until - now)
-
-    def note_pass(self, now: float | None = None) -> None:
-        """Record an explicit "nothing to do" verdict: back off for
-        PASS_BACKOFF_MULTIPLIER intervals instead of one. Same clock family
-        as the scheduler's default (time.monotonic)."""
-        if now is None:
-            now = time.monotonic()
-        self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
-
-    async def _fingerprint(self) -> tuple | None:
-        """External story state this agent's work depends on. None (default)
-        disables watermarking. Subclasses return a small tuple; captured
-        AFTER the agent's own commits, so its own writes never re-trigger it."""
-        return None
-
-    async def _gate_on_watermark(self, score: float) -> float:
-        fp = await self._fingerprint()
-        if fp is not None and fp == self._last_fingerprint:
-            return 0.0
-        return score
-
-    async def _record_watermark(self) -> None:
-        self._last_fingerprint = await self._fingerprint()
-
-    def _clear_watermark(self) -> None:
-        self._last_fingerprint = None
-
-    async def readiness(self) -> float:
-        return 0.0
-
-    async def _run(self) -> None:
-        """Subclasses put their poll/work/commit body here (M-telemetry:
-        run_once became a final template that brackets _run with machinery
-        events and ambient run context)."""
-
-    async def run_once(self) -> None:
-        run_id = str(uuid.uuid4())
-        started = time.monotonic()
-        rid_token = current_run_id.set(run_id)
-        name_token = current_agent_name.set(self.name)
-        await self._emit_telemetry(
-            TelemetryEventType.AGENT_RUN_STARTED, run_id,
-            AgentRunStarted(run_id=run_id, agent_name=self.name),
-        )
-        try:
-            await self._run()
-        except Exception as e:
-            phase = "llm_call" if (self.telemetry and self.telemetry.in_llm_call(run_id)) else "agent"
-            await self._emit_telemetry(
-                TelemetryEventType.AGENT_RUN_FAILED, run_id,
-                AgentRunFailed(run_id=run_id, agent_name=self.name,
-                               error_type=type(e).__name__, error_message=str(e),
-                               phase=phase, duration_s=time.monotonic() - started),
-            )
-            raise
-        else:
-            await self._emit_telemetry(
-                TelemetryEventType.AGENT_RUN_FINISHED, run_id,
-                AgentRunFinished(run_id=run_id, agent_name=self.name,
-                                 duration_s=time.monotonic() - started),
-            )
-        finally:
-            current_run_id.reset(rid_token)
-            current_agent_name.reset(name_token)
-
-    async def _emit_telemetry(self, event_type: str, aggregate_id: str, payload) -> None:
-        if self.telemetry is None:
-            return
-        await self.telemetry.emit(event_type, aggregate_id, payload)
 
     async def _consume_signals(self, signals) -> None:
         for sig in signals:

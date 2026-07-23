@@ -1,6 +1,6 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
-from novelizer.agents.llm import build_chat_model
+from agent_kit import build_chat_model
 
 _PROMPT = (
     "Summarize this tool call in one short plain sentence (under 15 words), "
