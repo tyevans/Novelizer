@@ -1,6 +1,6 @@
 # Substrate Package Boundary — Design
 
-**Status: approved, not yet implemented.**
+**Status: implemented (2026-07-22).**
 
 ## Problem
 
