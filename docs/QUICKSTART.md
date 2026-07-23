@@ -10,6 +10,12 @@ lines 34-58 in that file's numbering at time of writing)
 
 # Quickstart: install to first run
 
+> **New to Novelizer?** Start with the step-by-step tutorial instead:
+> [`docs/tutorial/first-story.md`](tutorial/first-story.md). It covers the same
+> install-to-first-chapter path in a guided, learning-oriented form. This file remains as
+> the condensed acceptance walkthrough (autonomy dial, canon tools, promise ledger, and
+> the day-long-run judgment steps the tutorial doesn't cover).
+
 This is the exact path a stranger — someone with no prior Novelizer config, on a machine
 that already has a reachable OpenAI-compatible LLM endpoint — follows to get the room
 running. It mirrors the M5.4 acceptance walkthrough in
