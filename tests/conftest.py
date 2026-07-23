@@ -1,6 +1,31 @@
 from __future__ import annotations
 import hashlib
 
+from novelizer.canon import db as _db
+
+# Test modules import `postgres_dsn` directly; its session-scoped container
+# dependency must be resolvable from every requesting directory (substrate,
+# research_domain), so surface it here.
+from tests.substrate.postgres_fixture import pg_container  # noqa: F401
+
+# --- SQLite: skip fsync in tests ---------------------------------------------
+# db.connect opens WAL databases at the default synchronous=FULL, so every
+# event append pays an fsync. Test DBs are throwaway tmpfiles; durability
+# across power loss is not a property any test asserts. synchronous=OFF
+# turns the suite's thousands of tiny commits from disk-bound to CPU-bound
+# (measured: the canon/brain/telemetry scope went 170s -> 32s, and the worst
+# single property test 19.7s -> 2.6s, with identical example counts).
+_real_connect = _db.connect
+
+
+async def _nosync_connect(path: str):
+    conn = await _real_connect(path)
+    await conn.execute("PRAGMA synchronous=OFF")
+    return conn
+
+
+_db.connect = _nosync_connect
+
 
 class FakeEmbeddingFunction:
     """Deterministic, network-free stand-in for chromadb's OpenAIEmbeddingFunction.
