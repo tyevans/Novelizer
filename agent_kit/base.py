@@ -34,6 +34,7 @@ class BaseAgent:
         interval: int,
         name: str | None = None,
         personality: str = "",
+        clock=time.monotonic,
     ) -> None:
         self._runner = runner
         self.interval = interval
@@ -45,6 +46,7 @@ class BaseAgent:
         self._backoff_until = 0.0
         self._last_fingerprint: tuple | None = None
         self.telemetry = None  # TelemetryEmitter; injected post-construction
+        self._clock = clock
 
     @staticmethod
     def _guarded_line(label: str, value: str) -> str:
@@ -69,9 +71,11 @@ class BaseAgent:
     def note_pass(self, now: float | None = None) -> None:
         """Record an explicit "nothing to do" verdict: back off for
         PASS_BACKOFF_MULTIPLIER intervals instead of one. Same clock family
-        as the scheduler's default (time.monotonic)."""
+        as the scheduler's default (time.monotonic); inject `clock` at
+        construction to keep agent backoff and a scheduler's injected clock
+        in the same timeline."""
         if now is None:
-            now = time.monotonic()
+            now = self._clock()
         self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
 
     async def _fingerprint(self) -> tuple | None:

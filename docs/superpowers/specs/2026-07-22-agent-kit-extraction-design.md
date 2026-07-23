@@ -118,6 +118,15 @@ The three corrected seams (the entire diff vs. novelizer's copy):
    re-exports (already flagged in novelizer as migrate-then-drop) are not
    carried over.
 
+A fourth seam was added during implementation, discovered by the pipeline
+integration test: `BaseAgent.__init__` accepts `clock=time.monotonic`,
+and `note_pass()` reads it when called without an explicit `now`.
+Without this, an agent under a clock-injected Scheduler (fake-clock
+tests) records backoff in real-monotonic units and starves. Relatedly,
+the research agents do not call `note_pass()` at all: their
+fruitless-set queues already idle them item-by-item, and a 3x backoff
+while other queue items remain workable was a mis-pacing.
+
 `GRAPH_RECURSION_LIMIT` moves to `agent_kit.llm` (it is a runner concern).
 
 ## Section 3: agent_kit.scheduler — Scheduler

@@ -4,11 +4,12 @@ Each subclasses agent_kit.BaseAgent: poll (read runtime + corpus state),
 work (one LLM call via the injected runner), commit (validate structured
 output, append events via runtime.append_events).
 
-Quiet-when-done uses the fruitless-set pattern, not watermark gating: an
-examined item that yielded no events joins an in-memory set subtracted
-from the workable queue, so it can never head-of-line-block items behind
-it. The sets are process-local; a restart re-examines fruitless items,
-which is safe because fruitless runs commit nothing."""
+Quiet-when-done uses the fruitless-set pattern, not watermark gating or
+note_pass backoff: an examined item that yielded no events joins an
+in-memory set subtracted from the workable queue, so it can never
+head-of-line-block items behind it, and readiness drops to 0.0 once no
+workable items remain. The sets are process-local; a restart re-examines
+fruitless items, which is safe because fruitless runs commit nothing."""
 from __future__ import annotations
 
 import uuid
@@ -104,7 +105,6 @@ class ExtractorAgent(BaseAgent):
             await self._runtime.append_events(events)
         else:
             self._fruitless.add(source_id)
-            self.note_pass()
 
 
 VERIFIER_PROMPT = """Verify the following claim against the rest of the corpus.
@@ -199,7 +199,6 @@ class VerifierAgent(BaseAgent):
             await self._runtime.append_events(events)
         else:
             self._inconclusive.add(claim_id)
-            self.note_pass()
 
 
 RETRACTOR_PROMPT = """Two claims in the research log contradict each other.
@@ -284,4 +283,3 @@ class RetractorAgent(BaseAgent):
             await self._runtime.append_events(events)
         else:
             self._stood.add(target_id)
-            self.note_pass()

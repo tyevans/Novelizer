@@ -67,6 +67,20 @@ def test_note_pass_defaults_to_monotonic_now():
     assert not agent.ready_for_interval(time.monotonic())
 
 
+def test_note_pass_uses_injected_clock():
+    agent = BaseAgent(NullRunner(), interval=10, clock=lambda: 1000.0)
+    agent.mark_ran(1000.0)
+    agent.note_pass()  # no arg -> injected clock, not real monotonic
+    assert not agent.ready_for_interval(1029.9)
+    assert agent.ready_for_interval(1030.0)
+
+
+def test_default_clock_is_monotonic():
+    agent = BaseAgent(NullRunner(), interval=10)
+    agent.note_pass()
+    assert not agent.ready_for_interval(time.monotonic())
+
+
 def test_pause_resume_flag():
     agent = BaseAgent(NullRunner(), interval=1)
     assert agent.paused is False
