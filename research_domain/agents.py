@@ -67,10 +67,10 @@ class ExtractorAgent(BaseAgent):
         self._fruitless: set[str] = set()
 
     def _workable(self) -> list[str]:
-        claimed = self._runtime.claimed_source_ids()
+        extracted = self._runtime.extracted_source_ids()
         return [
             d for d in self._corpus.list_documents()
-            if d not in claimed and d not in self._fruitless
+            if d not in extracted and d not in self._fruitless
         ]
 
     async def readiness(self) -> float:
@@ -99,7 +99,8 @@ class ExtractorAgent(BaseAgent):
             existing.add(key)
             events.append((
                 "claim.proposed",
-                {"claim_id": uuid.uuid4().hex, "source_id": source_id, "text": draft.text},
+                {"claim_id": uuid.uuid4().hex, "source_id": source_id, "text": draft.text,
+                 "origin": "extracted"},
             ))
         if events:
             await self._runtime.append_events(events)
@@ -183,18 +184,31 @@ class VerifierAgent(BaseAgent):
                     {"source_id": source_id, "claim_id": claim_id},
                 ))
             if verdict.refutation is not None:
-                counter_id = uuid.uuid4().hex
-                events.append((
-                    "claim.proposed",
-                    {"claim_id": counter_id,
-                     "source_id": verdict.refutation.source_id,
-                     "text": verdict.refutation.counter_text},
-                ))
-                events.append((
-                    "claim.refuted",
-                    {"claim_id": counter_id, "target_claim_id": claim_id,
-                     "reason": verdict.refutation.reason},
-                ))
+                refutation_source = verdict.refutation.source_id
+                refutation_key = (refutation_source, _normalize(verdict.refutation.counter_text))
+                existing_match = next(
+                    (c for c in self._runtime.list_claims()
+                     if (c["source_id"], _normalize(c["text"])) == refutation_key),
+                    None,
+                )
+                if existing_match is not None:
+                    counter_id = existing_match["claim_id"]
+                else:
+                    counter_id = uuid.uuid4().hex
+                    events.append((
+                        "claim.proposed",
+                        {"claim_id": counter_id,
+                         "source_id": refutation_source,
+                         "text": verdict.refutation.counter_text,
+                         "origin": "verification"},
+                    ))
+                already_refuted_by = set(self._runtime.refuters_for(claim_id))
+                if counter_id not in already_refuted_by:
+                    events.append((
+                        "claim.refuted",
+                        {"claim_id": counter_id, "target_claim_id": claim_id,
+                         "reason": verdict.refutation.reason},
+                    ))
         if events:
             await self._runtime.append_events(events)
         else:

@@ -95,6 +95,41 @@ async def test_zero_claim_doc_goes_fruitless_without_blocking_new_docs(tmp_path,
         await runtime.close()
 
 
+async def test_verification_origin_counter_does_not_block_extraction(tmp_path, postgres_dsn):
+    runtime = ResearchRuntime(postgres_dsn, stream="ext-origin-stream")
+    await runtime.connect()
+    try:
+        await runtime.catch_up()
+        corpus = _corpus(tmp_path)  # a.md, b.md
+        # Simulate a verifier counter-claim landing on b.md before extraction reaches it.
+        await runtime.append_events([
+            ("claim.proposed", {"claim_id": "counter1", "source_id": "b.md",
+                                 "text": "water boils at 90C everywhere",
+                                 "origin": "verification"}),
+        ])
+        # b.md is claimed (has a claim) but NOT extracted -- must remain workable.
+        assert "b.md" in runtime.claimed_source_ids()
+        assert "b.md" not in runtime.extracted_source_ids()
+
+        runner = FakeExtractorRunner({
+            "a.md": ["water boils at 100C at sea level"],
+            "b.md": ["a distinct extracted claim about b"],
+        })
+        agent = ExtractorAgent(runner, runtime, corpus)
+        assert await agent.readiness() == 0.7
+
+        await agent.run_once()  # a.md
+        await agent.run_once()  # b.md should still be workable
+        assert runner.calls == ["a.md", "b.md"]
+        assert "b.md" in runtime.extracted_source_ids()
+
+        texts = {c["text"] for c in runtime.list_claims() if c["source_id"] == "b.md"}
+        assert texts == {"water boils at 90C everywhere", "a distinct extracted claim about b"}
+        assert await agent.readiness() == 0.0
+    finally:
+        await runtime.close()
+
+
 async def test_dedups_duplicate_claim_texts_within_one_output(tmp_path, postgres_dsn):
     runtime = ResearchRuntime(postgres_dsn, stream="ext-dedup-stream")
     await runtime.connect()

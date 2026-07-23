@@ -36,6 +36,7 @@ class ResearchRuntime(RuntimeBase):
         self._superseders_by_target: dict[str, list[str]] = {}
         self._claims_by_id: dict[str, dict] = {}
         self._corroborators_by_claim: dict[str, list[str]] = {}
+        self._extracted_sources: set[str] = set()
 
         source_coverage = build_source_coverage_catalog(
             lambda source_id: self._counts_by_source[source_id]
@@ -64,6 +65,9 @@ class ResearchRuntime(RuntimeBase):
     def claimed_source_ids(self) -> set[str]:
         return set(self._counts_by_source)
 
+    def extracted_source_ids(self) -> set[str]:
+        return set(self._extracted_sources)
+
     def corroborators_for(self, claim_id: str) -> list[str]:
         return list(self._corroborators_by_claim.get(claim_id, []))
 
@@ -85,6 +89,7 @@ class ResearchRuntime(RuntimeBase):
         self._superseders_by_target.clear()
         self._claims_by_id.clear()
         self._corroborators_by_claim.clear()
+        self._extracted_sources.clear()
         for event in events:
             payload = event["payload"]
             if event["event_type"] == "claim.proposed":
@@ -95,6 +100,8 @@ class ResearchRuntime(RuntimeBase):
                     "source_id": source_id,
                     "text": payload["text"],
                 }
+                if payload.get("origin", "extracted") == "extracted":
+                    self._extracted_sources.add(source_id)
             elif event["event_type"] == "source.corroborated":
                 self._corroborators_by_claim.setdefault(payload["claim_id"], []).append(
                     payload["source_id"]

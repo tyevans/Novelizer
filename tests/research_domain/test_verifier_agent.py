@@ -75,6 +75,65 @@ async def test_refutation_mints_counter_claim_and_refuted_event(tmp_path, postgr
         await runtime.close()
 
 
+class AlwaysRefutingRunner:
+    """Refutes whatever claim it's asked about, citing the OTHER fixed doc
+    with that doc's fixed contradictory text. Never returns an empty
+    verdict -- models a worst-case refutation-happy LLM."""
+
+    def __init__(self, runtime: ResearchRuntime, texts: dict[str, str]):
+        self._runtime = runtime
+        # source_id -> fixed text for that source
+        self._texts = texts
+
+    async def ainvoke(self, inputs: dict) -> dict:
+        prompt = inputs["messages"][0]["content"]
+        claim_id = next(
+            line.split("CLAIM_ID:", 1)[1].strip()
+            for line in prompt.splitlines() if line.startswith("CLAIM_ID:")
+        )
+        claim = self._runtime.get_claim(claim_id)
+        this_source = claim["source_id"]
+        other_source = next(s for s in self._texts if s != this_source)
+        verdict = VerificationDraft(
+            claim_id=claim_id,
+            refutation=RefutationDraft(
+                source_id=other_source,
+                counter_text=self._texts[other_source],
+                reason="mutual contradiction"))
+        return {"structured_response": VerifierOutput(verdicts=[verdict])}
+
+
+async def test_mutual_contradiction_ping_pong_terminates(tmp_path, postgres_dsn):
+    (tmp_path / "a.md").write_text("x", encoding="utf-8")
+    (tmp_path / "b.md").write_text("y", encoding="utf-8")
+    runtime = ResearchRuntime(postgres_dsn, stream="ver-pingpong-stream")
+    await runtime.connect()
+    try:
+        await runtime.catch_up()
+        texts = {"a.md": "X is 5", "b.md": "X is 7"}
+        await runtime.append_events([
+            ("claim.proposed", {"claim_id": "c1", "source_id": "a.md", "text": texts["a.md"],
+                                 "origin": "extracted"}),
+        ])
+        runner = AlwaysRefutingRunner(runtime, texts)
+        agent = VerifierAgent(runner, runtime, CorpusReader(tmp_path))
+
+        for _ in range(6):
+            if await agent.readiness() == 0.0:
+                break
+            await agent.run_once()
+
+        assert await agent.readiness() == 0.0
+        claims = runtime.list_claims()
+        assert len(claims) == 2
+        ids = [c["claim_id"] for c in claims]
+        c_a, c_b = (ids if runtime.get_claim(ids[0])["source_id"] == "a.md" else ids[::-1])
+        assert runtime.refuters_for(c_a) == [c_b]
+        assert runtime.refuters_for(c_b) == [c_a]
+    finally:
+        await runtime.close()
+
+
 async def test_inconclusive_verdict_idles_without_blocking_later_claims(tmp_path, postgres_dsn):
     (tmp_path / "a.md").write_text("x", encoding="utf-8")
     (tmp_path / "b.md").write_text("y", encoding="utf-8")

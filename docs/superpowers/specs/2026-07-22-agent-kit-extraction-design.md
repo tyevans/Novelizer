@@ -208,11 +208,21 @@ the same `_refresh_lookup_dicts()` pattern already there:
   (claim_id → {claim_id, source_id, text}).
 - `_corroborators_by_claim: dict[str, list[str]]` — from
   `source.corroborated` (claim_id → [source_id]).
+- `_extracted_sources: set[str]` — source_ids whose `claim.proposed`
+  payload carries `origin == "extracted"` (missing `origin`, for
+  pre-existing streams written before the field existed, defaults to
+  `"extracted"` for back-compat). Distinguishes "the extractor has swept
+  this doc" from "some claim cites this doc" (`_counts_by_source`), so a
+  verifier-minted counter-claim citing a not-yet-extracted doc cannot
+  suppress that doc's own extraction.
 - Existing `_counts_by_source`, `_refuters_by_target`,
   `_superseders_by_target` unchanged.
 - Read accessors: `list_claims()`, `get_claim(claim_id)`,
   `corroborators_for(claim_id)`, `refuters_for(claim_id)`,
-  `superseders_for(claim_id)` — plain dict/list reads of current state.
+  `superseders_for(claim_id)`, `extracted_source_ids()` — plain dict/list
+  reads of current state. `claimed_source_ids()` (from `_counts_by_source`)
+  is retained unchanged for callers/tests that want "any claim at all", but
+  the extractor's own workable-queue check uses `extracted_source_ids()`.
 - An `asyncio.Lock` around `catch_up()` and `append_event()` bodies:
   multiple agents share one runtime instance under a concurrency-2
   scheduler, and `_refresh_lookup_dicts()` mutates shared dicts — the lock
@@ -248,44 +258,59 @@ validates and appends (novelizer's intent pattern).
 
 ### The three agents (`research_domain/agents.py`, new)
 
-All subclass `agent_kit.BaseAgent`; all follow poll/work/commit with
-watermark gating and `note_pass()` when a run yields nothing actionable.
-All appends batch via inherited `RuntimeBase.append()` then one
-`catch_up()` at commit end (under the runtime lock).
+All subclass `agent_kit.BaseAgent`; all follow poll/work/commit. Quiet-when-
+done uses the fruitless-set pattern, not watermark gating or `note_pass()`
+backoff: an examined item that yields no events joins an in-memory set
+subtracted from the workable queue, so it can never head-of-line-block
+items behind it, and readiness drops to 0.0 once no workable items remain.
+The sets are process-local; a restart re-examines fruitless items, which is
+safe because fruitless runs commit nothing. All appends batch via
+inherited `RuntimeBase.append()` then one `catch_up()` at commit end (under
+the runtime lock).
 
-**Extractor** (readiness 0.7 gated on watermark):
-- `poll()`: pending = corpus docs whose source_id has no `claim.proposed`
-  yet (`_counts_by_source` keys). Fingerprint = frozenset(pending).
+**Extractor** (readiness 0.7 when workable docs remain):
+- `_workable()`: corpus docs not yet in `extracted_source_ids()` and not in
+  the agent's own `_fruitless` set.
 - `work()`: one document per run (keeps runs short and scheduler traffic
   honest): runner reads the doc (prompt includes full text; tools available
   for cross-reference) → `ExtractorOutput`.
 - `commit()`: dedup drafts against existing claims by (source_id,
-  normalized text); append `claim.proposed` per surviving draft with minted
-  claim_id. A doc yielding zero claims appends nothing — the recorded
-  watermark keeps it from re-triggering until the corpus changes (this is
-  exactly what watermark gating is for).
+  normalized text); append `claim.proposed` (`origin: "extracted"`) per
+  surviving draft with minted claim_id. A doc yielding zero claims appends
+  nothing and joins `_fruitless` — it stays out of the workable queue until
+  a restart re-examines it.
 
-**Verifier** (readiness 0.6):
-- `poll()`: pending = claims with no corroboration and no refutation
-  targeting them. Fingerprint = frozenset(pending claim ids).
+**Verifier** (readiness 0.6 when workable claims remain):
+- `_workable()`: claims with no corroboration and no refutation targeting
+  them, and not in the agent's own `_inconclusive` set.
 - `work()`: one claim per run: runner gets the claim + tools to read other
   documents → `VerifierOutput`.
 - `commit()`: per verdict — `source.corroborated` per corroborating source
   (deduped against `corroborators_for`, and a claim's own source never
-  corroborates it); a refutation mints a counter-claim
-  (`claim.proposed` from the refuting source) then `claim.refuted`
-  (claim_id=counter, target_claim_id=verified claim, reason).
+  corroborates it); a refutation first checks `list_claims()` for an
+  existing claim matching (refuting source_id, normalized counter_text) —
+  if found, reuses that claim_id instead of minting a new one; only mints a
+  fresh counter-claim (`claim.proposed`, `origin: "verification"`) when no
+  match exists. Either way it appends `claim.refuted` (claim_id=counter,
+  target_claim_id=verified claim, reason) unless that counter already
+  refutes the target (i.e. the counter_id is already in
+  `refuters_for(target)`). This dedup-and-reuse closes the ping-pong a
+  refutation-happy model would otherwise drive: on a mutual contradiction
+  between two claims, the second refutation reuses the first claim's id
+  instead of minting a third, so both claims end up with a refuter and
+  leave the workable queue — no unbounded growth. An empty verdict appends
+  nothing and joins `_inconclusive`.
 
-**Retractor** (readiness 0.5):
-- `poll()`: pending = contradiction targets (`_refuters_by_target` keys)
-  with no superseder yet. Fingerprint = frozenset(pending).
+**Retractor** (readiness 0.5 when workable contradiction targets remain):
+- `_workable()`: contradiction targets (`contradiction_targets()`) with no
+  superseder yet and not in the agent's own `_stood` set.
 - `work()`: one contradiction per run: runner sees target claim, its
   refuters, and tools → `RetractorOutput`.
 - `commit()`: validate `superseding_claim_id` is an existing refuter of
   `target_claim_id` and target not already superseded; append
   `claim.corrected`. An empty corrections list (model judges the original
-  stands) commits nothing; watermark prevents re-litigating until the
-  contradiction set changes.
+  stands) commits nothing and joins `_stood` — it stays out of the workable
+  queue until a restart re-examines it.
 
 Gating enforcement (`claim.corrected` is tiered "reviewed") remains
 unenforced, consistent with the runtime spec's non-goals — the human-review
