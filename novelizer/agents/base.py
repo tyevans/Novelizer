@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_kit import BaseAgent as _KitBaseAgent, PASS_BACKOFF_MULTIPLIER, Runner  # noqa: F401 — Runner and PASS_BACKOFF_MULTIPLIER re-exported for agent imports
+from agent_kit import BaseAgent as _KitBaseAgent, PASS_BACKOFF_MULTIPLIER, RATE_LIMIT_BACKOFF_MULTIPLIER, Runner  # noqa: F401 — Runner and the backoff multipliers re-exported for agent imports
 from pydantic import BaseModel, Field
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (

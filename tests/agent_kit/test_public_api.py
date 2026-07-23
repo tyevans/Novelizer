@@ -3,14 +3,14 @@ from __future__ import annotations
 import agent_kit
 
 EXPECTED = {
-    "BaseAgent", "Runner", "PASS_BACKOFF_MULTIPLIER",
+    "BaseAgent", "Runner", "PASS_BACKOFF_MULTIPLIER", "RATE_LIMIT_BACKOFF_MULTIPLIER",
     "Scheduler",
     "TelemetryEventType", "TelemetryEmitter",
     "AgentRunStarted", "AgentRunFinished", "AgentRunFailed",
     "SchedulerPicked", "SchedulerEligibilityChanged",
     "current_run_id", "current_agent_name",
     "build_chat_model", "build_agent_runner",
-    "GRAPH_RECURSION_LIMIT", "CONTEXT_WINDOW_TOKENS",
+    "GRAPH_RECURSION_LIMIT", "CONTEXT_WINDOW_TOKENS", "LLM_MAX_RETRIES",
     "ExcludeToolsMiddleware",
 }
 

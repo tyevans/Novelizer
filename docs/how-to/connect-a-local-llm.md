@@ -606,6 +606,17 @@ stops abruptly, and agents' structured responses truncate mid-JSON and fail to
 parse. Raise the cap (the `4096` default is a sane floor; below ~2048 expect
 trouble) and restart.
 
+**The feed shows `RateLimitError: Too many requests` bursts.** The server is
+saturated — several agents, chat, embeddings, and the tool-call summarizer all
+share one endpoint, and llama.cpp-style servers answer the overflow with 429s.
+This is expected under load and self-healing: each request waits out the
+saturation with up to `LLM_MAX_RETRIES` (10) exponential-backoff retries before
+the run gives up, and an agent whose run does die from a rate limit steps back
+three intervals (`RATE_LIMIT_BACKOFF_MULTIPLIER` in `agent_kit`) before rejoining,
+so the fleet drains the queue instead of hammering it. If the errors are constant
+rather than bursty, the fleet is oversized for the server — lower
+`max_concurrent_agents`, or raise the server's parallel-request capacity.
+
 **Prose works, but semantic search finds nothing and nothing ever alarms.** Broken
 embeddings are silent by design: the indexer logs a warning, halts at the failing
 record, and retries every cycle instead of alarming. Run

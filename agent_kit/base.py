@@ -15,6 +15,25 @@ from agent_kit.telemetry import (
 # back for this many intervals instead of one, freeing dispatch slots.
 PASS_BACKOFF_MULTIPLIER = 3
 
+# A run killed by a rate limit means the endpoint is saturated — usually by
+# this very fleet. Rejoining at full cadence next interval feeds the pile-up,
+# so the agent steps back this many intervals instead.
+RATE_LIMIT_BACKOFF_MULTIPLIER = 3
+
+
+def _is_rate_limit_error(exc: BaseException | None) -> bool:
+    """True if exc, or anything on its __cause__/__context__ chain, is a
+    provider rate-limit error. Matched by class name and HTTP status rather
+    than isinstance so the kit stays provider-agnostic and wrapped re-raises
+    (frameworks chain the original) are still recognized."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if type(exc).__name__ == "RateLimitError" or getattr(exc, "status_code", None) == 429:
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
 
 class Runner(Protocol):
     async def ainvoke(self, inputs: dict) -> dict: ...
@@ -78,6 +97,14 @@ class BaseAgent:
             now = self._clock()
         self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
 
+    def note_rate_limited(self, now: float | None = None) -> None:
+        """Record a run killed by endpoint saturation: back off for
+        RATE_LIMIT_BACKOFF_MULTIPLIER intervals so the fleet drains instead
+        of hammering a limit that just proved itself exhausted."""
+        if now is None:
+            now = self._clock()
+        self._backoff_until = now + self.interval * RATE_LIMIT_BACKOFF_MULTIPLIER
+
     async def _fingerprint(self) -> tuple | None:
         """External state this agent's work depends on. None (default)
         disables watermarking. Subclasses return a small tuple; captured
@@ -122,6 +149,8 @@ class BaseAgent:
                                error_type=type(e).__name__, error_message=str(e),
                                phase=phase, duration_s=time.monotonic() - started),
             )
+            if _is_rate_limit_error(e):
+                self.note_rate_limited()
             raise
         else:
             await self._emit_telemetry(

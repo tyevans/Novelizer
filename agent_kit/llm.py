@@ -14,6 +14,15 @@ CONTEXT_WINDOW_TOKENS = 128_000
 # in practice, so give agent graphs generous headroom.
 GRAPH_RECURSION_LIMIT = 100
 
+# The openai client's stock retry policy (2 retries, exponential backoff from
+# 0.5s) gives up within ~2 seconds, but a saturated local endpoint returns 429
+# for multi-second windows when several agents, embeddings, and chat share it —
+# and one exhausted request aborts an entire agent pass mid-run, discarding all
+# its in-flight tool work. 10 retries (capped at 8s apart, Retry-After honored)
+# buys roughly a minute of patience at request level, where waiting preserves
+# the pass instead of restarting it.
+LLM_MAX_RETRIES = 10
+
 
 class _ReasoningAwareChatOpenAI(ChatOpenAI):
     """ChatOpenAI, plus surfacing provider-specific reasoning/thinking deltas
@@ -47,6 +56,7 @@ def build_chat_model(
     model: str, base_url: str, api_key: str, temperature: float = 0.8,
     max_tokens: int | None = None, callbacks=None, streaming=None,
     context_window_tokens: int = CONTEXT_WINDOW_TOKENS,
+    max_retries: int = LLM_MAX_RETRIES,
 ):
     """Build a LangChain chat model bound to an OpenAI-compatible endpoint.
 
@@ -68,6 +78,7 @@ def build_chat_model(
         max_tokens=max_tokens,
         callbacks=callbacks,
         streaming=streaming,
+        max_retries=max_retries,
         profile={"max_input_tokens": context_window_tokens},
     )
 
