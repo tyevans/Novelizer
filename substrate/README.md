@@ -6,6 +6,10 @@ domains: fiction (`novelizer/`) and a synthetic research domain
 `docs/superpowers/specs/2026-07-20-cross-domain-substrate-design.md` for the
 generalization history.
 
+Sibling kits: `tui_kit/` (domain-agnostic TUI) and `agent_kit/`
+(domain-neutral agent execution — loop, scheduler, LLM runners; see
+`agent_kit/README.md`).
+
 `research_domain/` is the worked example for everything on this page -- it
 exercises every primitive and the runtime-construction pattern end to end.
 For the CLI built on top of it, see `docs/reference/research-domain-cli.md`;
