@@ -173,7 +173,8 @@ def _summarize(
     pool = casting_pool_note(ctx.get("hand"))
     sparks = inspiration_note(ctx.get("hand"))
     if pull_mode:
-        chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+        gists = {s.chapter_id: s.gist for s in ctx.get("summaries", []) if s.gist}
+        chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'], gists=gists)}"
     else:
         # Full fidelity on the chapter being continued, a head slice for the
         # ones behind it. A uniform head slice hid the ending the next chapter
@@ -264,6 +265,7 @@ class Author(BaseAgent):
             "hand": await self._read.get_active_hand(),
             "promises": await self._read.list_promises(),
             "brief": await self._read.get_open_brief_for_ordinal(len(chapters) + 1),
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:

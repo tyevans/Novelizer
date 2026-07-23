@@ -87,6 +87,7 @@ class WorldArchitect(BaseAgent):
             "chapters": await self._read.list_chapters(),
             "signals": await self._read.list_unconsumed_signals(target_agent=self.name),
             "hand": await self._read.get_active_hand(),
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> WorldEntriesDraft | None:
@@ -98,7 +99,11 @@ class WorldArchitect(BaseAgent):
         # invented in a vacuum, and the Architect could not previously see a
         # single chapter.
         chapters = ctx.get("chapters") or []
-        story = f"\n\nChapter index (read these to see what the story needs):\n{chapter_map_note(chapters)}" if chapters else ""
+        gists = {s.chapter_id: s.gist for s in ctx.get("summaries", []) if s.gist}
+        story = (
+            f"\n\nChapter index (read these to see what the story needs):\n{chapter_map_note(chapters, gists=gists)}"
+            if chapters else ""
+        )
         msg = (
             f"Existing world entries:\n{existing}{story}\n\nDirector seeds:\n{seeds}"
             f"{sparks}{cast}\n\nGenerate new world entries."

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from collections.abc import Mapping
 from novelizer.brain.arc_alignment import STAGNATION_CHAPTERS, arc_findings
 from novelizer.brain.beat_drift import beat_drifts, next_expected_beat
 from novelizer.brain.completion import completion_status
@@ -99,22 +100,29 @@ def chapter_ordinals(chapter_ids: list[str]) -> dict[str, str]:
     return {cid: f"ch{i:03d}" for i, cid in enumerate(chapter_ids, start=1)}
 
 
-def chapter_map_note(chapters: list[Chapter]) -> str:
+def chapter_map_note(chapters: list[Chapter], gists: Mapping[str, str] | None = None) -> str:
     """Pull-mode chapter index: one line per chapter, never prose.
 
     Leads with the chNNN ordinal because raw chapter ids are UUIDs, and an
     agent asked to copy a 36-char opaque string back into an intent drops or
     mangles it. The raw id trails in [id:...] for the schemas that still
-    require it.
+    require it. A chapter with a Summarizer gist gains an indented gist
+    line — what the chapter IS ABOUT — so tooled agents choose what to pull
+    from more than a title.
     """
     if not chapters:
         return "None yet."
     ordinal = chapter_ordinals([c.id for c in chapters])
-    return "\n".join(
-        f"- {ordinal[c.id]} '{c.title}' ({c.editorial_status.value}) "
-        f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'} [id:{c.id}]"
-        for c in chapters
-    )
+    lines = []
+    for c in chapters:
+        lines.append(
+            f"- {ordinal[c.id]} '{c.title}' ({c.editorial_status.value}) "
+            f"cast: {', '.join(c.character_ids) if c.character_ids else 'none'} [id:{c.id}]"
+        )
+        gist = (gists or {}).get(c.id)
+        if gist:
+            lines.append(f"    gist: {gist}")
+    return "\n".join(lines)
 
 
 def ledger_note(promises: list[PromiseRecord], chapters: list[Chapter]) -> str:

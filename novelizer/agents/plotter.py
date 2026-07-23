@@ -51,7 +51,8 @@ def _summarize(ctx: dict, personality: str = "") -> str:
     arcs = ctx.get("arcs", [])
     characters = ctx.get("characters", [])
 
-    blocks = [f"Chapter index:\n{chapter_map_note(chapters)}"]
+    gists = {s.chapter_id: s.gist for s in ctx.get("summaries", []) if s.gist}
+    blocks = [f"Chapter index:\n{chapter_map_note(chapters, gists=gists)}"]
 
     if blueprint is None:
         blocks.append("No blueprint adopted — propose one (pick a framework and target length).")
@@ -176,6 +177,7 @@ class Plotter(BaseAgent):
             "open_proposals": open_proposals,
             "scores": scores,
             "arcs": arcs,
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> PlotterOutput | None:

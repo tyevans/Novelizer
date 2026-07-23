@@ -159,6 +159,7 @@ class CharacterKeeper(BaseAgent):
             "all_arcs": await self._read.list_arcs(active_only=False),
             "beats": await self._read.list_beats(),
             "blueprint": await self._read.get_active_blueprint(),
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     def _select_unmined(self, unmined: list) -> list:
@@ -217,7 +218,8 @@ class CharacterKeeper(BaseAgent):
         def build_msg(prose_block: str) -> str:
             if self.pull_mode:
                 chapters_section = (
-                    f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+                    f"Chapter index:\n"
+                    f"{chapter_map_note(ctx['chapters'], gists={s.chapter_id: s.gist for s in ctx['summaries'] if s.gist})}"
                     f"\n\n{UNREAD_CHAPTERS_HEADING}\n{prose_block}"
                 )
             else:

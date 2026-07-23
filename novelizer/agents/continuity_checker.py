@@ -178,6 +178,7 @@ class ContinuityChecker(BaseAgent):
                 for h in await self._read.list_hands(status="consumed")
                 if h.consumed_chapter_id
             },
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
@@ -186,7 +187,10 @@ class ContinuityChecker(BaseAgent):
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         if self.pull_mode:
-            chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+            chapters_block = (
+                f"Chapter index:\n"
+                f"{chapter_map_note(ctx['chapters'], gists={s.chapter_id: s.gist for s in ctx['summaries'] if s.gist})}"
+            )
         else:
             chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
             chapters_block = f"Recent chapters:\n{chapters}"

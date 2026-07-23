@@ -117,7 +117,9 @@ class ChatService:
         ) or "None."
         tm = "\n".join(f"- {th.id}: {th.title}" for th in themes) or "None."
         if self.pull_mode:
-            chapters_block = f"Chapter index:\n{chapter_map_note(chapters)}"
+            summaries = await self._read.list_chapter_summaries()
+            gists = {s.chapter_id: s.gist for s in summaries if s.gist}
+            chapters_block = f"Chapter index:\n{chapter_map_note(chapters, gists=gists)}"
         else:
             prev = "\n".join(f"- '{ch.title}': {ch.prose[:200]}" for ch in chapters[-3:]) or "None yet."
             chapters_block = f"Recent chapters:\n{prev}"
