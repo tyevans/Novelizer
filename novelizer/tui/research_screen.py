@@ -6,8 +6,10 @@ from textual.screen import Screen
 from textual.widgets import Footer, Input, RichLog
 
 from novelizer.research.service import ResearchAnswerError
-from novelizer.tui.widgets.engine_room_model import LiveRunState, apply_bus_item, route_agent
-from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
+from novelizer.tui.identity import NOVELIZER_AGENT_THEME
+from novelizer.tui.telemetry_adapter import to_contract_event
+from tui_kit.run_model import LiveRunState, apply_bus_item, route_agent
+from tui_kit.widgets.live_stream_panel import LiveStreamPanel
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ class ResearchScreen(Screen):
         self._live_state = LiveRunState()
 
     def compose(self) -> ComposeResult:
-        yield LiveStreamPanel(id="research_live")
+        yield LiveStreamPanel(theme=NOVELIZER_AGENT_THEME, id="research_live")
         log = RichLog(highlight=False, markup=False, id="research_log")
         log.border_title = "TALK TO THE PROJECT"
         yield log
@@ -44,9 +46,10 @@ class ResearchScreen(Screen):
         try:
             while True:
                 item = await q.get()
-                if route_agent(item) != "research":
+                contract_item = to_contract_event(item)
+                if contract_item is None or route_agent(contract_item) != "research":
                     continue
-                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                self._live_state = apply_bus_item(self._live_state, contract_item, time.monotonic())
                 self.query_one(LiveStreamPanel).render(self._live_state)
         finally:
             self.runtime.telemetry_bus.unsubscribe(q)

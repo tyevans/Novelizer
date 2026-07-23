@@ -1,61 +1,16 @@
-"""Pure Zone-5 statusbar rendering: scheduler status (+ Task 2: autonomy
-state, command hints) -> Rich Text. Same seam as the *_model.py modules —
-no Textual imports, no I/O, unit-testable without a terminal.
-
-The old named-summary format ("● author  ⏸ editor  ⚠ x: err") is replaced by
-the spec's glyph strip: the whole cast, always visible, one glyph+mark pair
-per agent in the agent's identity color. Error text never renders here —
-errors land in the feed as alarm lines (spec Zone 5)."""
+"""Pure Zone-5 statusbar rendering: scheduler status + autonomy state ->
+Rich Text. The roster glyph strip itself lives in tui_kit.widgets.roster
+(domain-agnostic); this module adds novelizer's autonomy dial and composes
+the two into the full statusbar, using NOVELIZER_AGENT_THEME for glyphs."""
 from __future__ import annotations
 
 from rich.text import Text
 
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
-from novelizer.tui.identity import identity_for
-from novelizer.tui.widgets.feed_model import ALARM_STYLE
+from novelizer.tui.identity import NOVELIZER_AGENT_THEME
+from tui_kit.widgets.roster import roster_glyphs
 
 DIM = "dim"
-
-# State marks appended to each agent's glyph. Precedence: errored > paused >
-# running > idle. The spinner is static per render (any spinner char is fine).
-RUNNING_MARK = "⠋"
-IDLE_MARK = "·"
-PAUSED_MARK = "‖"
-ERROR_MARK = "!"
-
-
-def _mark(s: dict) -> tuple[str, str | None]:
-    """(mark, style) for one status row; style None means 'agent color'."""
-    if s.get("last_error"):
-        return ERROR_MARK, ALARM_STYLE
-    if s.get("paused"):
-        return PAUSED_MARK, DIM
-    if s.get("running"):
-        return RUNNING_MARK, None
-    return IDLE_MARK, DIM
-
-
-def roster_glyphs(status: list) -> Text:
-    """The cast as a glyph strip — '✎⠋ §· ⌂· ♥· ⚖· ↺· ∿·'. Glyph in the
-    agent's color; mark carries state. M5.3 status fields the strip does not
-    need (last_completed, run_count, next_ready_in) are accepted and ignored."""
-    if not status:
-        return Text("no agents", style=DIM)
-    strip = Text()
-    for i, s in enumerate(status):
-        if i:
-            strip.append(" ")
-        ident = identity_for(s["name"])
-        strip.append(ident.glyph, style=ident.style)
-        mark, style = _mark(s)
-        strip.append(mark, style=ident.style if style is None else style)
-    return strip
-
-
-def roster_summary(status: list) -> str:
-    """Plain-string variant of the glyph strip for string-surface needs."""
-    return roster_glyphs(status).plain
-
 
 DIAL_SEGMENTS = 4
 DIAL_FILLED = "▮"
@@ -96,10 +51,8 @@ def dial_meter(state: AutonomyState) -> Text:
 
 
 def status_strip(status: list, state: AutonomyState) -> Text:
-    """The whole Zone-5 statusbar: roster glyph strip + autonomy dial.
-    The command cheatsheet is gone — commands live in the Input's hint
-    placeholder and :help."""
-    strip = roster_glyphs(status)
+    """The whole Zone-5 statusbar: roster glyph strip + autonomy dial."""
+    strip = roster_glyphs(status, NOVELIZER_AGENT_THEME)
     strip.append("    ")
     strip.append_text(dial_meter(state))
     return strip
