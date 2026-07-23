@@ -1,6 +1,7 @@
 from __future__ import annotations
 from novelizer.agents import prompts
-from novelizer.agents.base import BaseAgent, ChapterDraft, Runner, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
     stale_threads_note,

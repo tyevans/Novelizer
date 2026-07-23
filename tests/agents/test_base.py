@@ -649,7 +649,8 @@ def test_guarded_line_returns_empty_when_value_falsy():
     assert BaseAgent._guarded_line("In character", "") == ""
 
 
-from novelizer.agents.base import DEFAULT_PASS_REMARK, PASS_BACKOFF_MULTIPLIER
+from novelizer.agents.base import PASS_BACKOFF_MULTIPLIER
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK
 
 
 def test_note_pass_extends_backoff_beyond_interval():

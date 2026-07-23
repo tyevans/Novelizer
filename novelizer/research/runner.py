@@ -1,6 +1,6 @@
 from __future__ import annotations
 from langchain_core.tools import tool
-from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.research.schemas import ResearchAnswer
 from novelizer.research.tools import (
     check_beat_drift, check_completion, check_leaks, check_paradoxes,

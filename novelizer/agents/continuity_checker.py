@@ -1,6 +1,8 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
     PromiseIntent,

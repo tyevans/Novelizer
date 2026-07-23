@@ -1,6 +1,8 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import arc_note, chapter_map_note, open_retcons_note

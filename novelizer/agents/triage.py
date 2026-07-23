@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
-from novelizer.agents.base import BaseAgent, Runner, GRAPH_RECURSION_LIMIT
+from novelizer.agents.base import BaseAgent, Runner
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import TriageVerdict
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer

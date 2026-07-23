@@ -1,6 +1,6 @@
 from __future__ import annotations
 from novelizer.agents.author import RETRIEVAL_NOTE
-from novelizer.agents.base import GRAPH_RECURSION_LIMIT
+from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
