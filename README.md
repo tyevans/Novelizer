@@ -20,6 +20,8 @@ who-knows-what, cause and effect — from that same canon. The human director st
 seeds and focus signals, adjudicates retcons, dials how much autonomy the room gets, and
 reads the book as it emerges.
 
+![Novelizer Mission Control — the live agent feed on the left, the story browser and Story Brain panes on the right, with a chapter drafting live](docs/images/the_room.png)
+
 The project is feature-complete through milestone M5 (see
 [`docs/MILESTONES.md`](docs/MILESTONES.md) for the full roadmap and closeout notes) — this
 README describes the shipped product. New here? Start with
@@ -72,6 +74,8 @@ launch — a story picker lists the stories in `default_stories_dir`
 `stories/world.db` triggers a one-time migration offer; declining is
 remembered.
 
+![First-run setup wizard — point Novelizer at an OpenAI-compatible LLM endpoint, test the connection, and pick models from the endpoint's live model list](docs/images/initial_setup.png)
+
 Inside the TUI, `:settings` opens a settings screen showing every setting
 with its effective value and source layer (default / global / story / env).
 Edits write straight to `config.toml` / `story.toml` — hand-edits to those
@@ -110,9 +114,13 @@ cosmetic, `Ctrl+K` alone focuses the input):
 - `approve <id>` / `reject <id>` — resolve a pending proposal
 - `settings` — open the settings screen (see Configuration, above)
 
+![The command palette (Ctrl+K) — fuzzy-searchable list of every director command: seed, focus, pause, autonomy, approvals, view toggles, and more](docs/images/command_pallette.png)
+
 Toggle Room drill-in view (full-screen feed, agents speaking in their cast personalities)
 with `r`; toggle Reading mode (clean chapter-prose view) with `v`. Room and Reading are
 mutually exclusive with each other and with the normal two-column layout.
+
+![Reading mode — the story browser beside a clean, full-height chapter-prose pane for reading the book as it emerges](docs/images/reader_mode.png)
 
 Toggle the Engine Room view with `e` — a live machinery pane (which agent is running,
 the model's tokens streaming in, call vitals) over a durable trace of every run, LLM
@@ -122,6 +130,8 @@ inspection of the exact prompt for the call in flight (off by default). The one-
 activity strip above the command bar shows the same signal at a glance: `▶ author ·
 drafting · 3.4k tok · 52s` while a run is live, `idle · next: editor in 12s` between
 runs, and a red crash notice if an agent fails.
+
+![The Engine Room — an agent's raw tool-calls and streaming LLM output over a durable trace of every run, LLM call, and scheduler decision](docs/images/the_engine.png)
 
 ### Story Brain views
 
