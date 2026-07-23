@@ -8,7 +8,7 @@ from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.continuity_checker import ContinuityChecker
 from novelizer.agents.schemas import ContinuityOutput, FlagDraft, MinedFactsOutput, MinedSecretFact, MinedRevealFact, MinedThreadFact, MinedCausalFact, PromiseProgressFact
-from novelizer.store.models import WorldEntry, FlagStatus, Chapter
+from novelizer.store.models import WorldEntry, FlagStatus, Chapter, Character
 from novelizer.canon.events import SecretCreated, SecretReferenced
 from novelizer.brain.leaks import LEAK_SOURCE_TAG
 
@@ -1057,6 +1057,38 @@ async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
     assert "Recent chapters:" not in sent
     assert "- ch001 'One' (draft) cast: none [id:c1]" in sent
     assert "secret prose text" not in sent
+
+
+async def test_checker_pull_mode_false_keeps_world_bodies_and_traits(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Suns", body="SECRET WORLD BODY"))
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="SECRET TRAITS"))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "SECRET WORLD BODY" in sent
+    assert "SECRET TRAITS" in sent
+
+
+async def test_checker_pull_mode_true_pushes_world_and_cast_as_index_only(stack):
+    """A tooled Checker must read both sides of a conflict before filing;
+    pushed bodies and traits are the summary it is told not to work from."""
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Suns", body="SECRET WORLD BODY"))
+    await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira", traits="SECRET TRAITS"))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "[w1] Suns" in sent
+    assert "[ch1] Mira" in sent
+    assert "SECRET WORLD BODY" not in sent
+    assert "SECRET TRAITS" not in sent
 
 
 def test_build_continuity_checker_runner_without_backend_stays_constructible():

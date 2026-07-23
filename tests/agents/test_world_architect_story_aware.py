@@ -52,8 +52,8 @@ async def stack():
     os.unlink(path)
 
 
-async def _prompt(read, committer, runner):
-    architect = WorldArchitect(runner, read, committer)
+async def _prompt(read, committer, runner, pull_mode=False):
+    architect = WorldArchitect(runner, read, committer, pull_mode=pull_mode)
     ctx = await architect.poll()
     await architect.work(ctx)
     return runner.calls[-1]["messages"][0]["content"]
@@ -134,3 +134,28 @@ class TestWatermark:
         )
         await proj.catch_up()
         assert await architect.readiness() > 0.0
+
+
+class TestEntriesPushVsPull:
+    async def test_pull_mode_false_keeps_body_slices(self, stack):
+        events, proj, read, committer = stack
+        await events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Ashen League", body="SECRET ENTRY BODY"),
+        )
+        await proj.catch_up()
+        sent = await _prompt(read, committer, FakeRunner())
+        assert "SECRET ENTRY BODY" in sent
+
+    async def test_pull_mode_true_lists_titles_without_bodies(self, stack):
+        """The prompt orders a tool-based survey before canonizing anything;
+        pushed body slices are the summary that survey replaces."""
+        events, proj, read, committer = stack
+        await events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Ashen League", body="SECRET ENTRY BODY"),
+        )
+        await proj.catch_up()
+        sent = await _prompt(read, committer, FakeRunner(), pull_mode=True)
+        assert "The Ashen League" in sent
+        assert "SECRET ENTRY BODY" not in sent
