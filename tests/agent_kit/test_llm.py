@@ -1,11 +1,30 @@
 from __future__ import annotations
 
-from agent_kit.llm import CONTEXT_WINDOW_TOKENS, GRAPH_RECURSION_LIMIT, build_chat_model
+from agent_kit.llm import (
+    CONTEXT_WINDOW_TOKENS, GRAPH_RECURSION_LIMIT, LLM_MAX_RETRIES, build_chat_model,
+)
 
 
 def test_recursion_limit_and_context_window_defaults():
     assert GRAPH_RECURSION_LIMIT == 100
     assert CONTEXT_WINDOW_TOKENS == 128_000
+
+
+def test_max_retries_default_reaches_the_openai_client():
+    """The openai client's stock policy (2 retries, sub-second backoff) gives
+    up inside a multi-second 429 window from a saturated local server, and the
+    resulting RateLimitError aborts a whole agent pass. The builder must stamp
+    a generous request-level retry budget on the underlying client so requests
+    ride out saturation instead of killing the run."""
+    m = build_chat_model("m", "http://localhost:9999/v1", "k")
+    assert LLM_MAX_RETRIES >= 8
+    assert m.max_retries == LLM_MAX_RETRIES
+    assert m.root_async_client.max_retries == LLM_MAX_RETRIES
+
+
+def test_max_retries_is_overridable():
+    m = build_chat_model("m", "http://localhost:9999/v1", "k", max_retries=3)
+    assert m.root_async_client.max_retries == 3
 
 
 def test_build_chat_model_stamps_profile_and_params():

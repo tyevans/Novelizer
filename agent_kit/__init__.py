@@ -8,10 +8,16 @@ novelizer's shape, consumed first by research_domain.
 Import from this top level only; submodule imports are forbidden by an
 import-linter contract (see pyproject.toml).
 """
-from agent_kit.base import PASS_BACKOFF_MULTIPLIER, BaseAgent, Runner
+from agent_kit.base import (
+    PASS_BACKOFF_MULTIPLIER,
+    RATE_LIMIT_BACKOFF_MULTIPLIER,
+    BaseAgent,
+    Runner,
+)
 from agent_kit.llm import (
     CONTEXT_WINDOW_TOKENS,
     GRAPH_RECURSION_LIMIT,
+    LLM_MAX_RETRIES,
     build_agent_runner,
     build_chat_model,
 )
@@ -32,6 +38,7 @@ __all__ = [
     "BaseAgent",
     "Runner",
     "PASS_BACKOFF_MULTIPLIER",
+    "RATE_LIMIT_BACKOFF_MULTIPLIER",
     "Scheduler",
     "TelemetryEventType",
     "TelemetryEmitter",
@@ -46,5 +53,6 @@ __all__ = [
     "build_agent_runner",
     "GRAPH_RECURSION_LIMIT",
     "CONTEXT_WINDOW_TOKENS",
+    "LLM_MAX_RETRIES",
     "ExcludeToolsMiddleware",
 ]

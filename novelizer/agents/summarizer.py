@@ -136,7 +136,7 @@ class Summarizer(BaseAgent):
 def build_summarizer_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from langchain.agents.structured_output import ProviderStrategy
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     # Summarization is extraction, not composition: run cold, grammar-constrained
     # (same rationale as the continuity mining runner).
     model = build_chat_model(

@@ -194,3 +194,57 @@ async def test_run_once_without_telemetry_is_silent_noop():
     agent = RecordingAgent()
     await agent.run_once()  # must not raise
     assert agent.seen_agent_name == "rec"
+
+
+# --- rate-limit backoff ---------------------------------------------------
+
+def _rate_limit_error():
+    import httpx
+    import openai
+    resp = httpx.Response(
+        429, request=httpx.Request("POST", "http://localhost:9999/v1/chat/completions"))
+    return openai.RateLimitError("Too many requests", response=resp, body=None)
+
+
+class BackoffProbe(BaseAgent):
+    def __init__(self, fail: Exception, interval: int = 10, clock=lambda: 1000.0):
+        super().__init__(NullRunner(), interval=interval, name="probe", clock=clock)
+        self._fail = fail
+
+    async def _run(self):
+        raise self._fail
+
+
+async def test_run_once_rate_limit_failure_backs_off_extra_intervals():
+    """A run killed by a rate limit means the endpoint is saturated; the agent
+    must step back RATE_LIMIT_BACKOFF_MULTIPLIER intervals instead of rejoining
+    the pile-up at full cadence next interval."""
+    import openai
+    from agent_kit.base import RATE_LIMIT_BACKOFF_MULTIPLIER
+    agent = BackoffProbe(_rate_limit_error())
+    with pytest.raises(openai.RateLimitError):
+        await agent.run_once()
+    agent.mark_ran(1000.0)  # the scheduler's finally-block does this
+    horizon = 1000.0 + agent.interval * RATE_LIMIT_BACKOFF_MULTIPLIER
+    assert not agent.ready_for_interval(horizon - 0.001)
+    assert agent.ready_for_interval(horizon)
+
+
+async def test_run_once_wrapped_rate_limit_failure_still_backs_off():
+    """Frameworks re-raise provider errors with the original as __cause__ or
+    __context__; the backoff must see through one such wrapper chain."""
+    wrapper = RuntimeError("graph step failed")
+    wrapper.__cause__ = _rate_limit_error()
+    agent = BackoffProbe(wrapper)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    agent.mark_ran(1000.0)
+    assert not agent.ready_for_interval(1000.0 + agent.interval + 0.001)
+
+
+async def test_run_once_generic_failure_does_not_back_off():
+    agent = BackoffProbe(ValueError("boom"))
+    with pytest.raises(ValueError):
+        await agent.run_once()
+    agent.mark_ran(1000.0)
+    assert agent.ready_for_interval(1000.0 + agent.interval)

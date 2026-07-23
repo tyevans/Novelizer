@@ -678,6 +678,67 @@ def test_no_pass_means_plain_interval_gate():
 
 def test_pass_constants():
     assert PASS_BACKOFF_MULTIPLIER == 3
+
+
+# --- rate-limit backoff ---------------------------------------------------
+
+def _rate_limit_error():
+    import httpx
+    import openai
+    resp = httpx.Response(
+        429, request=httpx.Request("POST", "http://localhost:9999/v1/chat/completions"))
+    return openai.RateLimitError("Too many requests", response=resp, body=None)
+
+
+class _FailingAgent(BaseAgent):
+    def __init__(self, fail: Exception):
+        super().__init__(runner=None, read_store=None, committer=None,
+                         interval=100, name="probe")
+        self._fail = fail
+
+    async def _run(self):
+        raise self._fail
+
+
+async def test_run_once_rate_limit_failure_backs_off_extra_intervals():
+    """A run killed by a rate limit means the endpoint is saturated; the agent
+    must step back RATE_LIMIT_BACKOFF_MULTIPLIER intervals instead of rejoining
+    the pile-up at full cadence next interval."""
+    import time
+    import openai
+    from novelizer.agents.base import RATE_LIMIT_BACKOFF_MULTIPLIER
+    agent = _FailingAgent(_rate_limit_error())
+    with pytest.raises(openai.RateLimitError):
+        await agent.run_once()
+    now = time.monotonic()
+    agent.mark_ran(now)  # the scheduler's finally-block does this
+    assert not agent.ready_for_interval(now + agent.interval)
+    # backoff extends well past a single interval (allow generous clock slack)
+    assert agent.seconds_until_ready(now) > agent.interval * (RATE_LIMIT_BACKOFF_MULTIPLIER - 1)
+
+
+async def test_run_once_wrapped_rate_limit_failure_still_backs_off():
+    """Frameworks re-raise provider errors with the original as __cause__ or
+    __context__; the backoff must see through one such wrapper chain."""
+    import time
+    wrapper = RuntimeError("graph step failed")
+    wrapper.__cause__ = _rate_limit_error()
+    agent = _FailingAgent(wrapper)
+    with pytest.raises(RuntimeError):
+        await agent.run_once()
+    now = time.monotonic()
+    agent.mark_ran(now)
+    assert not agent.ready_for_interval(now + agent.interval)
+
+
+async def test_run_once_generic_failure_does_not_back_off():
+    import time
+    agent = _FailingAgent(ValueError("boom"))
+    with pytest.raises(ValueError):
+        await agent.run_once()
+    now = time.monotonic()
+    agent.mark_ran(now)
+    assert agent.ready_for_interval(now + agent.interval)
     assert DEFAULT_PASS_REMARK == "Nothing needs my attention — carry on with the story."
 
 
