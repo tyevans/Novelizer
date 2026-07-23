@@ -51,24 +51,29 @@ async def stack():
     os.unlink(path)
 
 
-async def _prompt(read, committer, runner, **kw):
-    keeper = CharacterKeeper(runner, read, committer, **kw)
+async def _prompt(read, committer, events, runner, **kw):
+    keeper = CharacterKeeper(runner, read, committer, events, **kw)
     ctx = await keeper.poll()
     await keeper.work(ctx)
     return runner.calls[-1]["messages"][0]["content"]
 
 
 class TestPullMode:
-    async def test_pull_mode_pushes_the_index_not_the_prose(self, stack):
+    async def test_pull_mode_pushes_the_index_and_mines_full_prose(self, stack):
+        """Task 8: a fixed prose cap starved discovery of anyone introduced
+        late in a chapter, so pull mode now gets the chapter index AND the
+        full prose of unmined chapters under a dedicated mining heading —
+        not the index alone."""
         events, proj, read, committer = stack
         await events.append(
             EventType.CHAPTER_CREATED, "c1",
             Chapter(id="c1", title="One", prose="A LATE ARRIVAL walked in."),
         )
         await proj.catch_up()
-        sent = await _prompt(read, committer, FakeRunner(), pull_mode=True)
-        assert "A LATE ARRIVAL" not in sent
+        sent = await _prompt(read, committer, events, FakeRunner(), pull_mode=True)
         assert "ch001" in sent and "One" in sent
+        assert "A LATE ARRIVAL" in sent
+        assert "Unread chapters (full prose — mine these now):" in sent
 
     async def test_push_mode_still_inlines_prose(self, stack):
         """Untooled deployments have no way to read, so they keep the push."""
@@ -77,7 +82,7 @@ class TestPullMode:
             EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="INLINE PROSE"),
         )
         await proj.catch_up()
-        sent = await _prompt(read, committer, FakeRunner())
+        sent = await _prompt(read, committer, events, FakeRunner())
         assert "INLINE PROSE" in sent
 
     async def test_pull_mode_prompt_orders_research_before_emit(self, stack):
@@ -102,7 +107,7 @@ class TestSecretsAreVisible:
             SecretRecord(id="the-heir-lives", title="The Heir Lives"),
         )
         await proj.catch_up()
-        sent = await _prompt(read, committer, FakeRunner())
+        sent = await _prompt(read, committer, events, FakeRunner())
         assert "the-heir-lives" in sent
         assert "The Heir Lives" in sent
 
@@ -112,7 +117,7 @@ class TestSecretsAreVisible:
             EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"),
         )
         await proj.catch_up()
-        sent = await _prompt(read, committer, FakeRunner())
+        sent = await _prompt(read, committer, events, FakeRunner())
         assert "learning a secret" not in sent
 
 
@@ -131,5 +136,5 @@ class TestAliasesAreVisible:
             EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"),
         )
         await proj.catch_up()
-        sent = await _prompt(read, committer, FakeRunner())
+        sent = await _prompt(read, committer, events, FakeRunner())
         assert "Doc" in sent
