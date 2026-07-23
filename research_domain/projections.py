@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable
 
-from substrate.projection import ProjectionCatalog, ProjectionSpec
+from substrate import ProjectionCatalog, ProjectionSpec
 
 
 def build_source_coverage_catalog(count_claims_for_source: Callable[[str], int]) -> ProjectionCatalog:

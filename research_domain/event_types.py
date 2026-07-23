@@ -1,5 +1,5 @@
 from __future__ import annotations
-from substrate.event_registry import EventTypeRegistry, EventTypeSpec, GatingTier
+from substrate import EventTypeRegistry, EventTypeSpec, GatingTier
 
 RESEARCH_TIER_ORDER = ["auto", "reviewed"]
 

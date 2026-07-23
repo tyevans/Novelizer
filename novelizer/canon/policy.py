@@ -1,8 +1,7 @@
 from __future__ import annotations
 from novelizer.canon.autonomy import AutonomyLevel
 from novelizer.canon.events import EventType
-from substrate.event_registry import EventTypeRegistry, EventTypeSpec, GatingTier
-from substrate.policy import is_gated as _substrate_is_gated
+from substrate import EventTypeRegistry, EventTypeSpec, GatingTier, is_gated as _substrate_is_gated
 
 _RETCON_EVENTS = {EventType.WORLD_ENTRY_SUPERSEDED, EventType.FLAG_RESOLVED}
 _CANON_EVENTS = _RETCON_EVENTS | {

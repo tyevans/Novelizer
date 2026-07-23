@@ -1,5 +1,5 @@
 from __future__ import annotations
-from substrate.agent_registry import AgentSpec
+from substrate import AgentSpec
 
 
 def _stub_construct(name: str):
