@@ -144,6 +144,8 @@ def _interactive_startup(
 @click.pass_context
 def cli(ctx, story_path: str | None):
     ctx.ensure_object(dict)
+    from novelizer.logging_setup import configure_logging
+    configure_logging()
     try:
         if ctx.invoked_subcommand is None:
             settings = _interactive_startup(story_path)
