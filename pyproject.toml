@@ -48,7 +48,7 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["substrate", "novelizer", "research_domain"]
+root_packages = ["substrate", "novelizer", "research_domain", "tui_kit"]
 
 [[tool.importlinter.contracts]]
 name = "substrate package boundary"
@@ -62,3 +62,9 @@ forbidden_modules = [
     "substrate.postgres",
     "substrate.projection",
 ]
+
+[[tool.importlinter.contracts]]
+name = "tui_kit independence"
+type = "forbidden"
+source_modules = ["tui_kit"]
+forbidden_modules = ["novelizer", "substrate", "research_domain"]
