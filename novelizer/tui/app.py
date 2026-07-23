@@ -32,12 +32,14 @@ from novelizer.tui.widgets.feed_model import (
     welcome_lines,
     worker_error_line,
 )
-from novelizer.tui.widgets.activity_strip import ActivityStrip
-from novelizer.tui.widgets.engine_room import EngineRoom
-from novelizer.tui.widgets.engine_room_model import (
-    AGENT_NAMES, LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
-    trace_line, trace_detail, normalize_input_summary,
+from tui_kit.widgets.activity_strip import ActivityStrip
+from tui_kit.widgets.engine_room import EngineRoom
+from tui_kit.run_model import (
+    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
+    normalize_input_summary,
 )
+from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
+from novelizer.tui.telemetry_adapter import to_contract_event, trace_line, trace_detail
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +110,8 @@ class NovelizerApp(App):
                 brain = BrainPanel(id="brain")
                 brain.border_title = "STORY BRAIN"
                 yield brain
-                yield EngineRoom(id="engine_room")
+                yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
+                                 id="engine_room")
             with Vertical(id="right"):
                 browser = StoryBrowser("Story", id="browser")
                 browser.border_title = "STORY"
@@ -117,7 +120,7 @@ class NovelizerApp(App):
                     detail_scroll.border_title = "DETAIL"
                     yield Static("Select an item to view details.", id="detail")
         yield Static("loading…", id="statusbar")
-        yield ActivityStrip("idle", id="activity_strip")
+        yield ActivityStrip("idle", theme=NOVELIZER_AGENT_THEME, id="activity_strip")
         # Hidden by default; open_command_followup() reveals it, pre-filled,
         # when an args-taking palette command is selected. compact=True
         # drops Input's default tall border so the single row it gets has
@@ -341,11 +344,14 @@ class NovelizerApp(App):
             try:
                 item = await q.get()
                 now = time.monotonic()
-                self._live_state = apply_bus_item(self._live_state, item, now)
-                agent = route_agent(item)
-                if agent:
-                    self._agent_live_states[agent] = apply_bus_item(
-                        self._agent_live_states.get(agent, LiveRunState()), item, now)
+                contract_item = to_contract_event(item)
+                agent = None
+                if contract_item is not None:
+                    self._live_state = apply_bus_item(self._live_state, contract_item, now)
+                    agent = route_agent(contract_item)
+                    if agent:
+                        self._agent_live_states[agent] = apply_bus_item(
+                            self._agent_live_states.get(agent, LiveRunState()), contract_item, now)
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()

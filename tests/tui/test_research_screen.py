@@ -9,7 +9,7 @@ from novelizer.research.schemas import ResearchAnswer
 from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFinished, TokenDelta,
 )
-from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
+from tui_kit.widgets.live_stream_panel import LiveStreamPanel
 
 
 class _R:
