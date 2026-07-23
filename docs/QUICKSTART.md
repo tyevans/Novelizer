@@ -48,17 +48,22 @@ novelizer
 ```
 
 This opens the setup wizard (no crash on missing config — the wizard *is* the first-run
-path). You'll see:
+path). Every field has a visible label with a dim help line beneath it explaining what
+you're setting. You'll see:
 
 - **LLM base URL** — a text field pre-filled with `http://localhost:8080/v1`; point it at
-  your OpenAI-compatible endpoint.
-- **API key** — a password field; leave blank for local endpoints that don't require one.
+  your OpenAI-compatible endpoint (llama.cpp, vLLM, Ollama, LM Studio, OpenRouter…),
+  including the `/v1` suffix.
+- **API key** — a password field, sent as a Bearer token; leave blank for local endpoints
+  that don't require one.
 - **Stories directory** — pre-filled with `stories`; where your story directories will
-  live.
+  live. `~` expands; relative paths resolve from where you launch novelizer.
 - **Test connection** — a button; click it to probe the endpoint and populate the model
   pickers below from its live model list.
-- **author model** / **agent model** / **embedding model** — three dropdowns, disabled
-  until the connection test succeeds; pick a model for each.
+- **Author model** / **Agent model** / **Embedding model** — three dropdowns, disabled
+  (showing "run Test connection first") until the connection test succeeds. Author writes
+  the prose (pick your strongest model), Agent runs the support agents (a faster model
+  works well), Embedding builds the semantic index for canon search.
 - **Save & continue** — writes your global config and proceeds to the story picker (only
   enabled once you've saved or the connection test has populated the model lists).
 - **Skip model picks — save endpoint only** — an escape hatch if you just want the endpoint
@@ -66,7 +71,7 @@ path). You'll see:
 
 *Verified against: `novelizer/tui/setup_wizard.py`'s actual widget ids
 (`base_url`, `api_key`, `stories_dir`, `probe`, `author_model`, `agent_model`,
-`embed_model`, `save`, `skip`).*
+`embed_model`, `save`, `skip`) and its `_field` label/help copy.*
 
 After the wizard, a story picker appears — it lists any existing stories in your stories
 directory (empty on a first run) and lets you create a new one. `novelizer --story
