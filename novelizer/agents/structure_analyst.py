@@ -6,6 +6,7 @@ from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, AnnotationStructureScored
+from novelizer.brain.context_assembly import AdvisoryEntry, assemble_advisory
 from novelizer.store.models import Flag
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,11 @@ class StructureAnalyst(BaseAgent):
         interval: int = 180,
         personality: str = "",
         pull_mode: bool = False,
+        advisory_token_budget: int = 2000,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="structure_analyst", personality=personality)
         self.pull_mode = pull_mode
+        self._advisory_token_budget = advisory_token_budget
 
     async def _unscored_recent_chapters(self) -> list:
         chapters = await self._read.list_chapters()
@@ -97,6 +100,7 @@ class StructureAnalyst(BaseAgent):
             "unscored": await self._unscored_recent_chapters(),
             "scores": await self._read.list_structure_scores(),
             "chapters": await self._read.list_chapters(),
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     def _calibration_note(self, ctx: dict) -> str:
@@ -125,7 +129,12 @@ class StructureAnalyst(BaseAgent):
             # unit entirely -- a tooled Analyst reads the chapters instead.
             listing = "\n".join(f"- Chapter id:{c.id} '{c.title}'" for c in chapters)
         else:
-            listing = "\n\n".join(f"Chapter id:{c.id} '{c.title}': {c.prose[:400]}" for c in chapters)
+            summaries_by_id = {s.chapter_id: s.summary for s in ctx["summaries"]}
+            entries = [
+                AdvisoryEntry(label=f"Chapter id:{c.id} '{c.title}'", summary=summaries_by_id.get(c.id), verbatim=c.prose)
+                for c in chapters
+            ]
+            listing = assemble_advisory(entries, self._advisory_token_budget)
         cast = self._guarded_line("In character", self.personality)
         calibration = self._calibration_note(ctx)
         msg = f"Score these chapters:\n{listing}{calibration}{cast}"
@@ -201,6 +210,7 @@ def _construct(ctx: AgentContext) -> StructureAnalyst:
         interval=ctx.settings.structure_analyst_interval,
         personality=ctx.personalities.get("structure_analyst", ""),
         pull_mode=enabled,
+        advisory_token_budget=ctx.settings.advisory_token_budget,
     )
 
 

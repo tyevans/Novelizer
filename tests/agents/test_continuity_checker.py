@@ -1059,6 +1059,39 @@ async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
     assert "secret prose text" not in sent
 
 
+async def test_checker_push_mode_recap_uses_summary_when_available(stack):
+    from novelizer.canon.events import ChapterSummarized
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await events.append(
+        EventType.CHAPTER_SUMMARIZED, "c1",
+        ChapterSummarized(chapter_id="c1", gist="ch1 gist", summary="A concise recap of chapter one."),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A concise recap of chapter one." in sent
+    assert "x" * 200 not in sent
+
+
+async def test_checker_push_mode_recap_labels_missing_summary(stack):
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert ELISION_MARKER in sent
+
+
 def test_build_continuity_checker_runner_without_backend_stays_constructible():
     from novelizer.agents.continuity_checker import build_continuity_checker_runner
 

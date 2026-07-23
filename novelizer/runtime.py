@@ -264,6 +264,7 @@ class Runtime:
             self.events, self.read, self.committer, self._chat_runner_for,
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
             pull_mode=s.chat_tools_enabled, telemetry=self.telemetry,
+            advisory_token_budget=s.advisory_token_budget,
         )
         from novelizer.research.service import ResearchService
         self.research = ResearchService(self._research_runner_for, telemetry=self.telemetry)

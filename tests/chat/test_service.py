@@ -167,6 +167,47 @@ async def test_story_context_pull_mode_uses_chapter_index_no_prose_leak(db_path)
 
 
 @pytest.mark.asyncio
+async def test_chat_push_mode_recap_uses_summary_when_available(db_path):
+    from novelizer.canon.events import ChapterSummarized
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = False
+    try:
+        await rt.events.append(
+            EventType.CHAPTER_CREATED, "c1",
+            Chapter(id="c1", title="The Salt Road", prose="x" * 20000),
+        )
+        await rt.events.append(
+            EventType.CHAPTER_SUMMARIZED, "c1",
+            ChapterSummarized(chapter_id="c1", gist="ch1 gist", summary="A concise recap of the salt road."),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert "A concise recap of the salt road." in context
+        assert "x" * 200 not in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_push_mode_recap_labels_missing_summary(db_path):
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = False
+    try:
+        await rt.events.append(
+            EventType.CHAPTER_CREATED, "c1",
+            Chapter(id="c1", title="The Salt Road", prose="x" * 20000),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert ELISION_MARKER in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
 async def test_persona_forbidden_intents_are_dropped(db_path):
     reply = ChatReply(reply_text="I should not plant.", thread_intents=[ThreadIntent(action="plant", name="Rogue Thread")])
     rt = await _runtime(db_path, {"chat_character_keeper": _R(reply)})
@@ -209,5 +250,14 @@ async def test_runtime_wires_telemetry_into_chat_service(db_path):
     rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="hi"))})
     try:
         assert rt.chat._telemetry is rt.telemetry
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_wires_advisory_token_budget_into_chat_service(db_path):
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="hi"))})
+    try:
+        assert rt.chat.advisory_token_budget == rt.settings.advisory_token_budget
     finally:
         await rt.close()
