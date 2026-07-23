@@ -3,21 +3,23 @@ import time
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
-from novelizer.tui.widgets.engine_room_model import LiveRunState, live_body, styled_body, styled_vitals
+from tui_kit.contracts import AgentTheme
+from tui_kit.run_model import LiveRunState, live_body, styled_body, styled_vitals
 
 
 class LiveStreamPanel(Vertical):
     """A single-agent live token/tool-call stream, the same rendering
-    Engine Room gives each autonomous agent's tab, without the tab strip.
-    Owns no bus subscription and no identity — the mounting screen computes
-    the LiveRunState for its own key and calls render()."""
+    EngineRoom gives each agent's tab, without the tab strip. Owns no bus
+    subscription and no identity — the mounting screen computes the
+    LiveRunState for its own key and calls render()."""
 
     _VITALS_ID = "#lsp_vitals"
     _STREAM_ID = "#lsp_stream"
     _STREAM_SCROLL_ID = "#lsp_stream_scroll"
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, theme: AgentTheme, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._theme = theme
         self._rendered_body: str = ""
 
     def compose(self) -> ComposeResult:
@@ -32,7 +34,7 @@ class LiveStreamPanel(Vertical):
             # get this container's own visual; Vertical paints nothing itself.
             return ""
         now = time.monotonic() if now is None else now
-        self.query_one(self._VITALS_ID, Static).update(styled_vitals(state, now))
+        self.query_one(self._VITALS_ID, Static).update(styled_vitals(state, now, self._theme))
         body = live_body(state)
         if body != self._rendered_body:
             self.query_one(self._STREAM_ID, Static).update(styled_body(body))

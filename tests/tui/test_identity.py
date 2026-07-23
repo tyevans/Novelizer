@@ -69,3 +69,26 @@ def test_identity_for_empty_string_falls_back_to_system():
     assert ident.label == "System"
     assert ident.glyph == "·"
     assert ident.style == "dim"
+
+
+from tui_kit.contracts import AgentTheme
+from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
+
+
+def test_agent_names_matches_the_scheduler_registry_order():
+    assert AGENT_NAMES == (
+        "world_architect", "character_keeper", "muse", "plotter", "author",
+        "editor", "continuity_checker", "retconner", "structure_analyst",
+    )
+
+
+def test_novelizer_agent_theme_satisfies_the_agent_theme_protocol():
+    theme: AgentTheme = NOVELIZER_AGENT_THEME
+    assert theme.glyph("author") == "✎"
+    assert theme.label("author") == "Author"
+    assert theme.style("author") == "gold3"
+
+
+def test_novelizer_agent_theme_verb_uses_the_verb_table_with_a_fallback():
+    assert NOVELIZER_AGENT_THEME.verb("author") == "drafting"
+    assert NOVELIZER_AGENT_THEME.verb("muse") == "working"

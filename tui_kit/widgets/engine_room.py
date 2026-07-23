@@ -1,4 +1,4 @@
-"""The Engine Room: live token stream, vitals, and durable trace.
+"""EngineRoom: live token stream, vitals, and durable trace for N agents.
 
 The stream body is a Static inside a VerticalScroll, not a RichLog: a
 RichLog renders one line per write() call, which would put every
@@ -11,29 +11,29 @@ from textual.app import ComposeResult
 from textual.content import Content
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Static, TabbedContent, TabPane
-from novelizer.tui.identity import identity_for
-from novelizer.tui.widgets.engine_room_model import (
-    AGENT_NAMES, LiveRunState, live_body, styled_body, styled_vitals,
-)
+from tui_kit.contracts import AgentTheme
+from tui_kit.run_model import LiveRunState, live_body, styled_body, styled_vitals
 
 
 class EngineRoom(Vertical):
     """The thick machinery view: live vitals + token stream on top (an "All"
     tab plus one tab per agent so concurrent runs don't clobber each other),
-    the durable trace below (rows filled by the app), prompt pane toggleable
-    with `p` (off by default)."""
+    the durable trace below (rows filled by the caller), prompt pane
+    toggleable (off by default)."""
 
     _rendered_body: dict[str, str]
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, agent_names: list[str], theme: AgentTheme, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._agent_names = tuple(agent_names)
+        self._theme = theme
         self._rendered_body = {}
 
     def compose(self) -> ComposeResult:
         # markup=False throughout: these panes show raw prompts, token streams,
         # and payload text — untrusted content full of "[...]" sequences that
-        # Textual's markup parser rejects (MarkupError crashes the telemetry
-        # loops otherwise).
+        # Textual's markup parser rejects (MarkupError crashes the caller
+        # otherwise).
         with TabbedContent(id="er_tabs"):
             with TabPane("All", id="er_tab_all"):
                 yield Static("idle — waiting for the scheduler", id="er_vitals",
@@ -41,13 +41,15 @@ class EngineRoom(Vertical):
                 with VerticalScroll(id="er_stream_scroll", classes="er-stream-scroll"):
                     yield Static("", id="er_stream", classes="er-stream", markup=False)
                 yield Static("", id="er_prompt", markup=False)
-            for agent_name in AGENT_NAMES:
-                ident = identity_for(agent_name)
+            for agent_name in self._agent_names:
+                glyph = self._theme.glyph(agent_name)
+                label = self._theme.label(agent_name)
+                style = self._theme.style(agent_name)
                 # A plain str title is markup-parsed by TabPane (Widget.render_str
                 # -> Content.from_markup), which silently drops any style not
                 # spelled out as markup tags -- pass a pre-styled Content instead
                 # so the tab title actually carries the agent's color.
-                title = Content.styled(f"{ident.glyph} {ident.label}", ident.style)
+                title = Content.styled(f"{glyph} {label}", style)
                 with TabPane(title, id=f"er_tab_{agent_name}"):
                     yield Static("idle — waiting for the scheduler",
                                 id=f"er_vitals_{agent_name}", classes="er-vitals", markup=False)
@@ -68,7 +70,7 @@ class EngineRoom(Vertical):
 
     def render_live(self, state: LiveRunState, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
-        self.query_one("#er_vitals", Static).update(styled_vitals(state, now))
+        self.query_one("#er_vitals", Static).update(styled_vitals(state, now, self._theme))
         body = live_body(state)
         if body != self._rendered_body.get("__all__"):
             self.query_one("#er_stream", Static).update(styled_body(body))
@@ -79,7 +81,8 @@ class EngineRoom(Vertical):
     def render_agent_live(self, agent_name: str, state: LiveRunState,
                           now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
-        self.query_one(f"#er_vitals_{agent_name}", Static).update(styled_vitals(state, now))
+        self.query_one(f"#er_vitals_{agent_name}", Static).update(
+            styled_vitals(state, now, self._theme))
         body = live_body(state)
         if body != self._rendered_body.get(agent_name):
             self.query_one(f"#er_stream_{agent_name}", Static).update(styled_body(body))
@@ -94,7 +97,7 @@ class EngineRoom(Vertical):
         pane.display = not pane.display
         return pane.display
 
-    # -- trace pane (rows managed by the app; see Task 15) --------------------
+    # -- trace pane (rows managed by the caller) ------------------------------
 
     def set_trace_rows(self, rows: list[tuple[str, str]]) -> None:
         """rows: (row_key, rendered_line), newest first."""

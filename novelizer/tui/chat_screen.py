@@ -6,8 +6,10 @@ from textual.app import ComposeResult
 from textual.screen import Screen
 from textual.widgets import Footer, Input, RichLog, Tab, Tabs
 
-from novelizer.tui.widgets.engine_room_model import LiveRunState, apply_bus_item, route_agent
-from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
+from tui_kit.run_model import LiveRunState, apply_bus_item, route_agent
+from tui_kit.widgets.live_stream_panel import LiveStreamPanel
+from novelizer.tui.telemetry_adapter import to_contract_event
+from novelizer.tui.identity import NOVELIZER_AGENT_THEME
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ class ChatScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Tabs(Tab(f"@{self.agent_name}", id=f"chat-{self.agent_name}"), id="chat_tabs")
-        yield LiveStreamPanel(id="chat_live")
+        yield LiveStreamPanel(theme=NOVELIZER_AGENT_THEME, id="chat_live")
         yield RichLog(highlight=False, markup=False, id="chat_log")
         yield Input(id="chat_input", placeholder=f"message @{self.agent_name}…", compact=True)
         yield Footer()
@@ -52,9 +54,10 @@ class ChatScreen(Screen):
         try:
             while True:
                 item = await q.get()
-                if route_agent(item) != f"chat:{self.agent_name}":
+                contract_item = to_contract_event(item)
+                if contract_item is None or route_agent(contract_item) != f"chat:{self.agent_name}":
                     continue
-                self._live_state = apply_bus_item(self._live_state, item, time.monotonic())
+                self._live_state = apply_bus_item(self._live_state, contract_item, time.monotonic())
                 self.query_one(LiveStreamPanel).render(self._live_state)
         finally:
             self.runtime.telemetry_bus.unsubscribe(q)
