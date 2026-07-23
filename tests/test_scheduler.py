@@ -1,6 +1,6 @@
 import asyncio
 import pytest
-from novelizer.scheduler import Scheduler
+from agent_kit import Scheduler
 
 
 class StubAgent:
@@ -44,7 +44,7 @@ async def _drain(sched):
 
 async def test_runs_highest_readiness():
     a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     dispatched = await sched.tick()
     assert dispatched == ["b"]
     await _drain(sched)
@@ -54,32 +54,34 @@ async def test_runs_highest_readiness():
 async def test_skips_paused_and_zero_score():
     a = StubAgent("a", 0.0); b = StubAgent("b", 0.5)
     b.pause()
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    sched = Scheduler([a, b], clock=lambda: 1000.0)
     assert await sched.tick() == []
 
 
 async def test_override_signal_forces_agent():
+    from novelizer.runtime import _make_override_provider
     from novelizer.store.models import DirectorSignal, SignalKind
     a = StubAgent("a", 0.9); b = StubAgent("b", 0.1)
     sig = DirectorSignal(kind=SignalKind.override, body="", target_agent="b")
-    sched = Scheduler([a, b], StubRead([sig]), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1,
+                      override_provider=_make_override_provider(StubRead([sig])))
     assert await sched.tick() == ["b"]
     await _drain(sched)
 
 
 async def test_respects_interval():
     a = StubAgent("a", 0.9, interval=10)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
+    sched = Scheduler([a], clock=lambda: 1000.0)
     assert await sched.tick() == ["a"]
     await _drain(sched)
     # same clock -> not interval-ready now
-    sched2 = Scheduler([a], StubRead(), clock=lambda: 1005.0)
+    sched2 = Scheduler([a], clock=lambda: 1005.0)
     assert await sched2.tick() == []
 
 
 async def test_status_reports_paused_and_currently_in_flight():
     a = StubAgent("a", 0.2); b = SlowAgent("b", 0.9, delay=0.05)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     before = {s["name"]: s for s in sched.status()}
     assert before["a"]["running"] is False and before["b"]["running"] is False
     await sched.tick()  # dispatches b (highest score), does not await completion
@@ -95,7 +97,7 @@ async def test_status_reports_paused_and_currently_in_flight():
 
 async def test_pause_all_only_pauses_currently_active_agents():
     a = StubAgent("a", 0.2); b = StubAgent("b", 0.5)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    sched = Scheduler([a, b], clock=lambda: 1000.0)
     sched.pause_agent("b")
     paused = sched.pause_all()
     assert paused == ["a"], "already-paused agents should not be reported as newly paused"
@@ -105,7 +107,7 @@ async def test_pause_all_only_pauses_currently_active_agents():
 
 async def test_resume_agents_only_resumes_named_agents():
     a = StubAgent("a", 0.2); b = StubAgent("b", 0.5)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0)
+    sched = Scheduler([a, b], clock=lambda: 1000.0)
     sched.pause_agent("b")
     paused = sched.pause_all()
     sched.resume_agents(paused)
@@ -119,7 +121,7 @@ async def test_tick_returns_promptly_without_awaiting_dispatched_agents():
     not a wait-for-completion cadence."""
     log = []
     a = SlowAgent("a", 0.9, delay=0.2, log=log)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a], clock=lambda: 1000.0, max_concurrent_agents=1)
     loop = asyncio.get_event_loop()
     t0 = loop.time()
     dispatched = await sched.tick()
@@ -138,7 +140,7 @@ async def test_a_crashing_agent_does_not_raise_out_of_tick():
             raise ValueError("boom")
 
     a = BoomAgent("a", 0.9)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a], clock=lambda: 1000.0, max_concurrent_agents=1)
     dispatched = await sched.tick()
     assert dispatched == ["a"]
     await _drain(sched)  # exception raised inside the task, swallowed by gather(return_exceptions=True)
@@ -157,7 +159,7 @@ async def test_run_survives_a_ticking_agents_exception_and_keeps_selecting_other
 
     boom = BoomAgent("boom", 0.9)
     healthy = StubAgent("healthy", 0.1)
-    sched = Scheduler([boom, healthy], StubRead(), tick_sleep=0.01, clock=lambda: 1000.0)
+    sched = Scheduler([boom, healthy], tick_sleep=0.01, clock=lambda: 1000.0)
     task = asyncio.create_task(sched.run())
     try:
         await asyncio.sleep(0.1)
@@ -179,7 +181,7 @@ async def test_crashing_agent_consumes_its_interval_so_others_can_run():
 
     boom = BoomAgent("boom", 0.9, interval=10)
     healthy = StubAgent("healthy", 0.1)
-    sched = Scheduler([boom, healthy], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([boom, healthy], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()
     await _drain(sched)
     assert boom.ran == 1  # mark_ran despite the crash -> interval backoff
@@ -196,7 +198,7 @@ async def test_status_reports_run_count_incrementing_on_every_completion():
             raise ValueError("boom")
 
     a = BoomAgent("a", 0.9, interval=1)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()
     await _drain(sched)
     st = {s["name"]: s for s in sched.status()}
@@ -219,7 +221,7 @@ async def test_status_reports_last_error_and_clears_on_success():
 
     now = [1000.0]
     flaky = FlakyAgent("flaky", 0.9, interval=10)
-    sched = Scheduler([flaky], StubRead(), clock=lambda: now[0], max_concurrent_agents=1)
+    sched = Scheduler([flaky], clock=lambda: now[0], max_concurrent_agents=1)
     await sched.tick()
     await _drain(sched)
     st = {s["name"]: s for s in sched.status()}
@@ -236,7 +238,7 @@ async def test_status_reports_last_error_and_clears_on_success():
 async def test_tick_dispatches_up_to_max_concurrent_agents():
     a = SlowAgent("a", 0.9, delay=0.05)
     b = SlowAgent("b", 0.8, delay=0.05)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=2)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=2)
     dispatched = await sched.tick()
     assert set(dispatched) == {"a", "b"}
     assert set(sched._in_flight.keys()) == {"a", "b"}
@@ -245,7 +247,7 @@ async def test_tick_dispatches_up_to_max_concurrent_agents():
 
 async def test_tick_does_not_exceed_pool_size():
     a = StubAgent("a", 0.9); b = StubAgent("b", 0.5); c = StubAgent("c", 0.1)
-    sched = Scheduler([a, b, c], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=2)
+    sched = Scheduler([a, b, c], clock=lambda: 1000.0, max_concurrent_agents=2)
     dispatched = await sched.tick()
     assert set(dispatched) == {"a", "b"}, "highest-scored two of three, pool size 2"
     await _drain(sched)
@@ -254,7 +256,7 @@ async def test_tick_does_not_exceed_pool_size():
 async def test_agent_already_in_flight_is_excluded_from_next_tick():
     log = []
     a = SlowAgent("a", 0.9, delay=0.1, log=log)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=2)
+    sched = Scheduler([a], clock=lambda: 1000.0, max_concurrent_agents=2)
     first = await sched.tick()
     assert first == ["a"]
     second = await sched.tick()
@@ -265,7 +267,7 @@ async def test_agent_already_in_flight_is_excluded_from_next_tick():
 async def test_status_reflects_agents_currently_in_flight():
     a = SlowAgent("a", 0.9, delay=0.05)
     b = StubAgent("b", 0.1)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()  # dispatches only a (higher score, pool size 1)
     st = {s["name"]: s for s in sched.status()}
     assert st["a"]["running"] is True
@@ -285,7 +287,7 @@ async def test_two_slow_agents_run_overlapped_not_sequentially():
     log = []
     a = SlowAgent("a", 0.9, delay=0.08, log=log)
     b = SlowAgent("b", 0.8, delay=0.08, log=log)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=2)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=2)
     await sched.tick()
     await _drain(sched)
     by_name = {name: (start, end) for name, start, end in log}
@@ -300,7 +302,7 @@ async def test_two_slow_agents_do_not_overlap_at_pool_size_1():
     log = []
     a = SlowAgent("a", 0.9, delay=0.05, log=log, interval=1)
     b = SlowAgent("b", 0.8, delay=0.05, log=log, interval=1)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()  # dispatches only a
     await _drain(sched)
     await sched.tick()  # a is now interval-backed-off (fixed clock); b, never dispatched, still eligible
@@ -315,7 +317,7 @@ async def test_two_slow_agents_do_not_overlap_at_pool_size_1():
 async def test_same_agent_never_double_dispatched_across_ticks():
     log = []
     a = SlowAgent("a", 0.9, delay=0.1, log=log, interval=0)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=2)
+    sched = Scheduler([a], clock=lambda: 1000.0, max_concurrent_agents=2)
     created_tasks = set()
     for _ in range(5):
         await sched.tick()
@@ -335,7 +337,7 @@ async def test_pool_size_1_reproduces_todays_serial_ordering_exactly():
     a = SlowAgent("a", 0.9, delay=0.02, log=log, interval=1)
     b = SlowAgent("b", 0.5, delay=0.02, log=log, interval=1)
     c = SlowAgent("c", 0.1, delay=0.02, log=log, interval=1)
-    sched = Scheduler([a, b, c], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b, c], clock=lambda: 1000.0, max_concurrent_agents=1)
 
     first = await sched.tick()
     assert first == ["a"]
@@ -371,7 +373,7 @@ async def test_tick_emits_scheduler_picked_for_the_dispatched_agent():
     from novelizer.telemetry.events import TelemetryEventType
     a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
     rec = CapturingRecorder()
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0,
+    sched = Scheduler([a, b], clock=lambda: 1000.0,
                       max_concurrent_agents=1, telemetry=rec)
     assert await sched.tick() == ["b"]
     await sched.drain_in_flight()
@@ -384,7 +386,7 @@ async def test_eligibility_changes_emit_once_not_per_tick():
     a = StubAgent("a", 0.9, interval=10)
     rec = CapturingRecorder()
     now = [1000.0]
-    sched = Scheduler([a], StubRead(), clock=lambda: now[0], telemetry=rec)
+    sched = Scheduler([a], clock=lambda: now[0], telemetry=rec)
     await sched.tick()             # a ready -> dispatched
     await sched.drain_in_flight()  # run completes -> mark_ran consumes interval
     now[0] = 1001.0
@@ -404,7 +406,7 @@ async def test_paused_and_readiness_zero_reasons_are_reported():
     b = StubAgent("b", 0.5)
     b.pause()
     rec = CapturingRecorder()
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, telemetry=rec)
     assert await sched.tick() == []  # nothing dispatched: a scores 0, b paused
     elig = {p.agent_name: p for t, p in rec.emitted
             if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED}
@@ -417,7 +419,7 @@ async def test_in_flight_agent_reports_running_reason():
     log = []
     slow = SlowAgent("slow", 0.9, delay=0.05, log=log)
     rec = CapturingRecorder()
-    sched = Scheduler([slow], StubRead(), clock=lambda: 1000.0, telemetry=rec)
+    sched = Scheduler([slow], clock=lambda: 1000.0, telemetry=rec)
     await sched.tick()   # dispatched, now in flight
     await sched.tick()   # while running: eligibility flips to (False, "running")
     await sched.drain_in_flight()
@@ -429,7 +431,7 @@ async def test_in_flight_agent_reports_running_reason():
 
 async def test_scheduler_without_telemetry_behaves_exactly_as_before():
     a = StubAgent("a", 0.2); b = StubAgent("b", 0.9)
-    sched = Scheduler([a, b], StubRead(), clock=lambda: 1000.0, max_concurrent_agents=1)
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     assert await sched.tick() == ["b"]
     await sched.drain_in_flight()
     assert b.ran == 1 and a.ran == 0
@@ -437,19 +439,21 @@ async def test_scheduler_without_telemetry_behaves_exactly_as_before():
 
 async def test_status_includes_next_ready_in_and_tolerates_stub_agents():
     a = StubAgent("a", 0.9, interval=10)
-    sched = Scheduler([a], StubRead(), clock=lambda: 1000.0)
+    sched = Scheduler([a], clock=lambda: 1000.0)
     st = sched.status()[0]
     assert st["next_ready_in"] == 0.0  # StubAgent has no seconds_until_ready -> 0.0
 
 
 async def test_override_tick_still_reports_readiness_zero_for_other_agents():
+    from novelizer.runtime import _make_override_provider
     from novelizer.store.models import DirectorSignal, SignalKind
     from novelizer.telemetry.events import TelemetryEventType
     zero = StubAgent("zero", 0.0)
     target = StubAgent("target", 0.5)
     sig = DirectorSignal(kind=SignalKind.override, body="", target_agent="target")
     rec = CapturingRecorder()
-    sched = Scheduler([zero, target], StubRead([sig]), clock=lambda: 1000.0, telemetry=rec)
+    sched = Scheduler([zero, target], clock=lambda: 1000.0, telemetry=rec,
+                      override_provider=_make_override_provider(StubRead([sig])))
     assert await sched.tick() == ["target"]
     await sched.drain_in_flight()
     elig = {p.agent_name: p for t, p in rec.emitted
@@ -462,7 +466,7 @@ async def test_status_marks_last_completed_agent_sticky():
     who-acted-most-recently marker for fast agents that complete between
     polls -- exposed as `last_completed`, distinct from `running`."""
     agents = [StubAgent("a1", 0.9), StubAgent("a2", 0.5)]
-    sched = Scheduler(agents, StubRead(), max_concurrent_agents=1)
+    sched = Scheduler(agents, max_concurrent_agents=1)
     assert all(not s["last_completed"] for s in sched.status())
     await sched.tick()
     await _drain(sched)
