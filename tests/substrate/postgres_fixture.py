@@ -4,6 +4,7 @@ import socket
 import subprocess
 import time
 import uuid
+from contextlib import contextmanager
 
 import pytest
 
@@ -86,10 +87,16 @@ def pg_container():
         subprocess.run(["docker", "kill", name], capture_output=True, timeout=15)
 
 
-@pytest.fixture
-def postgres_dsn(pg_container):
-    """A DSN pointing at a fresh, empty database inside the session container."""
-    name, port = pg_container
+@contextmanager
+def fresh_database(container):
+    """CREATE a throwaway database in the session container; DROP it on exit.
+
+    This is the whole per-test isolation lifecycle, extracted from the
+    postgres_dsn fixture so tests can drive the exact create/teardown code
+    path directly (e.g. two consecutive databases, or teardown with a leaked
+    connection still open).
+    """
+    name, port = container
     db = f"t_{uuid.uuid4().hex[:12]}"
 
     result = _psql(name, f'CREATE DATABASE "{db}"')
@@ -100,3 +107,10 @@ def postgres_dsn(pg_container):
     finally:
         # FORCE: kicks any connections a test's un-closed pool left behind.
         _psql(name, f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
+
+
+@pytest.fixture
+def postgres_dsn(pg_container):
+    """A DSN pointing at a fresh, empty database inside the session container."""
+    with fresh_database(pg_container) as dsn:
+        yield dsn
