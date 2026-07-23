@@ -146,6 +146,39 @@ def test_trace_replay_is_one_to_one_never_drops_or_duplicates(types):
     assert all(isinstance(line, str) and line for line in lines)
 
 
+def test_unmapped_stored_events_are_filtered_before_seeding_not_raised():
+    """The app's restart-seed path builds `[c for c in (to_contract_event(e)
+    for e in recent) if c is not None]` before calling seed_state/seed_states
+    (see novelizer/tui/app.py _telemetry_bus_loop). A raw StoredEvent type
+    with no mapping (e.g. a scheduler event) must come back as None here so
+    that filter silently drops it -- not raise, and not survive into the
+    seeded state as some stale/garbage entry."""
+    from tui_kit.run_model import seed_state, seed_states, LiveRunState
+
+    started = _ev(1, TelemetryEventType.AGENT_RUN_STARTED,
+                 {"run_id": "r1", "agent_name": "author"})
+    unmapped = _ev(2, TelemetryEventType.SCHEDULER_PICKED, {"agent_name": "author"})
+    finished = _ev(3, TelemetryEventType.AGENT_RUN_FINISHED,
+                  {"run_id": "r1", "agent_name": "author", "duration_s": 1.0})
+
+    raw = [started, unmapped, finished]
+    adapted = [to_contract_event(e) for e in raw]
+    assert adapted == [RunStarted(run_id="r1", agent_name="author"), None,
+                       RunFinished(run_id="r1", agent_name="author", duration_s=1.0)]
+
+    filtered = [c for c in adapted if c is not None]
+    assert None not in filtered
+    assert len(filtered) == 2
+
+    state = seed_state(filtered, now=100.0)
+    assert state == seed_state([c for c in adapted if c], now=100.0)
+    assert state.status == "finished"  # not left dangling as "running"
+
+    per_agent = seed_states(filtered, now=100.0)
+    assert per_agent["author"] == state
+    assert per_agent["author"] != LiveRunState()
+
+
 def test_trace_detail_shows_prompt_and_produced_domain_events():
     call = _ev(2, TelemetryEventType.LLM_CALL_STARTED,
               {"run_id": "r1", "agent_name": "author", "call_index": 1, "model": "qwen",

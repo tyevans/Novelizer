@@ -1,155 +1,216 @@
 # tui_kit extraction design
+Status: implemented (2026-07-22).
 
 ## Problem
 
-`novelizer/tui/` is the presentation layer for the entire app, importing
-directly from `brain`, `canon`, `chat`, `director`, `export`, `research`,
-`settings`, `store`, `telemetry`, and `voices`. Most of that coupling is
-legitimate — the TUI genuinely renders novel-specific concepts (brain
-findings, canon events, story browsing). But a subset of the TUI —
-the "watch N agents run" console (Engine Room, the live token-stream
-panel, the ambient activity strip, the roster glyph strip) — is
-almost entirely generic agent-run visualization with only a thin layer
-of novelizer-specific naming (agent list, verbs, glyph/color theme).
-
-As the project takes on non-novel domains (research, coding), that
-generic machinery needs to be reusable without dragging novelizer's
-domain types along. This spec extracts it into its own package.
+`novelizer/tui/widgets/` had accreted a set of Textual widgets — the roster
+glyph strip, the Engine Room live panes, the live-stream panel, and the
+activity strip — whose rendering logic was entirely generic (agent runs,
+tokens, tool calls, timelines) but which imported novelizer's domain types
+directly (`StoredEvent`, `TelemetryEventType`, canon models). That coupling
+made the widgets impossible to unit-test without novelizer's telemetry bus
+and canon store running, and impossible to reuse in any other Textual
+project.
 
 ## Scope
 
-In scope: `EngineRoom`, `LiveStreamPanel`, `ActivityStrip`,
-`engine_room_model.py`, and the roster glyph-strip renderer
-(`roster_glyphs` in `roster.py`).
-
-Out of scope: `brain_model.py`, `feed_model.py`, `browser_model.py`,
-`story_picker.py`, `chat_screen.py`, `research_screen.py`, and other
-screens — these are genuinely novel-specific and stay in
-`novelizer/tui/` unchanged.
+Extract the domain-agnostic core — event contracts, the pure agent-run state
+machine, and the four widgets — into a standalone package, `tui_kit`, with no
+import of anything under `novelizer/`. Leave a thin adapter on the
+novelizer side that translates real telemetry-bus items and `StoredEvent`s
+into `tui_kit.contracts` events. Enforce the boundary mechanically so it
+can't regress silently.
 
 ## Architecture
 
-A new top-level package, `tui_kit/`, sibling to `substrate/`,
-`novelizer/`, and `research_domain/`. It renders a "watch N agents run"
-console — pure state model, formatters, and Textual widgets — with
-**zero imports from novelizer, substrate, or research_domain**.
-
 ```
 tui_kit/
-  contracts.py     # event dataclasses + AgentTheme protocol
-  run_model.py      # pure state machine + formatters (no Textual)
+  __init__.py
+  contracts.py      # event/protocol vocabulary
+  run_model.py       # pure state machine + formatters
   widgets/
+    __init__.py
+    roster.py
     engine_room.py
     live_stream_panel.py
     activity_strip.py
-    roster.py
 ```
+
+This matches the directory tree on disk as of 2026-07-22 — confirmed via
+`ls tui_kit/ tui_kit/widgets/`.
 
 ### `contracts.py`
 
-Domain-agnostic event dataclasses describing one agent run's
-lifecycle, independent of any concrete telemetry system:
-
-- `RunStarted`, `RunFinished`, `RunFailed`
-- `LLMCallStarted`, `LLMCallFinished`, `LLMCallFailed`
-- `ToolCallStarted`, `ToolCallFinished`, `ToolCallFailed`
-- `TokenDelta`, `ToolSummaryReady`
-- `SchedulerPicked`, `SchedulerEligibilityChanged`
-
-Plus an `AgentTheme` protocol a consuming domain implements:
-
-```python
-class AgentTheme(Protocol):
-    def glyph(self, agent_name: str) -> str: ...
-    def style(self, agent_name: str) -> str: ...
-    def verb(self, agent_name: str) -> str: ...
-```
+Defines the domain-agnostic event types (`TokenDelta`, `ToolSummaryReady`,
+and the rest of the agent-run vocabulary) and the `AgentTheme` protocol that
+callers implement to supply glyph/label/color per agent. No novelizer
+imports.
 
 ### `run_model.py`
 
-Today's `engine_room_model.py`, minus `AGENT_NAMES`, `_VERBS`, and the
-direct `identity_for` import. Same public functions — `Block`,
-`LiveRunState`, `apply_bus_item`, `seed_state`, `seed_states`,
-`route_agent`, `strip_line`, `vitals_line`, `live_body`,
-`styled_vitals`, `styled_body`, `trace_line`, `trace_detail` — but
-`apply_bus_item` consumes `tui_kit.contracts` events instead of
-novelizer's `StoredEvent`/`TelemetryEventType`, and the formatters that
-need agent theming (`strip_line`, `vitals_line`, `styled_vitals`) take
-an `AgentTheme` parameter instead of importing `identity_for` and a
-hardcoded verb table.
+A pure state machine (`normalize_input_summary` and friends) that folds a
+stream of `contracts` events into renderable state, plus formatting helpers.
+No Textual, no I/O, no novelizer imports — this is what makes the widgets
+unit-testable in isolation.
 
 ### `widgets/`
 
-`EngineRoom`, `LiveStreamPanel`, `ActivityStrip`, and `roster_glyphs`,
-unchanged in behavior, built against `contracts`/`run_model` only. They
-accept an `AgentTheme` (or pre-rendered `Text`, where the current API
-already renders text upstream) from the mounting screen rather than
-reaching for `identity_for` themselves.
+Four Textual widgets, each consuming only `tui_kit.contracts` /
+`tui_kit.run_model` types:
+
+- `roster.py` — glyph-strip renderer
+- `engine_room.py` — live agent-run panes
+- `live_stream_panel.py` — streaming token/tool display
+- `activity_strip.py` — compact activity ticker
 
 ## novelizer-side adapter
 
-`novelizer/tui/` keeps:
+Two modules on the novelizer side bridge real telemetry into the generic
+contract vocabulary, confirmed present and matching this description as of
+6b3a2e5:
 
-- `identity.py` — implements `tui_kit.contracts.AgentTheme` using
-  novelizer's real agent glyphs/colors/verbs. `AGENT_NAMES` and
-  `_VERBS` move here from `engine_room_model.py`.
-- A new `telemetry_adapter.py` — the only module that knows both
-  vocabularies. Translates `StoredEvent`/`TelemetryEventType` values
-  and novelizer's `TokenDelta`/`ToolSummaryReady` into
-  `tui_kit.contracts` events.
-- Screens (`app.py`, `chat_screen.py`, etc.) construct `tui_kit`
-  widgets/model objects, feeding them adapter output and novelizer's
-  `AgentTheme`.
+- `novelizer/tui/identity.py` — single source of truth for agent identity
+  (glyph, label, Rich color style) keyed by canonical `agent_name`, sourced
+  from the mission-control design-pass spec's identity table.
+  `identity_for` falls back to a dim, title-cased label for any
+  `agent_name` not in the registry (including the empty string). This
+  module has no dependency on `telemetry_adapter.py` and vice versa —
+  the split holds cleanly: identity answers "how do I render agent X",
+  the adapter answers "what `tui_kit.contracts` event is this bus item".
+- `novelizer/tui/telemetry_adapter.py` — houses `to_contract_event`, the
+  adapter's actual entry point (see the subsection below), plus
+  `trace_line`/`trace_detail`. Those two stay here rather than moving to
+  `tui_kit` because they render domain-specific `StoredEvent` payloads
+  ("produced: chapter.created ch-12"), not the generic run vocabulary that
+  `tui_kit.contracts` events carry.
 
-Nothing else in novelizer's TUI changes shape.
+`novelizer/tui/app.py` and `novelizer/tui/chat_screen.py` were wired onto
+`tui_kit` in c87fee5, consuming the adapted contract events instead of the
+deleted novelizer-local widget modules.
+
+### Adapter entry point: `to_contract_event`
+
+`to_contract_event(item)` is the single dispatch function every caller uses
+to cross from novelizer's telemetry vocabulary into `tui_kit.contracts`. It
+takes one bus item — a `StoredEvent`, a bus-only `NovelizerTokenDelta`, or a
+bus-only `NovelizerToolSummaryReady` (the latter two imported from
+`novelizer.telemetry.events` under aliases, since `tui_kit.contracts`
+defines its own `TokenDelta`/`ToolSummaryReady`) — and returns the matching
+`tui_kit.contracts` event, or `None` if the item carries nothing the generic
+run model renders.
+
+Dispatch, confirmed against the current source:
+
+1. `NovelizerTokenDelta` -> `contracts.TokenDelta`.
+2. `NovelizerToolSummaryReady` -> `contracts.ToolSummaryReady`.
+3. Anything else that isn't a `StoredEvent` -> `None`.
+4. `StoredEvent`, matched on `event_type` against `TelemetryEventType`:
+   `AGENT_RUN_STARTED`/`FINISHED`/`FAILED`, `LLM_CALL_STARTED`/`FINISHED`,
+   and `TOOL_CALL_STARTED`/`FINISHED`/`FAILED` each map to their `contracts`
+   counterpart, reading fields out of `StoredEvent.payload` with `.get(...)`
+   defaults.
+5. Everything else (scheduler events — `SCHEDULER_PICKED`,
+   `SCHEDULER_ELIGIBILITY_CHANGED` — `LLM_CALL_FAILED`, or any other
+   `event_type`) -> `None`.
+
+`trace_line`/`trace_detail` are deliberately outside this dispatch: they
+take a `StoredEvent` directly and render its domain-specific payload for the
+trace table (e.g. `"⚒ author → write_scene(...)"`,
+`"produced: chapter.created ch-12"`), which has no equivalent in the
+generic `tui_kit.contracts` vocabulary. Callers that populate the trace
+table read raw `StoredEvent`s and call `trace_line`/`trace_detail`
+directly; callers that feed `tui_kit` widgets (Engine Room, live stream
+panel, activity strip, live-pane seeding) route every bus item through
+`to_contract_event` first and drop the `None`s.
+
+## Restart-seeding correctness
+
+Fixed post-merge in 6b3a2e5 ("fix(novelizer): seed Engine Room live panes
+from adapted contract events on restart").
+
+`app.py`'s `_telemetry_bus_loop` seeds two views from the recent-events
+buffer on a mid-run restart: the trace table, which consumes raw
+`StoredEvent`s directly via `trace_line`/`trace_detail` and so seeded
+correctly all along, and the Engine Room's live panes, which are seeded via
+`seed_state`/`seed_states` — functions that only recognize
+`tui_kit.contracts` events. Before the fix, the restart-seed block passed
+the same raw `StoredEvent`s straight to `seed_state`/`seed_states`. Their
+internal `isinstance` checks against `contracts` types silently no-op'd on
+a `StoredEvent` — no exception, no log line, just an empty Engine Room — so
+live panes stayed unseeded after a mid-run restart even though the trace
+table sitting right next to them looked fully populated.
+
+The fix maps `recent[-50:]` through `to_contract_event` and filters out
+`None` before handing the result to `seed_state`/`seed_states`:
+
+```python
+contract_recent = [c for c in (to_contract_event(e) for e in recent[-50:]) if c is not None]
+self._live_state = seed_state(contract_recent, now)
+self._agent_live_states = seed_states(contract_recent, now)
+```
+
+This mirrors the adaptation the same method's live bus-item loop already
+performed — that path was never affected by the bug, since it always ran
+incoming items through the adapter before dispatch.
 
 ## Import boundary
 
-Add `tui_kit` to `root_packages` in `pyproject.toml`'s
-`[tool.importlinter]` section, plus a new `forbidden` contract:
-`tui_kit` may not import `novelizer`, `substrate`, or `research_domain`
-— mirroring the independence contract that already protects
-`substrate`. No contract is added forcing novelizer to route through a
-narrow `tui_kit` public surface (unlike substrate's submodule-import
-ban) — YAGNI unless that proves necessary later.
+Enforced by import-linter, added in b40df29 ("chore(tui_kit): enforce
+independence from novelizer via import-linter") — `tui_kit` may not import
+`novelizer`. This runs as part of the standard lint/CI path, so a future
+patch that reaches back into novelizer from `tui_kit` fails mechanically
+rather than depending on review discipline.
 
 ## Testing
 
-- Pure-model tests (`tests/tui/test_engine_room_model.py`, the
-  `roster_glyphs` cases in `test_roster.py`) move to `tests/tui_kit/`
-  and drop all novelizer imports — they already have no Textual or
-  novelizer dependency beyond the model itself, so this is close to a
-  straight move plus fixture rewrites (fake `AgentTheme`, `contracts`
-  events instead of `StoredEvent`).
-- Widget tests (`test_engine_room.py`, `test_live_stream_panel.py`,
-  the `ActivityStrip` cases) move the same way, using Textual's test
-  harness with fake `AgentTheme`/event fixtures.
-- novelizer keeps thin tests for `telemetry_adapter.py` (translation
-  correctness) and for `identity.py`'s `AgentTheme` conformance.
+Pure-logic tests for the extracted package live under `tests/tui_kit/`:
+`test_contracts.py`, `test_roster.py`, `test_run_model.py`, `test_widgets.py`
+— confirmed present on disk.
+
+`tests/tui/test_telemetry_adapter.py` covers `to_contract_event` translation
+correctness — confirmed present on disk. `tests/tui/test_engine_room.py::
+test_seeded_live_pane_survives_restart` regression-tests the restart-seed
+adaptation path added in 6b3a2e5, confirmed present at line 388 of that
+file.
+
+The novelizer-side test suite was trimmed to match, rather than moved
+wholesale: 4ede08d ("refactor(novelizer): trim roster.py to autonomy dial,
+delete superseded tui_kit-migrated modules") cut `tests/tui/test_roster.py`
+from 100+ lines down to the handful of assertions that still exercise
+novelizer-local behavior (the autonomy dial), deleting the coverage that had
+already migrated to `tests/tui_kit/test_roster.py`. The same commit deletes
+the superseded `novelizer/tui/widgets/engine_room.py`,
+`engine_room_model.py`, `live_stream_panel.py`, and trims
+`activity_strip.py`/`roster.py` to what still differs from the extracted
+package. This is a trim-in-place of the old suite, not a straight `git mv`
+— call this out explicitly since the plan below originally assumed a move.
 
 ## Migration plan
 
-1. Create `tui_kit/` (`contracts.py`, `run_model.py`, `widgets/`) by
-   moving and trimming the existing files.
-2. Write `novelizer/tui/identity.py` as an `AgentTheme` implementation
-   and `novelizer/tui/telemetry_adapter.py` for event translation.
-3. Update `novelizer/tui/app.py`, `chat_screen.py`, and other call
-   sites to import from `tui_kit` plus the adapter.
-4. Move and rewrite tests as described above.
-5. Add the import-linter contract; run `uv run lint-imports`.
-6. Delete the old `novelizer/tui/widgets/engine_room_model.py`,
-   `engine_room.py`, `live_stream_panel.py`, `activity_strip.py`, and
-   the `roster_glyphs` function from `roster.py` once nothing
-   references them.
+Executed in six steps, each tied to its merge commit:
+
+1. **Extract contracts, state machine, and widgets into `tui_kit/`** —
+   fb79318 (domain-agnostic event contracts + `AgentTheme` protocol),
+   b66f188 (pure agent-run state machine and formatters), e5f0295
+   (EngineRoom, LiveStreamPanel, ActivityStrip widgets), 358de1c (roster
+   glyph-strip renderer).
+2. **Build the novelizer-side adapter** (`telemetry_adapter.py`,
+   `identity.py`) translating bus/`StoredEvent` items into `tui_kit.contracts`
+   events — c5e3589.
+3. **Wire `app.py` and `chat_screen.py` onto `tui_kit`** — c87fee5.
+4. **Move/trim tests** to match the new split (`tests/tui_kit/` added for
+   the extracted package; `tests/tui/test_roster.py` trimmed in place rather
+   than moved) — 4ede08d.
+5. **Enforce the import boundary** with import-linter — b40df29.
+6. **Delete superseded novelizer-local widget modules** (`engine_room.py`,
+   `engine_room_model.py`, `live_stream_panel.py`, trimmed `activity_strip.py`
+   /`roster.py`) — 4ede08d.
 
 ## Non-goals
 
-- Generalizing `identity.py`'s glyph/color *scheme* beyond making it
-  conform to `AgentTheme` — a future domain can supply its own
-  `AgentTheme` implementation without any further `tui_kit` change.
-- Touching `ChatScreen`, `ApprovalScreen`, `EscalationsScreen`, or any
-  other screen — flagged as a candidate for a later extraction pass,
-  not this one.
-- Enforcing a narrow novelizer-side import surface onto `tui_kit`
-  (substrate-style submodule ban) — revisit only if novelizer code
-  starts reaching into `tui_kit` internals in ways that hurt.
+- No attempt to publish `tui_kit` as an installable package (no
+  `pyproject.toml`/version boundary) — it stays an in-repo package for now.
+- No migration of other Textual screens (research, chat shell chrome) beyond
+  what already consumes the four extracted widgets.
+- No change to the telemetry bus's own event vocabulary — the adapter
+  absorbs the translation so the bus stays novelizer-native.

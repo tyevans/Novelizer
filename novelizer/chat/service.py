@@ -109,8 +109,15 @@ class ChatService:
         threads = await self._read.list_threads()
         secrets = await self._read.list_secrets()
         themes = await self._read.list_themes()
-        w = "\n".join(f"- {e.title}: {e.body[:150]}" for e in world[:10]) or "None yet."
-        c = "\n".join(f"- {ch.name}: {ch.traits}" for ch in characters[:8]) or "None yet."
+        if self.pull_mode:
+            # Titles and names only: tooled personas read canon themselves.
+            # The thread/secret/theme id lists below stay -- the chat prompt
+            # says "cite ids shown in the story context".
+            w = "\n".join(f"- {e.title}" for e in world[:10]) or "None yet."
+            c = "\n".join(f"- {ch.name}" for ch in characters[:8]) or "None yet."
+        else:
+            w = "\n".join(f"- {e.title}: {e.body[:150]}" for e in world[:10]) or "None yet."
+            c = "\n".join(f"- {ch.name}: {ch.traits}" for ch in characters[:8]) or "None yet."
         t = "\n".join(f"- [{th.state.value}] {th.id}: {th.name}" for th in threads) or "None."
         s = "\n".join(
             f"- {sec.id}: {sec.title}" + (" (revealed)" if sec.revealed else "") for sec in secrets

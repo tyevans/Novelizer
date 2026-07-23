@@ -127,10 +127,12 @@ class Editor(BaseAgent):
         casting_note: str = "",
         personality: str = "",
         sag_spike_delta: float = SAG_SPIKE_DELTA,
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="editor", personality=personality)
         self._casting_note = casting_note
         self._sag_spike_delta = sag_spike_delta
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         drafts = len(await self._read.list_chapters(status=EditorialStatus.draft))
@@ -162,6 +164,24 @@ class Editor(BaseAgent):
             return ""
         return "\n\nCharacter voices:\n" + "\n".join(lines)
 
+    async def _cast_pointer_block(self, character_ids: list[str]) -> str:
+        """Pull-mode replacement for _character_voices_block: the system
+        prompt tells a tooled Editor to pull a voice card when it suspects
+        drift, so pushing every card alongside that instruction was the
+        push/pull redundancy. Names + ids stay because voice_drift_flags
+        must cite a character_id."""
+        lines = []
+        for cid in character_ids:
+            c = await self._read.get_character(cid)
+            if c is not None:
+                lines.append(f"{c.name} (id:{cid})")
+        if not lines:
+            return ""
+        return (
+            "\n\nCast in this chapter (pull a voice card when you suspect their "
+            "dialogue drifts): " + ", ".join(lines)
+        )
+
     async def work(self, ctx: dict) -> EditorVerdict | None:
         ch = ctx["target"]
         if ch is None:
@@ -172,7 +192,10 @@ class Editor(BaseAgent):
             else ""
         )
         cast = self._guarded_line("In character", self.personality)
-        voices = await self._character_voices_block(ch.character_ids)
+        if self.pull_mode:
+            voices = await self._cast_pointer_block(ch.character_ids)
+        else:
+            voices = await self._character_voices_block(ch.character_ids)
         pacing = pacing_flags_note(ctx["scores"], delta=self._sag_spike_delta)
         chapter_order = [c.id for c in ctx["chapters"]]
         causal = causal_flags_note(ctx["causal_edges"], chapter_order)
@@ -310,6 +333,7 @@ def _construct(ctx: AgentContext) -> Editor:
         casting_note=ctx.casting_note,
         personality=ctx.personalities.get("editor", ""),
         sag_spike_delta=ctx.settings.sag_spike_delta,
+        pull_mode=enabled,
     )
 
 
