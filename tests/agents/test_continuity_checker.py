@@ -1145,3 +1145,24 @@ def test_build_continuity_mining_runner_construction_unchanged():
 def test_spec_carries_subagent_grant():
     from novelizer.agents.continuity_checker import SPEC
     assert SPEC.subagent_grant.enabled_setting == "checker_subagent_enabled"
+
+
+async def test_revised_chapter_is_remined(stack):
+    """chapter.revised after chapter.mined puts the chapter back in the
+    to-mine list (v1 gap: revised chapters were never re-mined)."""
+    from novelizer.canon.events import ChapterMined, ChapterRevised
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_MINED, "c1", ChapterMined(chapter_id="c1"))
+    await proj.catch_up()
+
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    assert "c1" not in [c.id for c in ctx["mined_chapters"]]
+
+    await events.append(EventType.CHAPTER_REVISED, "c1", ChapterRevised(chapter_id="c1", prose="new"))
+    await proj.catch_up()
+
+    ctx = await agent.poll()
+    assert "c1" in [c.id for c in ctx["mined_chapters"]]

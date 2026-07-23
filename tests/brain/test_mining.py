@@ -1,18 +1,9 @@
-from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
+from novelizer.brain.mining import MINED_SOURCE_TAG, thread_touch_log
 from novelizer.canon.events import StoredEvent
 
 
 def _ev(event_type, payload):
     return StoredEvent(sequence=1, id="e1", event_type=event_type, aggregate_id="a", payload=payload, created_at="2026-01-01T00:00:00Z")
-
-
-def test_already_mined_chapter_ids_reads_chapter_id_field():
-    events = [_ev("chapter.mined", {"chapter_id": "c1"}), _ev("chapter.mined", {"chapter_id": "c2"})]
-    assert already_mined_chapter_ids(events) == {"c1", "c2"}
-
-
-def test_already_mined_chapter_ids_empty_on_no_events():
-    assert already_mined_chapter_ids([]) == set()
 
 
 def test_thread_touch_log_pairs_id_and_chapter_id():

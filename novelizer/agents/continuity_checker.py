@@ -8,7 +8,8 @@ from novelizer.agents.schemas import (
 from novelizer.brain.context import chapter_map_note, open_retcons_note
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
-from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
+from novelizer.brain.mining import MINED_SOURCE_TAG, thread_touch_log
+from novelizer.brain.watermarks import current_done_ids
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -142,7 +143,8 @@ class ContinuityChecker(BaseAgent):
     async def _fingerprint(self) -> tuple:
         chapters = await self._read.list_chapters()
         mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
-        already_mined = already_mined_chapter_ids(mined_events)
+        revised_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_REVISED])
+        already_mined = current_done_ids(mined_events, revised_events)
         unmined = sum(1 for c in chapters if c.id not in already_mined)
         refs = await self._read.list_secret_references()
         edges = await self._read.list_causal_edges()
@@ -151,7 +153,8 @@ class ContinuityChecker(BaseAgent):
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
         mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
-        already_mined = already_mined_chapter_ids(mined_events)
+        revised_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_REVISED])
+        already_mined = current_done_ids(mined_events, revised_events)
         thread_events = await self._events.events_since(
             0, event_types=[EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED,
                              EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],

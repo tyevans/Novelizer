@@ -27,6 +27,18 @@ def test_revised_then_done_is_done():
     assert current_done_ids(done, revised) == {"c1"}
 
 
+def test_reads_chapter_id_field_across_multiple_done_events():
+    # Migrated from tests/brain/test_mining.py's
+    # test_already_mined_chapter_ids_reads_chapter_id_field: current_done_ids
+    # generalizes brain/mining.already_mined_chapter_ids.
+    done = [_ev(1, "chapter.mined", "c1"), _ev(2, "chapter.mined", "c2")]
+    assert current_done_ids(done, []) == {"c1", "c2"}
+
+
+def test_empty_done_and_revised_is_empty():
+    assert current_done_ids([], []) == set()
+
+
 def test_empty():
     assert current_done_ids([], []) == set()
 
