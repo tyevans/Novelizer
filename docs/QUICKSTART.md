@@ -188,8 +188,10 @@ Each agent has a settings flag (global, story, or `NOVELIZER_*` env, like any se
 `world_architect_tools_enabled`, `character_keeper_tools_enabled`, `editor_tools_enabled`,
 `retconner_tools_enabled`, `structure_analyst_tools_enabled` — all default `true`.
 
-Turning one off reverts that agent to its legacy push-only prompt (no canon tools; the
-Author/Checker/chat also revert from the chapter-index map to inline prose excerpts). Use
+Turning one off reverts that agent to its legacy push-only prompt (no canon tools, and
+pushed context reverts from index form — chapter maps, lore-title and cast name lists,
+entry-id listings, the Editor's cast pointer — back to inline prose excerpts, entry
+bodies, traits, and voice cards). Use
 this if a small local model handles tool-calling poorly. Flag changes take effect on
 restart — mid-session edits are deliberately inert until then.
 

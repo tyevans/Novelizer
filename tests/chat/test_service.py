@@ -167,6 +167,63 @@ async def test_story_context_pull_mode_uses_chapter_index_no_prose_leak(db_path)
 
 
 @pytest.mark.asyncio
+async def test_story_context_pull_mode_strips_world_bodies_and_traits_keeps_ids(db_path):
+    """Chat personas are tooled in pull mode and can read canon themselves.
+    The context keeps the thread/secret/theme id lists (the system prompt
+    says 'cite ids shown in the story context') but stops pushing lore
+    bodies and character traits."""
+    from novelizer.store.models import Character, WorldEntry
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = True
+    try:
+        await rt.events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Salt Charter", body="SECRET-LORE-BODY"),
+        )
+        await rt.events.append(
+            EventType.CHARACTER_CREATED, "ch1",
+            Character(id="ch1", name="Mira", traits="SECRET-TRAITS"),
+        )
+        await rt.events.append(
+            EventType.SECRET_CREATED, "s1",
+            SecretCreated(id="s1", title="The heir lives"),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert "The Salt Charter" in context
+        assert "SECRET-LORE-BODY" not in context
+        assert "Mira" in context
+        assert "SECRET-TRAITS" not in context
+        assert "s1" in context and "The heir lives" in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_story_context_default_mode_keeps_world_bodies_and_traits(db_path):
+    from novelizer.store.models import Character, WorldEntry
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = False
+    try:
+        await rt.events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Salt Charter", body="SECRET-LORE-BODY"),
+        )
+        await rt.events.append(
+            EventType.CHARACTER_CREATED, "ch1",
+            Character(id="ch1", name="Mira", traits="SECRET-TRAITS"),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert "SECRET-LORE-BODY" in context
+        assert "SECRET-TRAITS" in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
 async def test_persona_forbidden_intents_are_dropped(db_path):
     reply = ChatReply(reply_text="I should not plant.", thread_intents=[ThreadIntent(action="plant", name="Rogue Thread")])
     rt = await _runtime(db_path, {"chat_character_keeper": _R(reply)})

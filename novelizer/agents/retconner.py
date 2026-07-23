@@ -65,11 +65,13 @@ class Retconner(BaseAgent):
         committer: Committer,
         interval: int = 120,
         personality: str = "",
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="retconner", personality=personality)
         # Requests that failed an attempt (exception or empty response) are
         # deferred so one poisoned request can't block the whole queue.
         self._deferred: set[str] = set()
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         open_flags = len(await self._read.list_flags(category="contradiction", status=FlagStatus.open))
@@ -91,7 +93,13 @@ class Retconner(BaseAgent):
         if req is None:
             return None
         conflicting = [e for e in ctx["world"] if e.id in req.related_entry_ids]
-        text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
+        if self.pull_mode:
+            # Ids and titles only: the prompt already declares inlined bodies
+            # stale pointers and orders a live re-read, so a tooled Retconner
+            # gets the ids to read, not bodies to trust.
+            text = "\n".join(f"[{e.id}] {e.title}" for e in conflicting) or "(entries not found)"
+        else:
+            text = "\n".join(f"[{e.id}] {e.title}: {e.body}" for e in conflicting) or "(entries not found)"
         cast = self._guarded_line("In character", self.personality)
         msg = f"Contradiction: {req.description}\n\nProposed resolution: {req.proposed_resolution}\n\nConflicting entries:\n{text}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
@@ -197,6 +205,7 @@ def _construct(ctx: AgentContext) -> Retconner:
         runner, ctx.read, ctx.committer,
         interval=ctx.settings.default_agent_interval,
         personality=ctx.personalities.get("retconner", ""),
+        pull_mode=enabled,
     )
 
 
