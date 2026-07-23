@@ -39,7 +39,7 @@ async def test_skills_read_returns_frontmatter(stack):
     assert "name: outlining" in result.file_data["content"]
 
 
-async def test_skills_ls_lists_five_packs(stack):
+async def test_skills_ls_lists_all_packs(stack):
     _events, proj, read = stack
     await proj.catch_up()
     composite = build_composite(read)
@@ -51,6 +51,7 @@ async def test_skills_ls_lists_five_packs(stack):
         "/skills/scene-sequel",
         "/skills/character-arcs",
         "/skills/pacing",
+        "/skills/output-conventions",
     }
     # entries may have trailing slash for directories
     normalized = {p.rstrip("/") for p in paths}

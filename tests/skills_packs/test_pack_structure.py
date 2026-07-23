@@ -17,6 +17,7 @@ PACK_NAMES = [
     "character-arcs",
     "scene-sequel",
     "pacing",
+    "output-conventions",
 ]
 
 

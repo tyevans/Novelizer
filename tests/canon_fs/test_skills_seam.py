@@ -34,6 +34,7 @@ EXPECTED_PACKS = {
     "character-arcs",
     "scene-sequel",
     "pacing",
+    "output-conventions",
 }
 
 
@@ -56,7 +57,7 @@ async def test_skills_middleware_loads_all_five_packs_via_container_source():
     skills, error = await _alist_skills_with_errors(backend, CRAFT_SKILLS[0])
     assert error is None, f"skills source failed to load: {error}"
     names = {s["name"] for s in skills}
-    assert names == EXPECTED_PACKS, f"expected all five packs, got {names}"
+    assert names == EXPECTED_PACKS, f"expected all packs, got {names}"
     for skill in skills:
         assert skill["description"].strip(), f"{skill['name']} has an empty description"
 
@@ -77,4 +78,4 @@ async def test_skills_middleware_abefore_agent_populates_state():
     assert "skills_load_errors" not in result, result.get("skills_load_errors")
     skills_metadata = result["skills_metadata"]
     names = {s["name"] for s in skills_metadata}
-    assert EXPECTED_PACKS <= names, f"expected all five packs reachable, got {names}"
+    assert EXPECTED_PACKS <= names, f"expected all packs reachable, got {names}"
