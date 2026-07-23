@@ -129,6 +129,68 @@ def test_different_delegates_do_not_collapse():
     assert all(b.repeat_count == 1 for b in s.blocks)
 
 
+def test_parallel_same_tool_results_attach_to_their_own_call():
+    """Regression: five parallel read_file calls had results attached LIFO to
+    whichever same-named block was still running, so each error rendered under
+    the wrong call. A result carrying input_summary must land on the block
+    that made that exact call."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="continuity_checker")
+    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="continuity_checker",
+                                          tool_name="read_file",
+                                          input_summary="/characters/death.md"), now=1.0)
+    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="continuity_checker",
+                                          tool_name="read_file",
+                                          input_summary="/world/the-silvanthrine.md"), now=1.0)
+    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="continuity_checker",
+                                           tool_name="read_file", duration_s=0.2,
+                                           input_summary="/characters/death.md",
+                                           output_summary="# Death"), now=1.2)
+    death, silvanthrine = s.blocks
+    assert death.status == "done" and death.output == "# Death"
+    assert silvanthrine.status == "running"
+
+
+def test_parallel_same_tool_failures_attach_to_their_own_call():
+    s = LiveRunState(status="running", run_id="r1", agent_name="continuity_checker")
+    for path in ("/world/a.md", "/world/b.md"):
+        s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="continuity_checker",
+                                              tool_name="read_file", input_summary=path), now=1.0)
+    s = apply_bus_item(s, ToolCallFailed(run_id="r1", agent_name="continuity_checker",
+                                         tool_name="read_file", duration_s=0.1,
+                                         error_type="FileNotFoundError",
+                                         input_summary="/world/a.md"), now=1.1)
+    a, b = s.blocks
+    assert a.status == "failed" and a.error == "FileNotFoundError"
+    assert b.status == "running"
+
+
+def test_result_input_summary_is_normalized_before_matching():
+    """ToolCallStarted blocks store the normalized (120-char, ␤) summary while
+    telemetry results carry the raw string — matching must normalize both."""
+    raw = "/world/" + "x" * 200 + ".md"
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
+                                          tool_name="read_file", input_summary=raw), now=1.0)
+    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
+                                          tool_name="read_file", input_summary="/world/y.md"), now=1.0)
+    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
+                                           tool_name="read_file", duration_s=0.2,
+                                           input_summary=raw, output_summary="long"), now=1.2)
+    assert s.blocks[0].status == "done" and s.blocks[0].output == "long"
+    assert s.blocks[1].status == "running"
+
+
+def test_results_without_input_summary_keep_the_last_running_fallback():
+    """Producers that don't set input_summary on results still close blocks
+    the old way: last running block with the same tool name."""
+    s = LiveRunState(status="running", run_id="r1", agent_name="author")
+    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
+                                          tool_name="read_file", input_summary="ch1.md"), now=1.0)
+    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
+                                           tool_name="read_file", duration_s=0.1), now=1.1)
+    assert s.blocks[0].status == "done"
+
+
 def test_tool_summary_ready_patches_the_matching_finished_block():
     s = LiveRunState(status="running", run_id="r1", agent_name="author",
                      blocks=(Block(kind="tool", tool_name="search_web",

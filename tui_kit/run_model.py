@@ -132,17 +132,27 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
                                            delegate=item.delegate),)
         return replace(state, blocks=blocks)
     if isinstance(item, (ToolCallFinished, ToolCallFailed)):
-        for i in range(len(state.blocks) - 1, -1, -1):
+        # Prefer the running block whose input_summary matches the result's,
+        # so parallel same-named calls each get their own output; fall back
+        # to last-running-same-tool for producers that omit input_summary.
+        wanted = normalize_input_summary(item.input_summary) if item.input_summary else ""
+        candidates = [
+            i for i in range(len(state.blocks) - 1, -1, -1)
+            if state.blocks[i].kind == "tool"
+            and state.blocks[i].tool_name == item.tool_name
+            and state.blocks[i].status == "running"
+        ]
+        matched = [i for i in candidates if wanted and state.blocks[i].input_summary == wanted]
+        for i in matched or candidates:
             b = state.blocks[i]
-            if b.kind == "tool" and b.tool_name == item.tool_name and b.status == "running":
-                if isinstance(item, ToolCallFinished):
-                    updated = replace(b, status="done", duration_s=item.duration_s,
-                                      output=item.output_summary)
-                else:
-                    updated = replace(b, status="failed", duration_s=item.duration_s,
-                                      error=item.error_type)
-                blocks = state.blocks[:i] + (updated,) + state.blocks[i + 1:]
-                return replace(state, blocks=blocks)
+            if isinstance(item, ToolCallFinished):
+                updated = replace(b, status="done", duration_s=item.duration_s,
+                                  output=item.output_summary)
+            else:
+                updated = replace(b, status="failed", duration_s=item.duration_s,
+                                  error=item.error_type)
+            blocks = state.blocks[:i] + (updated,) + state.blocks[i + 1:]
+            return replace(state, blocks=blocks)
         return state
     return state
 

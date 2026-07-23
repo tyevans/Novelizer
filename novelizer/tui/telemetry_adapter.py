@@ -59,12 +59,14 @@ def to_contract_event(item):
                                           agent_name=p.get("agent_name", ""),
                                           tool_name=p.get("tool_name", "?"),
                                           duration_s=p.get("duration_s", 0.0),
-                                          output_summary=p.get("output_summary", ""))
+                                          output_summary=p.get("output_summary", ""),
+                                          input_summary=p.get("input_summary", ""))
     if et == TelemetryEventType.TOOL_CALL_FAILED:
         return contracts.ToolCallFailed(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
                                         tool_name=p.get("tool_name", "?"),
                                         duration_s=p.get("duration_s", 0.0),
-                                        error_type=p.get("error_type", "?"))
+                                        error_type=p.get("error_type", "?"),
+                                        input_summary=p.get("input_summary", ""))
     return None
 
 
