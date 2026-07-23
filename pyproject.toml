@@ -61,4 +61,5 @@ forbidden_modules = [
     "substrate.policy",
     "substrate.postgres",
     "substrate.projection",
+    "substrate.runtime",
 ]
