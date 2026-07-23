@@ -23,14 +23,9 @@ Current Diataxis coverage (docs/, before this backlog):
 
 ## novelizer
 
-The flagship BC and the least documented relative to its surface. The first
-five items are **in progress** (full Diataxis pass, this run).
+The flagship BC and the least documented relative to its surface. The first five
+proposed docs landed 2026-07-23 (see Done); remaining items below.
 
-- [ ] **P1 [R]** `docs/reference/novelizer-cli.md` — every `novelizer` subcommand, args, options, autonomy levels. The primary user CLI has no reference; only the synthetic `research-domain` one exists. *(in progress)*
-- [ ] **P1 [R]** `docs/reference/configuration.md` — all ~50 `EffectiveSettings` fields, defaults, 4-layer precedence (defaults ← global ← story.toml ← `NOVELIZER_*` env), story-overridable vs global-only vs forbidden keys, restart-required set. *(in progress)*
-- [ ] **P1 [T]** `docs/tutorial/first-story.md` — linear install → configure endpoint → seed → watch first chapter → read it. One happy path, no options. *(in progress)*
-- [ ] **P1 [H]** `docs/how-to/connect-a-local-llm.md` — llama.cpp / Ollama / vLLM via OpenAI-compatible endpoints, model pick in wizard, `llm_max_tokens`/timeout gotchas, per-agent tool-disable for weak tool-callers. Biggest first-run friction point. *(in progress)*
-- [ ] **P1 [E]** `docs/explanation/how-the-room-works.md` — the ten-agent fleet, scheduler cadence/concurrency, gated commit path (intent → committer → autonomy policy → proposal or append), coordination only through the event log. *(in progress)*
 - [ ] **P2 [H]** `docs/how-to/cast-the-room-voices.md` — scaffold + activate prose profiles, agent personalities, character voices; user vs shipped packs. CLI-scaffold + settings-activate flow is non-obvious.
 - [ ] **P2 [H]** `docs/how-to/steer-a-story.md` — blueprint framing, `retarget`, `plan-resolution`/`plan-reveal`, autonomy dial, approvals/escalations, completion. The "director verbs" bundle.
 - [ ] **P2 [E]** `docs/explanation/event-sourcing-and-canon.md` — why event-sourced; EventStore/Projector/ReadStore split; canon read-only to agents; the "only way to change canon is a declared intent" invariant.
@@ -79,7 +74,6 @@ primitives, exercised only by tests), and no doc says so.
 
 ## Cross-cutting notes
 
-- `docs/tutorial/` does not exist yet — first tutorial to land creates it.
 - Repo convention is singular Diataxis dirs: `docs/how-to/`, `docs/reference/`,
   `docs/explanation/` (and `docs/tutorial/` when created).
 - Historical material (`docs/superpowers/`, `docs/submilestones/`,
@@ -90,4 +84,10 @@ primitives, exercised only by tests), and no doc says so.
 
 ## Done
 
-*(move completed items here with the landing commit)*
+- [x] **P1 [R]** `docs/reference/novelizer-cli.md` — every `novelizer` subcommand, args, options, autonomy levels. The primary user CLI has no reference; only the synthetic `research-domain` one exists.
+- [x] **P1 [R]** `docs/reference/configuration.md` — all ~50 `EffectiveSettings` fields, defaults, 4-layer precedence (defaults ← global ← story.toml ← `NOVELIZER_*` env), story-overridable vs global-only vs forbidden keys, restart-required set.
+- [x] **P1 [T]** `docs/tutorial/first-story.md` — linear install → configure endpoint → seed → watch first chapter → read it. One happy path, no options.
+- [x] **P1 [H]** `docs/how-to/connect-a-local-llm.md` — llama.cpp / Ollama / vLLM via OpenAI-compatible endpoints, model pick in wizard, `llm_max_tokens`/timeout gotchas, per-agent tool-disable for weak tool-callers. Biggest first-run friction point.
+- [x] **P1 [E]** `docs/explanation/how-the-room-works.md` — the ten-agent fleet, scheduler cadence/concurrency, gated commit path (intent → committer → autonomy policy → proposal or append), coordination only through the event log.
+
+  All five landed in the novelizer full Diataxis pass, 2026-07-23 (verified against source by a dedicated verification wave).
