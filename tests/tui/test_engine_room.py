@@ -8,7 +8,7 @@ from novelizer.telemetry.events import (
 )
 from novelizer.agents.schemas import (
     WorldEntriesDraft, KeeperOutput, EditorVerdict,
-    ContinuityOutput, RetconAmendments, StructureAnalystOutput,
+    ContinuityOutput, RetconAmendments, StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
 
@@ -31,6 +31,7 @@ def _runners():
         "continuity_checker_mining": _R(None),
         "retconner": _R(RetconAmendments()),
         "structure_analyst": _R(StructureAnalystOutput()),
+        "summarizer": _R(SummarizerOutput(gist="g", summary="s")),
     }
 
 

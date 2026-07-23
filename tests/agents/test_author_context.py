@@ -49,9 +49,13 @@ class TestPriorChapterFidelity:
         assert "FINAL MOMENT." in sent
 
     def test_most_recent_chapter_gets_more_room_than_older_ones(self):
+        """The latest chapter is always sent in full; older ones only get as
+        much room as the advisory budget allows -- so a budget too tight to
+        fit an older chapter whole must still leave the latest untouched."""
         older = Chapter(id="c1", title="One", prose="A" * 4000)
         latest = Chapter(id="c2", title="Two", prose="B" * 4000)
-        sent = _summarize(_ctx(previous=[older, latest], chapters=[older, latest]))
+        sent = _summarize(_ctx(previous=[older, latest], chapters=[older, latest]),
+                           advisory_budget=200)
         assert sent.count("B") > sent.count("A")
 
     def test_pull_mode_pushes_the_index_and_no_prose(self):

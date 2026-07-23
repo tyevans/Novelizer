@@ -79,6 +79,7 @@ async def test_runtime_wires_continuity_checker_mining_runner_and_event_store(se
         "continuity_checker_mining": mining_fake,
         "retconner": ScriptedRunner(RetconAmendments()),
         "structure_analyst": _FakeAgentRunner(),
+        "summarizer": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
@@ -131,13 +132,14 @@ async def test_full_pipeline_runs_under_runtime(settings):
         "retconner": ScriptedRunner(RetconAmendments()),
         "structure_analyst": _FakeAgentRunner(),
         "plotter": _FakeAgentRunner(),
+        "summarizer": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
     try:
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor", "continuity_checker",
-            "retconner", "structure_analyst", "muse", "plotter", "triage",
+            "retconner", "structure_analyst", "muse", "plotter", "triage", "summarizer",
         }
         # Drive each agent once directly (deterministic), projecting between.
         for name in ["world_architect", "author", "editor"]:
@@ -205,6 +207,7 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
             WorldEntryDraft(title="Suns", body="One sun.", supersedes_id=known_world_entry_id)
         ])),
         "structure_analyst": _FakeAgentRunner(),
+        "summarizer": _FakeAgentRunner(),
     }
     rt = Runtime(settings, runners=runners)
     await rt.start()
@@ -274,6 +277,7 @@ def _all_fake_runners():
         for name in (
             "author", "world_architect", "character_keeper", "editor",
             "continuity_checker", "retconner", "structure_analyst", "plotter",
+            "summarizer",
         )
     }
 
@@ -290,7 +294,7 @@ async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor",
             "continuity_checker", "retconner", "structure_analyst", "muse",
-            "plotter", "triage",
+            "plotter", "triage", "summarizer",
         }
         assert rt.structure_analyst is not None
         assert rt.structure_analyst._committer is rt.committer
@@ -394,7 +398,7 @@ async def test_runtime_wires_telemetry_store_bus_and_recorder(tmp_path):
     settings = Settings(db_path=str(db))
     rt = Runtime(settings, runners={n: _R() for n in [
         "author", "world_architect", "character_keeper", "editor",
-        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst"]})
+        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst", "summarizer"]})
     await rt.start()
     try:
         assert rt.telemetry is not None and rt.telemetry_bus is not None
@@ -419,7 +423,7 @@ async def test_agent_run_via_runtime_lands_run_events_in_telemetry_log(tmp_path)
     settings = Settings(db_path=str(tmp_path / "world.db"))
     rt = Runtime(settings, runners={n: _R() for n in [
         "author", "world_architect", "character_keeper", "editor",
-        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst"]})
+        "continuity_checker", "continuity_checker_mining", "retconner", "structure_analyst", "summarizer"]})
     await rt.start()
     try:
         await rt.author.run_once()

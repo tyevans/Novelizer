@@ -11,6 +11,7 @@ def _runners():
     names = [
         "author", "world_architect", "character_keeper", "editor",
         "continuity_checker", "retconner", "structure_analyst", "plotter",
+        "summarizer",
     ]
     return {n: _R() for n in names}
 

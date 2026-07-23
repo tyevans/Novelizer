@@ -10,6 +10,7 @@ from novelizer.canon.events import EventType, ChatUserMessaged, ChatAgentReplied
 from novelizer.agents.base import ChapterDraft
 from novelizer.agents.schemas import (
     WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments, StructureAnalystOutput,
+    SummarizerOutput,
 )
 
 
@@ -26,6 +27,7 @@ def _fake_agent_runners():
         "world_architect": WorldEntriesDraft(), "author": ChapterDraft(title="X", prose="y"),
         "character_keeper": KeeperOutput(), "editor": EditorVerdict(), "continuity_checker": ContinuityOutput(),
         "retconner": RetconAmendments(), "structure_analyst": StructureAnalystOutput(),
+        "summarizer": SummarizerOutput(gist="g", summary="s"),
     }.items()}
 
 
