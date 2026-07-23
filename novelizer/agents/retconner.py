@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
 from novelizer.agents.schemas import RetconAmendments
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon.read_store import ReadStore
@@ -180,7 +181,7 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None, s
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
-        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=RetconAmendments,
             backend=backend, tools=tools, subagents=subagents,

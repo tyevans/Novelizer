@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
-from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import (
     ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
@@ -548,7 +548,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
         callbacks=None, streaming=callbacks is not None,
     )
     if backend is not None:
-        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
             backend=backend, tools=tools, subagents=subagents,

@@ -2,6 +2,7 @@ from __future__ import annotations
 from novelizer.agents import prompts
 from novelizer.agents.base import BaseAgent, ChapterDraft, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
 from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
     stale_threads_note,
@@ -369,7 +370,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None, suba
     )
     if backend is not None:
         from novelizer.agents.middleware import TodoContextMiddleware
-        system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE
+        system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
             backend=backend, tools=tools, skills=AUTHOR_SKILLS, subagents=subagents,

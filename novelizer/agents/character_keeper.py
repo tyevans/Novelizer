@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
-from novelizer.agents.prompts import DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import KeeperOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
@@ -380,7 +380,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
-        system_prompt = SYSTEM_PROMPT + KEEPER_PULL_NOTE
+        system_prompt = SYSTEM_PROMPT + KEEPER_PULL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
             backend=backend, tools=tools, skills=KEEPER_SKILLS, subagents=subagents,
