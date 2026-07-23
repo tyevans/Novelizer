@@ -403,3 +403,34 @@ async def test_seeded_live_pane_survives_restart(rt):
         await pilot.pause(0.8)
         vitals = str(app.query_one("#er_vitals").renderable)
         assert "author" in vitals
+
+
+async def test_seeded_per_agent_live_pane_survives_restart(rt):
+    """seed_states() (the per-agent branch) must also be fed adapted
+    contract events on restart, not just seed_state()'s All-pane branch --
+    and a raw StoredEvent type with no to_contract_event mapping mixed into
+    the replay (a scheduler event) must be filtered out rather than
+    breaking the per-agent seeding."""
+    from novelizer.telemetry.events import LlmCallStarted, SchedulerPicked
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                            LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                           model="qwen", prompt="[system]\nWrite the chapter."))
+    # Scheduler events have no to_contract_event mapping (translate to None);
+    # they must not raise or otherwise poison the per-agent replay.
+    await rt.telemetry.emit(TelemetryEventType.SCHEDULER_PICKED, "sched",
+                            SchedulerPicked(agent_name="editor"))
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                            AgentRunStarted(run_id="r2", agent_name="editor"))
+    # A fresh app instance (a "restart") must show each agent's own seeded
+    # live state in its own per-agent vitals pane.
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        author_vitals = str(app.query_one("#er_vitals_author").renderable)
+        editor_vitals = str(app.query_one("#er_vitals_editor").renderable)
+        assert "author" in author_vitals
+        assert "editor" in editor_vitals

@@ -12,10 +12,30 @@ hang signature so nobody re-diagnoses it from scratch.
   This is where almost all visual logic lives and where new rendering behavior gets its
   red/green tests first. Assert on `.plain` for content and on `.spans` for styling —
   widgets are thin enough that everything visual is checkable here.
+- **tui_kit contract/model/widget tests** (`tests/tui_kit/test_contracts.py`,
+  `test_run_model.py`, `test_widgets.py`, `test_roster.py`): the extracted
+  rendering-kit layer, tested at three distinct altitudes inside one directory.
+  `test_contracts.py` checks Protocol conformance — a `_FakeTheme` stub satisfying
+  `AgentTheme` (`glyph`/`label`/`style`/`verb`) — plus that the bus-event dataclasses
+  (`RunStarted`, `TokenDelta`, `ToolCallStarted`, ...) are frozen with the fields
+  callers expect. `test_run_model.py` drives `apply_bus_item`/`route_agent`/
+  `vitals_line` and friends as pure functions over `LiveRunState`: construct a bus
+  item and a fake clock, apply it, assert on the resulting dataclass — no Textual
+  runtime involved. `test_widgets.py` mounts the real Textual widgets (`ActivityStrip`,
+  `EngineRoom`, `LiveStreamPanel`) inside a minimal `App`/`ComposeResult` harness
+  defined right in the test file, then queries rendered `Static`/`DataTable` content
+  after `await pilot.pause()`. `test_roster.py` uses Hypothesis (`@given`) to
+  property-test `roster_glyphs`/`roster_summary` formatting across generated agent
+  rosters. This is now where new tui_kit rendering behavior gets its red/green tests
+  first — distinct from `tests/tui`'s app-level pure model tests, which still own
+  `app.py`/`chat_screen.py`-specific logic.
 - **Widget/pilot tests** (`test_app_layout.py`, `test_approval_screen.py`, etc.):
   Textual's `run_test()` pilot drives the real app headlessly. These are seconds each;
   the whole `tests/tui` suite is ~100s. Pilot tests cover wiring only (bindings, screen
-  stack, loops writing into the right widget) — not rendering detail.
+  stack, loops writing into the right widget) — not rendering detail. As of c87fee5
+  these exercise `app.py`/`chat_screen.py` as wired onto `tui_kit`, so a wiring
+  regression can now originate in either the app layer or the tui_kit widgets it
+  composes.
 - **Screenshot verification** (manual, not in CI): copy a real story DB, run the app
   with no-op fake runners under a pilot, `app.save_screenshot()` → SVG → cairosvg PNG.
   Ty's `stories/` churns between sessions — always `ls stories/` for a current DB and
@@ -23,7 +43,7 @@ hang signature so nobody re-diagnoses it from scratch.
 
 ## The gates
 
-- Run the TUI suite as: `uv run pytest tests/tui -q -W error`
+- Run the TUI suite as: `uv run pytest tests/tui tests/tui_kit -q -W error`
 - **Zero warnings is a hard gate** (`-W error`). Textual deprecations and un-awaited
   coroutines surface as failures, on purpose.
 - `live_llm`-marked tests are deselected by `addopts = "-m 'not live_llm'"` in
@@ -74,8 +94,11 @@ worktree's Claude session running pytest, load average ≥ ~5 — the pilot test
 *en masse* with `aiosqlite` `RuntimeError('Event loop is closed')` teardown races
 surfacing as `PytestUnhandledThreadExceptionWarning` ExceptionGroups (fatal under
 `-W error`), plus stray chromadb `DeprecationWarning`s from fixture setup ordering.
-The same files pass when the box is quiet. Before diagnosing a red pilot suite as a
-regression:
+The same files pass when the box is quiet. `tests/tui_kit/test_widgets.py`'s harness
+is the same `App.run_test()` pilot machinery under the hood, so treat it as equally
+load-sensitive — don't diagnose a red `test_widgets.py` as a regression without
+first checking load, the same as any other pilot file. Before diagnosing a red pilot
+suite as a regression:
 
 1. `uptime` and `ps -eo pid,etime,time,args --sort=-time | head` — look for a live
    `novelizer` process or another worktree's pytest.
@@ -123,3 +146,29 @@ regression:
   for DataTable cells. Red test: feed the widget real hostile text (see the
   `_HOSTILE` prompt in `tests/tui/test_engine_room.py`) and assert no
   "telemetry … error" lines land in `app.messages`.
+
+## tui_kit test-writing conventions
+
+Where a new tui_kit rendering test belongs depends on what it's exercising:
+
+- **Pure logic/state transitions** — a new bus-item variant, a new `LiveRunState`
+  field, a formatting helper like `vitals_line`/`strip_line` — go in
+  `test_run_model.py`, or in `test_contracts.py` if it's about the shape of a
+  contract event or the `AgentTheme` protocol itself. Neither file boots a Textual
+  runtime; both run in milliseconds and should be preferred whenever the behavior can
+  be expressed as function-in/dataclass-out.
+- **Actual widget mounting or DOM queries** — anything that needs Textual to compose,
+  mount, and lay out a widget (`ActivityStrip`, `EngineRoom`, `LiveStreamPanel`, or a
+  new one) — goes in `test_widgets.py`, using the minimal `App`/`ComposeResult`
+  harness pattern already there (a small `_XHarness(App)` per widget under test,
+  driven by `async with app.run_test() as pilot`, asserting on rendered content after
+  `await pilot.pause()`).
+- **Property-based invariants** — formatting behavior that should hold across
+  arbitrary agent names or rosters (glyph/summary rendering, cast ordering) — go in
+  `test_roster.py` via Hypothesis `@given`, alongside the example-based cases for
+  specific states (idle/running/paused/errored).
+- `_FakeTheme` (a small class implementing `glyph`/`label`/`style`/`verb`) is
+  currently duplicated per file rather than pulled into a shared fixture — each file
+  defines the minimal shape it needs to satisfy the `AgentTheme` protocol. Follow that
+  pattern for now rather than introducing a shared conftest fixture unless the
+  duplication starts drifting out of sync.

@@ -1,3 +1,5 @@
+import pytest
+
 from substrate.event_registry import EventTypeRegistry, EventTypeSpec, GatingTier
 from substrate.policy import is_gated
 
@@ -40,3 +42,14 @@ def test_tiered_event_gated_at_max_tier_index():
     registry = _registry()
     assert is_gated("retcon.event", registry, TIER_ORDER, current_tier_index=3) is True
     assert is_gated("canon.event", registry, TIER_ORDER, current_tier_index=3) is True
+
+
+def test_tiered_event_with_tier_level_missing_from_tier_order_raises_value_error():
+    # A misconfigured tier_order (or a spec's tier_level that fell out of sync
+    # with it) must surface loudly rather than silently pass/fail the gate.
+    registry = EventTypeRegistry()
+    registry.register(
+        EventTypeSpec(name="orphan.event", gating_tier=GatingTier.tiered, tier_level="quarantine")
+    )
+    with pytest.raises(ValueError):
+        is_gated("orphan.event", registry, TIER_ORDER, current_tier_index=0)
