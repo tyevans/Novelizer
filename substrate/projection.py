@@ -1,14 +1,20 @@
 from __future__ import annotations
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 
 @dataclass(frozen=True)
 class ProjectionSpec:
+    """One named projection: how to invalidate it, and how to recompute a dirty key.
+
+    `recompute` may return a value directly or an awaitable of one --
+    `ProjectionCatalog.recompute_dirty` awaits it if needed, so both a plain
+    function and an `async def` are valid.
+    """
     name: str
     invalidation_key: Callable[[Any], str]
-    recompute: Callable[[str], Any]
+    recompute: Callable[[str], Any | Awaitable[Any]]
 
 
 class ProjectionCatalog:
