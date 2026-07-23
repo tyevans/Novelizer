@@ -1,7 +1,7 @@
 import uuid
 from types import SimpleNamespace
 from langchain_core.messages import HumanMessage, SystemMessage
-from novelizer.run_context import current_run_id, current_agent_name
+from agent_kit import current_run_id, current_agent_name
 from novelizer.telemetry.callbacks import TelemetryCallbackHandler, render_messages
 from novelizer.telemetry.events import TelemetryEventType, TokenDelta
 

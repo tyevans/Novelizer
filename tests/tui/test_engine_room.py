@@ -163,7 +163,7 @@ async def test_selecting_a_trace_row_shows_detail_with_prompt_and_produced(rt):
     from textual.widgets import DataTable
     from novelizer.telemetry.events import LlmCallStarted
     from novelizer.canon.events import EventType, AgentRemark
-    from novelizer.run_context import current_run_id
+    from agent_kit import current_run_id
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         # A domain event stamped with the run, so detail can show "produced:"

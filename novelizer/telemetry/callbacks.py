@@ -3,7 +3,7 @@ import time
 from typing import Any
 from uuid import UUID
 from langchain_core.callbacks import AsyncCallbackHandler
-from novelizer.run_context import current_run_id, current_agent_name
+from agent_kit import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
     TelemetryEventType, LlmCallStarted, LlmCallFinished, LlmCallFailed, TokenDelta,
     ToolCallStarted, ToolCallFinished, ToolCallFailed,

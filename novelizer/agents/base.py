@@ -12,7 +12,7 @@ from novelizer.agents.schemas import (
 )
 from novelizer.store.models import ChapterBriefRecord, Flag, FlagStatus
 from novelizer.agents import intents as intent_helpers
-from novelizer.run_context import current_run_id, current_agent_name
+from agent_kit import current_run_id, current_agent_name
 from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
 )

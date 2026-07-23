@@ -391,7 +391,7 @@ async def test_run_once_emits_started_and_finished_with_one_run_id():
 
 
 async def test_run_once_sets_ambient_run_context_during_run_and_resets_after():
-    from novelizer.run_context import current_run_id, current_agent_name
+    from agent_kit import current_run_id, current_agent_name
 
     seen = {}
 

@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import EventType
 from novelizer.canon.autonomy import Proposal
-from novelizer.run_context import current_run_id
+from agent_kit import current_run_id
 
 
 class Committer:

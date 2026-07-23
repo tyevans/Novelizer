@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import StoredEvent
-from novelizer.run_context import current_agent_name, current_run_id
+from agent_kit import current_agent_name, current_run_id
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.events import (
     AgentRunFailed, AgentRunFinished, AgentRunStarted, TelemetryEventType, TokenDelta,
