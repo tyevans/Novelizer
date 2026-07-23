@@ -1,6 +1,6 @@
 # Spec: Context-Assembly Protocol v2 (pull-mode-first)
 
-**Status:** APPROVED — scope confirmed by user 2026-07-22 ("both halves, rethought for pull mode")
+**Status:** IMPLEMENTED — 2026-07-22 (scope confirmed by user: "both halves, rethought for pull mode")
 **Created:** 2026-07-22
 **Supersedes:** `.specs/context-assembly-protocol.md` (v1, DRAFT). v1 was implemented on branch
 `worktree-fix-keeper-prose-truncation` but never merged; main has since diverged (Flag API replaced
@@ -199,6 +199,25 @@ different problem); non-prose truncations (`world_entry.body[:200]`, list caps);
 windowing via embeddings; real tokenizer integration (protocol seam exists).
 
 ---
+
+## Deviations (recorded at implementation, 2026-07-22)
+
+- **Keeper batching**: selected unmined chapters that fit the budget share ONE runner call (today's
+  prompt shape preserved); per-window calls happen only for a single chapter larger than the whole
+  budget — as clarified in D6's batching semantics. `chapter.processed` is also stamped on a
+  `no_action` verdict (presented-in-full-and-judged counts as processed).
+- **Keeper constructor**: `event_store` is positional after `committer` (ContinuityChecker
+  convention); `prose_chars` removed outright rather than deprecated in the agent.
+- **Gist threading**: Author and Plotter pass gists to their module-level prompt builders via the
+  existing `ctx` dict rather than new function parameters; `build_author_prompt` gained
+  `advisory_budget` + `summaries` parameters replacing `prior_chapter_chars` (D8).
+- **`brain/mining.already_mined_chapter_ids`** was removed with its callers migrated to
+  `current_done_ids` (its unit test migrated too); `thread_touch_log` and `MINED_SOURCE_TAG` remain.
+- **structure_analyst** got its `summaries` poll fetch in the D8 cutover rather than D7 (it never
+  called `chapter_map_note`).
+- **Known environmental issue, not a deviation**: `tests/chat/test_service.py` fails under
+  `-W error` on the BASELINE too (chromadb DeprecationWarning + aiosqlite ResourceWarning); it was
+  run without `-W error` during per-task verification.
 
 ## Invariants (each gets a property test)
 
