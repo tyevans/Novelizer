@@ -40,7 +40,7 @@ async def _run_names(names: list[str]) -> None:
         await proj.catch_up()
 
         out = KeeperOutput(new_characters=[NewCharacter(name=n) for n in names])
-        keeper = CharacterKeeper(FakeRunner(out), read, committer=Committer(events))
+        keeper = CharacterKeeper(FakeRunner(out), read, committer=Committer(events), event_store=events)
         await keeper.run_once()
         await proj.catch_up()
 
@@ -85,16 +85,20 @@ async def _run_pass(out: KeeperOutput) -> None:
         await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="..."))
         await proj.catch_up()
 
-        keeper = CharacterKeeper(FakeRunner(out), read, committer=Committer(events))
+        keeper = CharacterKeeper(FakeRunner(out), read, committer=Committer(events), event_store=events)
         await keeper.run_once()
         await proj.catch_up()
 
-        # However populated the lists, a pass never mutates canon:
-        # the only event beyond the seeded chapter may be one agent.remarked.
+        # However populated the lists, a pass never mutates canon: beyond the
+        # seeded chapter, only one agent.remarked and the presented chapter's
+        # chapter.processed stamp (Task 8: presented-in-full-and-judged still
+        # counts as processed, even on a no_action pass).
         assert await read.list_characters() == []
         assert await read.list_flags(category="contradiction", status=FlagStatus.open) == []
         log = await events.events_since(0)
-        assert {e.event_type for e in log} <= {EventType.CHAPTER_CREATED, EventType.AGENT_REMARKED}
+        assert {e.event_type for e in log} <= {
+            EventType.CHAPTER_CREATED, EventType.AGENT_REMARKED, EventType.CHAPTER_PROCESSED,
+        }
         assert sum(1 for e in log if e.event_type == EventType.AGENT_REMARKED) <= 1
 
         await read.close()

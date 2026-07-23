@@ -6,11 +6,11 @@ EXPECTED_ORDER = [
     "world_architect", "character_keeper", "muse",
     "plotter", "author",
     "editor", "continuity_checker", "retconner", "structure_analyst",
-    "triage",
+    "summarizer", "triage",
 ]
 
 
-def test_registry_has_ten_specs_in_scheduling_order():
+def test_registry_lists_every_spec_in_scheduling_order():
     assert [spec.name for spec in AGENT_REGISTRY] == EXPECTED_ORDER
 
 

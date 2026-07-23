@@ -44,7 +44,7 @@ async def test_minting_a_dealt_name_records_uptake(stack):
     events, proj, read, committer = stack
     await _seed_consumed_hand(events, proj)
     out = KeeperOutput(new_characters=[NewCharacter(name="Doris Kimbrough")])
-    await CharacterKeeper(FakeRunner(out), read, committer).run_once()
+    await CharacterKeeper(FakeRunner(out), read, committer, events).run_once()
     await proj.catch_up()
     rows = await read.list_uptake("h1")
     assert [(r.kind, r.item, r.chapter_id) for r in rows] == [("names", "Doris Kimbrough", "c1")]
@@ -54,6 +54,6 @@ async def test_minting_an_undealt_name_records_nothing(stack):
     events, proj, read, committer = stack
     await _seed_consumed_hand(events, proj)
     out = KeeperOutput(new_characters=[NewCharacter(name="Prudence Vann")])
-    await CharacterKeeper(FakeRunner(out), read, committer).run_once()
+    await CharacterKeeper(FakeRunner(out), read, committer, events).run_once()
     await proj.catch_up()
     assert await read.list_uptake() == []

@@ -39,6 +39,8 @@ class EventType:
     CAUSAL_EDGE_DECLARED = "causal_edge.declared"
     ANNOTATION_STRUCTURE_SCORED = "annotation.structure_scored"
     CHAPTER_MINED = "chapter.mined"
+    CHAPTER_PROCESSED = "chapter.processed"
+    CHAPTER_SUMMARIZED = "chapter.summarized"
     THEME_INTRODUCED = "theme.introduced"
     THEME_DEVELOPED = "theme.developed"
     INSPIRATION_DRAWN = "inspiration.drawn"
@@ -307,6 +309,27 @@ class ChapterMined(BaseModel):
     """
 
     chapter_id: str
+
+
+class ChapterProcessed(BaseModel):
+    """Payload for chapter.processed -- per-agent bookkeeping marker that
+    `agent` has seen this chapter's full prose. Never projected; done-sets are
+    a pure log fold (brain/watermarks.current_done_ids), and a later
+    chapter.revised clears the marker so revised chapters re-process."""
+
+    agent: str
+    chapter_id: str
+
+
+class ChapterSummarized(BaseModel):
+    """Payload for chapter.summarized -- the Summarizer's rolling summary of
+    one chapter revision. Projected into chapter_summaries (upsert by
+    chapter_id: the latest summary wins on replay). gist is one line for the
+    pull-mode chapter map; summary is one paragraph for advisory contexts."""
+
+    chapter_id: str
+    gist: str
+    summary: str
 
 
 class ChatUserMessaged(BaseModel):

@@ -5,6 +5,7 @@ from novelizer.brain.context import (
     causal_flags_note, chapter_map_note, known_secrets_note, ledger_note, resolution_pacing_note,
     stale_threads_note,
 )
+from novelizer.brain.context_assembly import AdvisoryEntry, assemble_advisory
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
@@ -152,7 +153,8 @@ def _summarize(
     ctx: dict,
     casting_note: str = "",
     personality: str = "",
-    prior_chapter_chars: int = 200,
+    advisory_budget: int = 2000,
+    summaries: dict[str, str] | None = None,
     staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
     pull_mode: bool = False,
 ) -> str:
@@ -178,15 +180,21 @@ def _summarize(
     pool = casting_pool_note(ctx.get("hand"))
     sparks = inspiration_note(ctx.get("hand"))
     if pull_mode:
-        chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+        gists = {s.chapter_id: s.gist for s in ctx.get("summaries", []) if s.gist}
+        chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'], gists=gists)}"
     else:
-        # Full fidelity on the chapter being continued, a head slice for the
-        # ones behind it. A uniform head slice hid the ending the next chapter
-        # has to pick up from -- the Author was continuing from an opening.
+        # Full fidelity on the chapter being continued -- the Author needs its
+        # ending to pick up from, not a gist. The chapters behind it get the
+        # advisory treatment: a rolling summary when the Summarizer has caught
+        # up, a labeled verbatim head (never silent) otherwise.
         previous = ctx["previous"]
-        lines = [
-            f"- '{c.title}': {c.prose[:prior_chapter_chars]}" for c in previous[:-1]
+        summaries_by_id = summaries or {}
+        entries = [
+            AdvisoryEntry(label=f"'{c.title}'", summary=summaries_by_id.get(c.id), verbatim=c.prose)
+            for c in previous[:-1]
         ]
+        block = assemble_advisory(entries, advisory_budget)
+        lines = [block] if block else []
         if previous:
             latest = previous[-1]
             lines.append(f"- '{latest.title}' (most recent, in full):\n{latest.prose}")
@@ -238,14 +246,14 @@ class Author(BaseAgent):
         casting_note: str = "",
         personality: str = "",
         provenance: dict | None = None,
-        prior_chapter_summary_chars: int = 200,
+        advisory_token_budget: int = 2000,
         staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
         pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
         self.provenance = provenance
-        self._prior_chapter_summary_chars = prior_chapter_summary_chars
+        self._advisory_token_budget = advisory_token_budget
         self._staleness_threshold_chapters = staleness_threshold_chapters
         self.pull_mode = pull_mode
 
@@ -269,6 +277,7 @@ class Author(BaseAgent):
             "hand": await self._read.get_active_hand(),
             "promises": await self._read.list_promises(),
             "brief": await self._read.get_open_brief_for_ordinal(len(chapters) + 1),
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> ChapterDraft | None:
@@ -281,7 +290,8 @@ class Author(BaseAgent):
         else:
             content = _summarize(
                 ctx, self._casting_note, self.personality,
-                prior_chapter_chars=self._prior_chapter_summary_chars,
+                advisory_budget=self._advisory_token_budget,
+                summaries={s.chapter_id: s.summary for s in ctx["summaries"]},
                 staleness_threshold_chapters=self._staleness_threshold_chapters,
                 pull_mode=self.pull_mode,
             )
@@ -388,7 +398,7 @@ def _construct(ctx: AgentContext) -> Author:
         casting_note=ctx.casting_note,
         personality=ctx.personalities.get("author", ""),
         provenance=ctx.provenance,
-        prior_chapter_summary_chars=ctx.settings.prior_chapter_summary_chars,
+        advisory_token_budget=ctx.settings.advisory_token_budget,
         staleness_threshold_chapters=ctx.settings.staleness_threshold_chapters,
         pull_mode=enabled,
     )

@@ -433,3 +433,21 @@ def test_finale_convergence_note_empty_when_nothing_remains_open():
     beats = [_beat("open", "Opening", fulfilled=True)]
     note = finale_convergence_note(_bp(10), beats, [], [], _chapters(8))
     assert note == ""
+
+
+from novelizer.brain.context import chapter_map_note
+
+
+def test_chapter_map_note_gists_annotate_lines():
+    chapters = _chapters(2)
+    out = chapter_map_note(chapters, gists={chapters[0].id: "Ana finds the key."})
+    lines = out.splitlines()
+    idx = next(i for i, l in enumerate(lines) if chapters[0].id in l)
+    assert lines[idx + 1].strip() == "gist: Ana finds the key."
+    assert "gist:" not in "\n".join(l for l in lines if chapters[1].id in l)
+
+
+def test_chapter_map_note_without_gists_unchanged():
+    chapters = _chapters(2)
+    assert chapter_map_note(chapters) == chapter_map_note(chapters, gists=None)
+    assert "gist:" not in chapter_map_note(chapters, gists={})

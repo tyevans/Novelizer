@@ -290,6 +290,17 @@ class StructureScore(BaseModel):
     pacing_label: str = ""
 
 
+class ChapterSummary(BaseModel):
+    """Read-side row for one chapter's rolling summary, built by the Projector
+    from chapter.summarized events. gist feeds the pull-mode chapter map;
+    summary feeds advisory (push-mode) contexts. Upsert by chapter_id: a
+    re-summarize after chapter.revised replaces the row."""
+
+    chapter_id: str
+    gist: str = ""
+    summary: str = ""
+
+
 class Event(BaseModel):
     id: str = Field(default_factory=_uuid)
     created_at: datetime = Field(default_factory=_now)

@@ -500,47 +500,50 @@ async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
     assert sent == expected
 
 
-def test_summarize_uses_configured_prior_chapter_chars():
+def test_summarize_uses_summary_when_available_over_prose():
     from novelizer.agents.author import _summarize
 
-    # The knob governs the chapters BEHIND the newest one; the chapter being
+    # The window governs the chapters BEHIND the newest one; the chapter being
     # continued from is pushed in full so its ending is visible.
     ctx = {
         "world": [], "characters": [],
-        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
+        "previous": [Chapter(id="c1", title="T", prose="x" * 500), Chapter(id="c2", title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
-    out = _summarize(ctx, prior_chapter_chars=50)
-    assert "x" * 51 not in out
-    assert "x" * 50 in out
+    out = _summarize(ctx, summaries={"c1": "A brisk recap of chapter one."})
+    assert "A brisk recap of chapter one." in out
+    assert "x" * 50 not in out
 
 
-def test_summarize_default_prior_chapter_chars_is_200():
+def test_summarize_falls_back_to_labeled_elision_when_no_summary():
     from novelizer.agents.author import _summarize
+    from novelizer.brain.context_assembly import ELISION_MARKER
 
     ctx = {
         "world": [], "characters": [],
-        "previous": [Chapter(title="T", prose="x" * 500), Chapter(title="Newest", prose="p")],
+        "previous": [Chapter(id="c1", title="T", prose="x" * 5000), Chapter(id="c2", title="Newest", prose="p")],
         "chapters": [], "signals": [], "threads": [], "secrets": [], "knowledge_matrix": {},
         "themes": [], "causal_edges": [],
     }
-    out = _summarize(ctx)
-    assert "x" * 200 in out and "x" * 201 not in out
+    out = _summarize(ctx, advisory_budget=50)
+    assert ELISION_MARKER in out
 
 
-async def test_author_constructor_threads_prior_chapter_summary_chars_through(stack):
+async def test_author_constructor_threads_advisory_token_budget_through(stack):
     events, proj, read, committer = stack
-    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 500))
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="T", prose="x" * 5000))
     await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Newest", prose="p"))
     await proj.catch_up()
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
     runner = FakeRunner(ChapterDraft(title="T2", prose="P"))
-    author = Author(runner, read, committer, prior_chapter_summary_chars=10)
+    author = Author(runner, read, committer, advisory_token_budget=10)
     ctx = await author.poll()
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
-    assert "x" * 11 not in sent
-    assert "x" * 10 in sent
+    assert ELISION_MARKER in sent
+    assert "x" * 5000 not in sent
 
 
 async def test_author_constructor_threads_staleness_threshold_through(stack):
@@ -932,3 +935,38 @@ def test_author_module_does_not_import_arc_note():
 def test_spec_carries_subagent_grant():
     from novelizer.agents.author import SPEC
     assert SPEC.subagent_grant.enabled_setting == "author_subagent_enabled"
+
+
+async def test_push_mode_recap_uses_summary_when_available(stack):
+    from novelizer.canon.events import ChapterSummarized
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 5000))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Newest", prose="latest prose"))
+    await events.append(
+        EventType.CHAPTER_SUMMARIZED, "c1",
+        ChapterSummarized(chapter_id="c1", gist="ch1 gist", summary="A concise recap of what chapter one did."),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, pull_mode=False)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A concise recap of what chapter one did." in sent
+    assert "x" * 200 not in sent
+
+
+async def test_push_mode_recap_labels_missing_summary(stack):
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await events.append(EventType.CHAPTER_CREATED, "c2", Chapter(id="c2", title="Newest", prose="latest prose"))
+    await proj.catch_up()
+    runner = FakeRunner(ChapterDraft(title="T", prose="P"))
+    author = Author(runner, read, committer, pull_mode=False)
+    ctx = await author.poll()
+    await author.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert ELISION_MARKER in sent

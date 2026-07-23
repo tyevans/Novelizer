@@ -10,13 +10,19 @@ from novelizer.store.models import Chapter, EditorialStatus
 from novelizer.canon.events import EventType
 from novelizer.tui.app import NovelizerApp
 from novelizer.tui.export_screen import ExportScreen
+from novelizer.agents.schemas import SummarizerOutput
+
+
+class _R:
+    async def ainvoke(self, inputs):
+        return {"structured_response": SummarizerOutput(gist="g", summary="s")}
 
 
 async def _app_with_chapters():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1, story_title="The Drowned Bell")
-    rt = Runtime(settings, runners={})
+    rt = Runtime(settings, runners={"summarizer": _R()})
     await rt.start()
     ch = Chapter(title="Ch One", prose="Some prose.", editorial_status=EditorialStatus.final)
     await rt.committer.commit("author", EventType.CHAPTER_CREATED, ch.id, ch)

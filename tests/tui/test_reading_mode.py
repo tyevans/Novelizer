@@ -4,12 +4,18 @@ import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
+from novelizer.agents.schemas import SummarizerOutput
+
+
+class _R:
+    async def ainvoke(self, inputs):
+        return {"structured_response": SummarizerOutput(gist="g", summary="s")}
 
 
 async def _app():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners={})
+    rt = Runtime(settings, runners={"summarizer": _R()})
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])

@@ -181,3 +181,12 @@ async def test_flag_escalation_events_are_never_gated(level, event_type):
     policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
     assert await policy.is_gated("triage", event_type) is False
     assert await policy.is_gated("author", event_type) is False
+
+
+@pytest.mark.parametrize("level", list(AutonomyLevel))
+@pytest.mark.parametrize("event_type", [
+    EventType.CHAPTER_PROCESSED, EventType.CHAPTER_SUMMARIZED,
+])
+async def test_assembly_bookkeeping_events_never_gated(level, event_type):
+    policy = AutonomyPolicy(FakeRead(AutonomyState(global_level=level)))
+    assert await policy.is_gated("any_agent", event_type) is False

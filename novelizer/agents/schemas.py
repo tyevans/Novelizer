@@ -282,6 +282,15 @@ class KeeperOutput(BaseModel):
     no_action: bool = False
 
 
+class SummarizerOutput(BaseModel):
+    """One chapter's rolling summary. gist: a single line (<=140 chars) for
+    the chapter map; summary: one paragraph for advisory contexts."""
+
+    gist: str = ""
+    summary: str = ""
+    feed_note: str = ""
+
+
 class VoiceDriftFlag(BaseModel):
     """One agent-declared instance of a character's prose voice violating its
     voice card, from Editor structured output. Committed at commit time as a

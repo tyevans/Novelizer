@@ -160,6 +160,41 @@ async def test_flags_from_structured_output_are_filed(stack):
     assert flags[0].filed_by == "structure_analyst"
 
 
+async def test_push_mode_recap_uses_summary_when_available(stack):
+    from novelizer.canon.events import ChapterSummarized
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await events.append(
+        EventType.CHAPTER_SUMMARIZED, "c1",
+        ChapterSummarized(chapter_id="c1", gist="ch1 gist", summary="A concise recap of chapter one."),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(StructureAnalystOutput())
+    analyst = StructureAnalyst(runner, read, committer, pull_mode=False)
+    ctx = await analyst.poll()
+    await analyst.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A concise recap of chapter one." in sent
+    assert "x" * 200 not in sent
+    assert "Chapter id:c1" in sent
+
+
+async def test_push_mode_recap_labels_missing_summary(stack):
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await proj.catch_up()
+    runner = FakeRunner(StructureAnalystOutput())
+    analyst = StructureAnalyst(runner, read, committer, pull_mode=False)
+    ctx = await analyst.poll()
+    await analyst.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert ELISION_MARKER in sent
+    assert "Chapter id:c1" in sent
+
+
 class _FakeSettings:
     agent_model = "gpt-4o-mini"
     llm_base_url = None

@@ -6,9 +6,11 @@ from novelizer.agents.schemas import (
     PromiseIntent,
 )
 from novelizer.brain.context import chapter_map_note, open_retcons_note
+from novelizer.brain.context_assembly import AdvisoryEntry, assemble_advisory
 from novelizer.brain.leaks import find_leaks, leak_description
 from novelizer.brain.paradoxes import find_paradoxes, paradox_description
-from novelizer.brain.mining import MINED_SOURCE_TAG, already_mined_chapter_ids, thread_touch_log
+from novelizer.brain.mining import MINED_SOURCE_TAG, thread_touch_log
+from novelizer.brain.watermarks import current_done_ids
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
@@ -129,11 +131,13 @@ class ContinuityChecker(BaseAgent):
         interval: int = 900,
         personality: str = "",
         pull_mode: bool = False,
+        advisory_token_budget: int = 2000,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="continuity_checker", personality=personality)
         self._mining_runner = mining_runner
         self._events = event_store
         self.pull_mode = pull_mode
+        self._advisory_token_budget = advisory_token_budget
 
     async def readiness(self) -> float:
         open_retcons = len(await self._read.list_flags(category="contradiction", status=FlagStatus.open))
@@ -142,7 +146,8 @@ class ContinuityChecker(BaseAgent):
     async def _fingerprint(self) -> tuple:
         chapters = await self._read.list_chapters()
         mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
-        already_mined = already_mined_chapter_ids(mined_events)
+        revised_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_REVISED])
+        already_mined = current_done_ids(mined_events, revised_events)
         unmined = sum(1 for c in chapters if c.id not in already_mined)
         refs = await self._read.list_secret_references()
         edges = await self._read.list_causal_edges()
@@ -151,7 +156,8 @@ class ContinuityChecker(BaseAgent):
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
         mined_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_MINED])
-        already_mined = already_mined_chapter_ids(mined_events)
+        revised_events = await self._events.events_since(0, event_types=[EventType.CHAPTER_REVISED])
+        already_mined = current_done_ids(mined_events, revised_events)
         thread_events = await self._events.events_since(
             0, event_types=[EventType.THREAD_PLANTED, EventType.THREAD_TOUCHED,
                              EventType.THREAD_PAID_OFF, EventType.THREAD_ABANDONED],
@@ -175,6 +181,7 @@ class ContinuityChecker(BaseAgent):
                 for h in await self._read.list_hands(status="consumed")
                 if h.consumed_chapter_id
             },
+            "summaries": await self._read.list_chapter_summaries(),
         }
 
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
@@ -190,9 +197,17 @@ class ContinuityChecker(BaseAgent):
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         if self.pull_mode:
-            chapters_block = f"Chapter index:\n{chapter_map_note(ctx['chapters'])}"
+            chapters_block = (
+                f"Chapter index:\n"
+                f"{chapter_map_note(ctx['chapters'], gists={s.chapter_id: s.gist for s in ctx['summaries'] if s.gist})}"
+            )
         else:
-            chapters = "\n".join(f"[{c.id[:8]}] {c.title}: {c.prose[:300]}" for c in ctx["chapters"]) or "None."
+            summaries_by_id = {s.chapter_id: s.summary for s in ctx["summaries"]}
+            entries = [
+                AdvisoryEntry(label=f"[{c.id[:8]}] {c.title}", summary=summaries_by_id.get(c.id), verbatim=c.prose)
+                for c in ctx["chapters"]
+            ]
+            chapters = assemble_advisory(entries, self._advisory_token_budget) or "None."
             chapters_block = f"Recent chapters:\n{chapters}"
         msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\n{chapters_block}{retcons}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
@@ -585,6 +600,7 @@ def _construct(ctx: AgentContext) -> ContinuityChecker:
         interval=ctx.settings.continuity_interval,
         personality=ctx.personalities.get("continuity_checker", ""),
         pull_mode=enabled,
+        advisory_token_budget=ctx.settings.advisory_token_budget,
     )
 
 

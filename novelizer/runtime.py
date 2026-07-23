@@ -75,6 +75,7 @@ class Runtime:
         self.continuity_checker = None
         self.retconner = None
         self.structure_analyst = None
+        self.summarizer = None
         self.plotter = None
         self.muse = None
         self.scheduler: Optional[Scheduler] = None
@@ -249,6 +250,7 @@ class Runtime:
         self.continuity_checker = self.agents_by_name["continuity_checker"]
         self.retconner = self.agents_by_name["retconner"]
         self.structure_analyst = self.agents_by_name["structure_analyst"]
+        self.summarizer = self.agents_by_name["summarizer"]
         # the planner ticks before the writer in a fresh room -- AGENT_REGISTRY
         # order encodes scheduling order, same as this list did before.
         self.agents = [self.agents_by_name[spec.name] for spec in AGENT_REGISTRY]
@@ -262,6 +264,7 @@ class Runtime:
             self.events, self.read, self.committer, self._chat_runner_for,
             lambda name: self.voice_pack.agent_personalities.get(name, ""),
             pull_mode=s.chat_tools_enabled, telemetry=self.telemetry,
+            advisory_token_budget=s.advisory_token_budget,
         )
         from novelizer.research.service import ResearchService
         self.research = ResearchService(self._research_runner_for, telemetry=self.telemetry)
@@ -282,6 +285,7 @@ class Runtime:
             "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
             "continuity_interval": [self.continuity_checker],
             "structure_analyst_interval": [self.structure_analyst],
+            "summarizer_interval": [self.summarizer],
             "plotter_interval": [self.plotter],
             "muse_interval": [self.muse],
         }

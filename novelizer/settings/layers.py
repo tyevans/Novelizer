@@ -47,6 +47,9 @@ class GlobalConfig(BaseModel):
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
+    extractor_token_budget: int | None = None
+    advisory_token_budget: int | None = None
+    summarizer_interval: int | None = None
     author_tools_enabled: bool | None = None
     checker_tools_enabled: bool | None = None
     chat_tools_enabled: bool | None = None
@@ -91,6 +94,9 @@ class StoryConfig(BaseModel):
     sag_spike_delta: float | None = None
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
+    extractor_token_budget: int | None = None
+    advisory_token_budget: int | None = None
+    summarizer_interval: int | None = None
     author_tools_enabled: bool | None = None
     checker_tools_enabled: bool | None = None
     chat_tools_enabled: bool | None = None

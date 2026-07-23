@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS chapter_briefs (
 CREATE TABLE IF NOT EXISTS arcs (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, character_id TEXT NOT NULL, active INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chapter_summaries (
+    id TEXT PRIMARY KEY, data TEXT NOT NULL
+);
 """
 
 
@@ -154,6 +157,7 @@ class Projector:
             "structure_scores", "secrets", "secret_knowledge", "secret_references",
             "causal_edges", "themes", "chat_messages", "inspiration_hands",
             "inspiration_uptake", "promises", "blueprints", "beats", "chapter_briefs", "arcs",
+            "chapter_summaries",
         ):
             await self._conn.execute(f"DELETE FROM {table}")
         await self._set_last_sequence(0)
@@ -503,6 +507,11 @@ class Projector:
         elif t == EventType.ANNOTATION_STRUCTURE_SCORED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
+                (p["chapter_id"], data),
+            )
+        elif t == EventType.CHAPTER_SUMMARIZED:
+            await self._conn.execute(
+                "INSERT OR REPLACE INTO chapter_summaries (id, data) VALUES (?,?)",
                 (p["chapter_id"], data),
             )
         elif t == EventType.CHAT_USER_MESSAGED or t == EventType.CHAT_AGENT_REPLIED:

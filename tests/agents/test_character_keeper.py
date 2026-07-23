@@ -9,7 +9,7 @@ from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
 from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, FlagDraft, KnowledgeIntent, ArcIntent
 from novelizer.agents.character_keeper import SYSTEM_PROMPT
-from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared
+from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared, ChapterProcessed
 from novelizer.store.models import Character, Chapter, FlagStatus
 from novelizer.agents.base import DEFAULT_PASS_REMARK
 
@@ -43,7 +43,7 @@ async def test_updates_character_arc_and_files_retcon(stack):
         updated_characters=[CharacterUpdate(id="c1", arc_status="cracking")],
         flags=[FlagDraft(category="contradiction", description="stoic vs weeping", related_entry_ids=["c1", "ch1"], proposed_resolution="show restraint")],
     )
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     mira = await read.get_character("c1")
@@ -53,7 +53,7 @@ async def test_updates_character_arc_and_files_retcon(stack):
 
 async def test_noop_when_no_characters(stack):
     events, proj, read, committer = stack
-    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer)
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_characters() == []
@@ -64,7 +64,7 @@ async def test_work_prompt_includes_personality_when_set(stack):
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mara", traits="wary"))
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer, personality="A protective, watchful presence.")
+    agent = CharacterKeeper(runner, read, committer, events, personality="A protective, watchful presence.")
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -75,7 +75,7 @@ async def test_work_prompt_includes_personality_when_set(stack):
 async def test_commit_emits_remark_when_feed_note_present(stack):
     events, proj, read, committer = stack
     out = KeeperOutput(feed_note="Mara's arc is bending toward trust.")
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.commit(out, {"characters": [], "recent": []})
     await proj.catch_up()
     log = await events.events_since(0)
@@ -96,7 +96,7 @@ async def test_updates_character_voice_and_leaves_unset_voice_unchanged(stack):
     out = KeeperOutput(updated_characters=[
         CharacterUpdate(id="c1", voice="Now trails off mid-sentence when scared."),
     ])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     mira = await read.get_character("c1")
@@ -105,7 +105,7 @@ async def test_updates_character_voice_and_leaves_unset_voice_unchanged(stack):
 
     # Second update: voice left None should not clobber the existing voice.
     out2 = KeeperOutput(updated_characters=[CharacterUpdate(id="c1", arc_status="cracking")])
-    agent2 = CharacterKeeper(FakeRunner(out2), read, committer)
+    agent2 = CharacterKeeper(FakeRunner(out2), read, committer, events)
     await agent2.run_once()
     await proj.catch_up()
     mira2 = await read.get_character("c1")
@@ -121,7 +121,7 @@ async def test_character_keeper_commit_learn_commits_secret_learned(stack):
     out = KeeperOutput(
         knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="pieced it together")],
     )
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     matrix = await read.knowledge_matrix()
@@ -133,7 +133,7 @@ async def test_character_keeper_commit_drops_non_learn_actions(stack):
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await proj.catch_up()
     out = KeeperOutput(knowledge_intents=[KnowledgeIntent(action="plant", title="Should Not Commit")])
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     log = await events.events_since(0)
@@ -145,7 +145,7 @@ async def test_character_keeper_commit_with_no_knowledge_intents_emits_no_secret
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await proj.catch_up()
     out = KeeperOutput()
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     log = await events.events_since(0)
@@ -171,7 +171,7 @@ async def _seed_open_retcon(events, proj, description="stoic vs weeping"):
 async def test_poll_includes_open_retcons(stack):
     events, proj, read, committer = stack
     await _seed_open_retcon(events, proj)
-    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer)
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events)
     ctx = await agent.poll()
     assert [r.description for r in ctx["open_retcons"]] == ["stoic vs weeping"]
 
@@ -181,7 +181,7 @@ async def test_work_prompt_lists_open_retcons(stack):
     await _seed_keeper_scene(events, proj)
     await _seed_open_retcon(events, proj)
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -193,7 +193,7 @@ async def test_work_prompt_omits_retcon_block_when_queue_empty(stack):
     events, proj, read, committer = stack
     await _seed_keeper_scene(events, proj)
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -208,7 +208,7 @@ async def test_creates_characters_mined_from_chapters(stack):
         NewCharacter(name="Silas Vane", traits="haunted", arc_status="arriving"),
         NewCharacter(name="Mrs. Gable", motivations="keep the building's peace"),
     ])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     silas = await read.get_character("silas-vane")
@@ -225,7 +225,7 @@ async def test_work_invokes_runner_when_cast_empty_but_chapters_exist(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="The Listening Wall", prose="Silas listened."))
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     out = await agent.work(ctx)
     assert out is not None
@@ -241,24 +241,11 @@ async def test_work_prompt_includes_characters_introduced_late_in_a_chapter(stac
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Silas Vane" in sent
-
-
-async def test_work_prompt_caps_prose_at_configured_prose_chars(stack):
-    events, proj, read, committer = stack
-    prose = ("x" * 150) + " Silas Vane arrived."
-    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
-    await proj.catch_up()
-    runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer, prose_chars=100)
-    ctx = await agent.poll()
-    await agent.work(ctx)
-    sent = runner.calls[-1]["messages"][0]["content"]
-    assert "Silas Vane" not in sent
 
 
 async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
@@ -267,7 +254,7 @@ async def test_new_character_colliding_with_existing_id_is_not_recreated(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Silas Vane returned."))
     await proj.catch_up()
     out = KeeperOutput(new_characters=[NewCharacter(name="Silas Vane!", traits="grim")])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     silas = await read.get_character("silas-vane")
@@ -282,7 +269,7 @@ async def test_new_character_with_blank_name_is_dropped(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Someone was there."))
     await proj.catch_up()
     out = KeeperOutput(new_characters=[NewCharacter(name="   ")])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_characters() == []
@@ -296,7 +283,7 @@ async def test_duplicate_new_characters_in_one_output_create_once(stack):
         NewCharacter(name="Maeve", traits="first"),
         NewCharacter(name="MAEVE", traits="second"),
     ])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     maeve = await read.get_character("maeve")
@@ -309,7 +296,7 @@ async def test_readiness_prioritizes_bootstrap_when_chapters_but_no_cast(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Silas."))
     await proj.catch_up()
-    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer)
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events)
     assert await agent.readiness() == 0.8
 
 
@@ -319,7 +306,7 @@ async def test_retcon_matching_open_description_is_not_refiled(stack):
     await _seed_open_retcon(events, proj)
     out = KeeperOutput(flags=[FlagDraft(
         category="contradiction", description="stoic vs weeping", related_entry_ids=["c1"], proposed_resolution="show restraint")])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     open_reqs = await read.list_flags(category="contradiction", status=FlagStatus.open)
@@ -336,7 +323,7 @@ async def test_keeper_readiness_zero_when_state_unchanged(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mira arrives."))
     await proj.catch_up()
     out = KeeperOutput(new_characters=[NewCharacter(name="Mira")])
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     assert await agent.readiness() > 0.0
     await agent.run_once()
     await proj.catch_up()
@@ -355,7 +342,7 @@ async def test_keeper_failed_run_leaves_watermark_unset(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
     await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
     await proj.catch_up()
-    agent = CharacterKeeper(BoomRunner(), read, committer)
+    agent = CharacterKeeper(BoomRunner(), read, committer, events)
     with pytest.raises(RuntimeError):
         await agent.run_once()
     assert await agent.readiness() == 0.5
@@ -367,7 +354,7 @@ async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
     await proj.catch_up()
     out = KeeperOutput(no_action=True, new_characters=[NewCharacter(name="Ghost")],
                        feed_note="All quiet on the cast front — write on.")
-    agent = CharacterKeeper(FakeRunner(out), read, committer)
+    agent = CharacterKeeper(FakeRunner(out), read, committer, events)
     await agent.run_once()
     await proj.catch_up()
     assert await read.list_characters() == []          # populated list ignored on a pass
@@ -380,7 +367,7 @@ async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
 
 async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):
     events, proj, read, committer = stack
-    agent = CharacterKeeper(FakeRunner(KeeperOutput(no_action=True)), read, committer)
+    agent = CharacterKeeper(FakeRunner(KeeperOutput(no_action=True)), read, committer, events)
     await agent.commit(KeeperOutput(no_action=True), {"characters": [], "recent": [], "secrets": [], "hands": []})
     log = await events.events_since(0)
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
@@ -410,7 +397,7 @@ async def test_keeper_midrun_chapter_is_not_absorbed_by_watermark(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
     await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira"))
     await proj.catch_up()
-    agent = CharacterKeeper(ChapterCommittingRunner(KeeperOutput(), events, proj), read, committer)
+    agent = CharacterKeeper(ChapterCommittingRunner(KeeperOutput(), events, proj), read, committer, events)
     await agent.run_once()
     # The mid-run chapter was never analyzed: the watermark must stay clear.
     assert await agent.readiness() > 0.0
@@ -517,6 +504,7 @@ def test_construct_reads_subagent_enabled_setting():
         character_keeper_subagent_enabled = True
         default_agent_interval = 120
         keeper_prose_chars = 6000
+        extractor_token_budget = 24000
 
     ctx = AgentContext(
         read=None, committer=None, events=None, settings=_Settings(),
@@ -566,7 +554,7 @@ async def test_work_prompt_includes_arc_note_when_arc_stagnant(stack):
     )
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -579,7 +567,7 @@ async def test_work_prompt_omits_arc_note_when_quiet(stack):
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -593,7 +581,7 @@ async def test_declare_arc_intent_projects_active_arc_for_character(stack):
     out = KeeperOutput(
         arc_intents=[ArcIntent(action="declare", character_id="mara", arc_type="positive", lie="I am alone")],
     )
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     arcs = await read.list_arcs(active_only=True)
@@ -613,7 +601,7 @@ async def test_advance_arc_intent_carries_latest_analyzed_chapter(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="Mara grew."))
     await proj.catch_up()
     out = KeeperOutput(arc_intents=[ArcIntent(action="advance", id="arc1", note="grew")])
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     arc = await read.get_active_arc_for_character("mara")
@@ -626,7 +614,7 @@ async def test_new_character_and_declare_arc_intent_in_same_pass(stack):
         new_characters=[NewCharacter(name="Mara")],
         arc_intents=[ArcIntent(action="declare", character_id="mara", arc_type="positive", lie="I am alone")],
     )
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.commit(out, {"characters": [], "recent": []})
     await proj.catch_up()
     arc = await read.get_active_arc_for_character("mara")
@@ -642,7 +630,7 @@ async def test_resolve_arc_intent_citing_unknown_id_is_dropped(stack):
     out = KeeperOutput(
         arc_intents=[ArcIntent(action="resolve", id="nonexistent", outcome="truth_embraced")],
     )
-    keeper = CharacterKeeper(FakeRunner(out), read, committer)
+    keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
     log = await events.events_since(0)
@@ -658,7 +646,7 @@ async def test_work_prompt_includes_active_arcs_block(stack):
     )
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -679,7 +667,7 @@ async def test_work_prompt_annotates_resolved_arc_with_outcome(stack):
     )
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
@@ -707,8 +695,138 @@ async def test_work_prompt_includes_available_beat_ids_when_beats_exist(stack):
     )
     await proj.catch_up()
     runner = FakeRunner(KeeperOutput())
-    agent = CharacterKeeper(runner, read, committer)
+    agent = CharacterKeeper(runner, read, committer, events)
     ctx = await agent.poll()
     await agent.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert "Available beat ids for pivots: bp1-midpoint" in sent
+
+
+class SequenceRunner:
+    """Returns a distinct structured_response per call, in order."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def ainvoke(self, inputs):
+        self.calls.append(inputs)
+        idx = len(self.calls)
+        return {"structured_response": KeeperOutput(new_characters=[NewCharacter(name=f"Char{idx}")])}
+
+
+async def test_sweep_stamps_processed_and_drains_backlog(stack):
+    events, proj, read, committer = stack
+    # ~150 chars each -> ~38 tokens (CharHeuristicEstimator, chars/4); with a
+    # 100-token budget the first two chapters fit together (76) but the third
+    # would push spent to 114 > 100 and so waits for the next run.
+    prose = "word " * 30
+    for i in (1, 2, 3):
+        await events.append(EventType.CHAPTER_CREATED, f"ch{i}", Chapter(id=f"ch{i}", title=f"Ch{i}", prose=prose))
+    await proj.catch_up()
+    runner = FakeRunner(KeeperOutput())
+    agent = CharacterKeeper(runner, read, committer, events, extractor_token_budget=100)
+
+    await agent.run_once()
+    await proj.catch_up()
+    processed = await events.events_since(0, event_types=[EventType.CHAPTER_PROCESSED])
+    assert {e.payload["chapter_id"] for e in processed} == {"ch1", "ch2"}
+    assert len(runner.calls) == 1
+
+    await agent.run_once()
+    await proj.catch_up()
+    processed = await events.events_since(0, event_types=[EventType.CHAPTER_PROCESSED])
+    assert {e.payload["chapter_id"] for e in processed} == {"ch1", "ch2", "ch3"}
+    assert len(runner.calls) == 2
+
+    await agent.run_once()
+    await proj.catch_up()
+    processed = await events.events_since(0, event_types=[EventType.CHAPTER_PROCESSED])
+    assert {e.payload["chapter_id"] for e in processed} == {"ch1", "ch2", "ch3"}
+    assert len(runner.calls) == 2  # backlog drained: zero new LLM calls
+
+
+async def test_revised_chapter_is_reswept(stack):
+    from novelizer.canon.events import ChapterRevised
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose="text"))
+    await proj.catch_up()
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events)
+
+    await events.append(
+        EventType.CHAPTER_PROCESSED, "ch1", ChapterProcessed(agent="character_keeper", chapter_id="ch1"),
+    )
+    await proj.catch_up()
+    ctx = await agent.poll()
+    assert ctx["unmined"] == []
+
+    await events.append(
+        EventType.CHAPTER_REVISED, "ch1", ChapterRevised(chapter_id="ch1", prose="revised text"),
+    )
+    await proj.catch_up()
+    ctx = await agent.poll()
+    assert [c.id for c in ctx["unmined"]] == ["ch1"]
+
+
+async def test_oversize_chapter_windows_merge(stack):
+    events, proj, read, committer = stack
+    prose = "word " * 2000  # far beyond a 50-token budget: multiple windows
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+    runner = SequenceRunner()
+    agent = CharacterKeeper(runner, read, committer, events, extractor_token_budget=50)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    assert len(runner.calls) > 1  # sanity: the chapter really was windowed
+    chars = await read.list_characters()
+    assert {c.name for c in chars} == {f"Char{i}" for i in range(1, len(runner.calls) + 1)}
+    processed = await events.events_since(0, event_types=[EventType.CHAPTER_PROCESSED])
+    assert len(processed) == 1
+    assert processed[0].payload["chapter_id"] == "ch1"
+
+
+async def test_prompt_contains_full_prose_not_slice(stack):
+    events, proj, read, committer = stack
+    prose = "filler " * 2000 + "LATE_ARRIVAL_SENTINEL"
+    await events.append(EventType.CHAPTER_CREATED, "ch1", Chapter(id="ch1", title="One", prose=prose))
+    await proj.catch_up()
+
+    push_runner = FakeRunner(KeeperOutput())
+    push_agent = CharacterKeeper(push_runner, read, committer, events)
+    ctx = await push_agent.poll()
+    await push_agent.work(ctx)
+    sent = push_runner.calls[-1]["messages"][0]["content"]
+    assert "LATE_ARRIVAL_SENTINEL" in sent
+
+    pull_runner = FakeRunner(KeeperOutput())
+    pull_agent = CharacterKeeper(pull_runner, read, committer, events, pull_mode=True)
+    ctx = await pull_agent.poll()
+    await pull_agent.work(ctx)
+    sent = pull_runner.calls[-1]["messages"][0]["content"]
+    assert "LATE_ARRIVAL_SENTINEL" in sent
+    assert "Unread chapters (full prose — mine these now):" in sent
+
+
+async def test_readiness_stays_open_until_backlog_drained(stack):
+    """Regression: with an existing cast (the gated readiness path), the
+    watermark must not be recorded while budgeted backlog remains — the
+    scheduler otherwise never dispatches the rest of the sweep."""
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira", traits="stoic"))
+    prose = "word " * 30  # ~38 tokens; budget 100 fits two per run
+    for i in (1, 2, 3):
+        await events.append(EventType.CHAPTER_CREATED, f"ch{i}", Chapter(id=f"ch{i}", title=f"Ch{i}", prose=prose))
+    await proj.catch_up()
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events, extractor_token_budget=100)
+
+    await agent.run_once()
+    assert await agent.readiness() > 0.0  # ch3 still unmined: gate stays open
+
+    await agent.run_once()
+    assert await agent.readiness() == 0.0  # drained: watermark recorded
+
+    await events.append(EventType.CHAPTER_CREATED, "ch4", Chapter(id="ch4", title="Ch4", prose=prose))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0  # new prose reopens the gate

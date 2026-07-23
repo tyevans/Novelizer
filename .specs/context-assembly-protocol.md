@@ -1,6 +1,6 @@
 # Spec: Context-Assembly Protocol for Novelizer Agents
 
-**Status:** DRAFT — ready for review
+**Status:** SUPERSEDED — see context-assembly-v2.md (redesigned pull-mode-first from post-registry main, 2026-07-22)
 **Created:** 2026-07-19
 **Author:** Claude (user-initiated, /spec workflow)
 

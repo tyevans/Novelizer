@@ -35,6 +35,8 @@ _NEVER_GATED = {
     EventType.SECRET_REFERENCED,
     EventType.CAUSAL_EDGE_DECLARED,
     EventType.CHAPTER_MINED,
+    EventType.CHAPTER_PROCESSED,
+    EventType.CHAPTER_SUMMARIZED,
     EventType.THEME_INTRODUCED,
     EventType.THEME_DEVELOPED,
     # mechanical bookkeeping from a deterministic no-LLM agent, same class as chapter.mined

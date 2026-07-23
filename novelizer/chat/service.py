@@ -11,6 +11,7 @@ from novelizer.agents.intents import (
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
 from novelizer.brain.context import chapter_map_note
+from novelizer.brain.context_assembly import AdvisoryEntry, assemble_advisory
 from novelizer.telemetry.recorder import run_with_identity
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ class ChatService:
 
     def __init__(
         self, events, read, committer, runner_for: Callable, personality_for: Callable[[str], str],
-        pull_mode: bool = False, telemetry=None,
+        pull_mode: bool = False, telemetry=None, advisory_token_budget: int = 2000,
     ) -> None:
         self._events = events
         self._read = read
@@ -54,6 +55,7 @@ class ChatService:
         self._pending: dict[str, int] = {}
         self.pull_mode = pull_mode
         self._telemetry = telemetry
+        self.advisory_token_budget = advisory_token_budget
 
     def pending(self, agent_name: str) -> bool:
         return self._pending.get(agent_name, 0) > 0
@@ -124,9 +126,18 @@ class ChatService:
         ) or "None."
         tm = "\n".join(f"- {th.id}: {th.title}" for th in themes) or "None."
         if self.pull_mode:
-            chapters_block = f"Chapter index:\n{chapter_map_note(chapters)}"
+            summaries = await self._read.list_chapter_summaries()
+            gists = {s.chapter_id: s.gist for s in summaries if s.gist}
+            chapters_block = f"Chapter index:\n{chapter_map_note(chapters, gists=gists)}"
         else:
-            prev = "\n".join(f"- '{ch.title}': {ch.prose[:200]}" for ch in chapters[-3:]) or "None yet."
+            summaries = await self._read.list_chapter_summaries()
+            summaries_by_id = {s.chapter_id: s.summary for s in summaries}
+            window = chapters[-3:]
+            entries = [
+                AdvisoryEntry(label=f"'{ch.title}'", summary=summaries_by_id.get(ch.id), verbatim=ch.prose)
+                for ch in window
+            ]
+            prev = assemble_advisory(entries, self.advisory_token_budget) or "None yet."
             chapters_block = f"Recent chapters:\n{prev}"
         return (
             f"Story context.\nWorld lore:\n{w}\n\nCharacters:\n{c}\n\n{chapters_block}"

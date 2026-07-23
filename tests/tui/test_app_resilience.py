@@ -8,6 +8,7 @@ from novelizer.canon.events import EventType
 from novelizer.store.models import DirectorSignal, SignalKind
 from novelizer.agents.schemas import (
     WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments, StructureAnalystOutput,
+    SummarizerOutput,
 )
 
 
@@ -35,6 +36,7 @@ def _idle_room_runners():
         "continuity_checker": _Idle(ContinuityOutput()),
         "retconner": _Idle(RetconAmendments()),
         "structure_analyst": _Idle(StructureAnalystOutput()),
+        "summarizer": _Idle(SummarizerOutput(gist="g", summary="s")),
     }
 
 

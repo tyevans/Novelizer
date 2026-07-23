@@ -4,6 +4,7 @@ import aiosqlite
 from novelizer.canon import db
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, Flag, ThreadRecord, StructureScore,
+    ChapterSummary,
     SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
     InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
     BlueprintRecord, BeatRecord, ChapterBriefRecord, ArcRecord,
@@ -189,6 +190,15 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM structure_scores WHERE id=?", (chapter_id,))
         row = await cur.fetchone()
         return StructureScore.model_validate_json(row[0]) if row else None
+
+    async def list_chapter_summaries(self) -> list[ChapterSummary]:
+        cur = await self._conn.execute("SELECT data FROM chapter_summaries ORDER BY rowid")
+        return [ChapterSummary.model_validate_json(r[0]) for r in await cur.fetchall()]
+
+    async def get_chapter_summary(self, chapter_id: str) -> Optional[ChapterSummary]:
+        cur = await self._conn.execute("SELECT data FROM chapter_summaries WHERE id=?", (chapter_id,))
+        row = await cur.fetchone()
+        return ChapterSummary.model_validate_json(row[0]) if row else None
 
     async def list_secrets(self) -> list[SecretRecord]:
         cur = await self._conn.execute("SELECT data FROM secrets ORDER BY rowid")

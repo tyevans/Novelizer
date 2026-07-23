@@ -5,6 +5,12 @@ from novelizer.director.commands import dispatch
 from novelizer.runtime import Runtime
 from novelizer.settings import EffectiveSettings
 from novelizer.store.models import HandStatus
+from novelizer.agents.schemas import SummarizerOutput
+
+
+class _R:
+    async def ainvoke(self, inputs):
+        return {"structured_response": SummarizerOutput(gist="g", summary="s")}
 
 
 @pytest.fixture
@@ -12,7 +18,7 @@ async def runtime():
     tmp = tempfile.mkdtemp()
     settings = EffectiveSettings(db_path=os.path.join(tmp, "world.db"),
                                  chroma_path=os.path.join(tmp, "chroma"))
-    rt = Runtime(settings, runners={})
+    rt = Runtime(settings, runners={"summarizer": _R()})
     await rt.start()
     yield rt
     await rt.close()

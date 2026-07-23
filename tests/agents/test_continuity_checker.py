@@ -1059,6 +1059,39 @@ async def test_checker_pull_mode_true_replaces_excerpts_with_chapter_map(stack):
     assert "secret prose text" not in sent
 
 
+async def test_checker_push_mode_recap_uses_summary_when_available(stack):
+    from novelizer.canon.events import ChapterSummarized
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await events.append(
+        EventType.CHAPTER_SUMMARIZED, "c1",
+        ChapterSummarized(chapter_id="c1", gist="ch1 gist", summary="A concise recap of chapter one."),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "A concise recap of chapter one." in sent
+    assert "x" * 200 not in sent
+
+
+async def test_checker_push_mode_recap_labels_missing_summary(stack):
+    from novelizer.brain.context_assembly import ELISION_MARKER
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="x" * 20000))
+    await proj.catch_up()
+    runner = FakeRunner(ContinuityOutput())
+    agent = ContinuityChecker(runner, FakeRunner(MinedFactsOutput()), read, committer, events, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert ELISION_MARKER in sent
+
+
 async def test_checker_pull_mode_false_keeps_world_bodies_and_traits(stack):
     events, proj, read, committer = stack
     await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Suns", body="SECRET WORLD BODY"))
@@ -1177,3 +1210,24 @@ def test_build_continuity_mining_runner_construction_unchanged():
 def test_spec_carries_subagent_grant():
     from novelizer.agents.continuity_checker import SPEC
     assert SPEC.subagent_grant.enabled_setting == "checker_subagent_enabled"
+
+
+async def test_revised_chapter_is_remined(stack):
+    """chapter.revised after chapter.mined puts the chapter back in the
+    to-mine list (v1 gap: revised chapters were never re-mined)."""
+    from novelizer.canon.events import ChapterMined, ChapterRevised
+
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await events.append(EventType.CHAPTER_MINED, "c1", ChapterMined(chapter_id="c1"))
+    await proj.catch_up()
+
+    agent = ContinuityChecker(FakeRunner(ContinuityOutput()), FakeRunner(MinedFactsOutput()), read, committer, events)
+    ctx = await agent.poll()
+    assert "c1" not in [c.id for c in ctx["mined_chapters"]]
+
+    await events.append(EventType.CHAPTER_REVISED, "c1", ChapterRevised(chapter_id="c1", prose="new"))
+    await proj.catch_up()
+
+    ctx = await agent.poll()
+    assert "c1" in [c.id for c in ctx["mined_chapters"]]
