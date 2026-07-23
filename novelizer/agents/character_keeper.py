@@ -357,9 +357,12 @@ class CharacterKeeper(BaseAgent):
         # The chapter components (count, latest id) are purely external — the
         # Keeper never writes chapters. If they moved mid-run, this run's
         # analysis did not cover the new prose: leave the watermark clear so
-        # the next tick re-dispatches. Own retcon filings land in fp_now and
-        # are absorbed.
-        if fp_now[:2] == fp_seen[:2]:
+        # the next tick re-dispatches. unmined > 0 at record time means the
+        # budgeted sweep has backlog left (or a failed pass must retry) — the
+        # gate must stay open until the drain finishes, same contract as the
+        # miner's fp_now[2] check. Own retcon filings land in fp_now and are
+        # absorbed.
+        if fp_now[3] == 0 and fp_now[:2] == fp_seen[:2]:
             self._last_fingerprint = fp_now
         else:
             self._clear_watermark()

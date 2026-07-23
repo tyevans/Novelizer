@@ -6,12 +6,12 @@ from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.agents.schemas import (
     WorldEntriesDraft, WorldEntryDraft, KeeperOutput, EditorVerdict,
-    ContinuityOutput, RetconAmendments, StructureAnalystOutput,
+    ContinuityOutput, RetconAmendments, StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
 
 _AGENTS = ["world_architect", "character_keeper", "author", "editor",
-           "continuity_checker", "retconner", "structure_analyst"]
+           "continuity_checker", "retconner", "structure_analyst", "summarizer"]
 
 
 class _R:
@@ -28,6 +28,7 @@ def _runners():
         "continuity_checker": _R(ContinuityOutput()),
         "retconner": _R(RetconAmendments()),
         "structure_analyst": _R(StructureAnalystOutput()),
+        "summarizer": _R(SummarizerOutput(gist="g", summary="s")),
     }
 
 

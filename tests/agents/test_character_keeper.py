@@ -807,3 +807,26 @@ async def test_prompt_contains_full_prose_not_slice(stack):
     sent = pull_runner.calls[-1]["messages"][0]["content"]
     assert "LATE_ARRIVAL_SENTINEL" in sent
     assert "Unread chapters (full prose — mine these now):" in sent
+
+
+async def test_readiness_stays_open_until_backlog_drained(stack):
+    """Regression: with an existing cast (the gated readiness path), the
+    watermark must not be recorded while budgeted backlog remains — the
+    scheduler otherwise never dispatches the rest of the sweep."""
+    events, proj, read, committer = stack
+    await events.append(EventType.CHARACTER_CREATED, "c1", Character(id="c1", name="Mira", traits="stoic"))
+    prose = "word " * 30  # ~38 tokens; budget 100 fits two per run
+    for i in (1, 2, 3):
+        await events.append(EventType.CHAPTER_CREATED, f"ch{i}", Chapter(id=f"ch{i}", title=f"Ch{i}", prose=prose))
+    await proj.catch_up()
+    agent = CharacterKeeper(FakeRunner(KeeperOutput()), read, committer, events, extractor_token_budget=100)
+
+    await agent.run_once()
+    assert await agent.readiness() > 0.0  # ch3 still unmined: gate stays open
+
+    await agent.run_once()
+    assert await agent.readiness() == 0.0  # drained: watermark recorded
+
+    await events.append(EventType.CHAPTER_CREATED, "ch4", Chapter(id="ch4", title="Ch4", prose=prose))
+    await proj.catch_up()
+    assert await agent.readiness() > 0.0  # new prose reopens the gate

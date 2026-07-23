@@ -78,3 +78,62 @@ async def test_revision_triggers_resummarize():
         await read.close(); await proj.close(); await events.close()
     finally:
         os.unlink(path)
+
+
+class NoneRunner:
+    """Simulates a malformed structured response every call."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def ainvoke(self, inputs):
+        self.calls += 1
+        return {"structured_response": None}
+
+
+@pytest.mark.asyncio
+async def test_failed_summarize_keeps_readiness_open():
+    """Regression: a failed call must leave the watermark clear so the
+    chapter actually retries next poll under the scheduler."""
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        events, proj, read = await _stores(path)
+        await events.append(EventType.CHAPTER_CREATED, "c1",
+                            Chapter(id="c1", title="Ch 1", prose="some prose"))
+        await proj.catch_up()
+        agent = Summarizer(NoneRunner(), read, Committer(events), events)
+        await agent.run_once()
+        assert await agent.readiness() > 0.0  # gate stays open for the retry
+        log = await events.events_since(0, event_types=[EventType.CHAPTER_SUMMARIZED])
+        assert log == []
+        agent._runner = CountingRunner()
+        await agent.run_once()
+        assert await agent.readiness() == 0.0  # summarized: watermark recorded
+        await read.close(); await proj.close(); await events.close()
+    finally:
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_empty_summary_is_treated_as_failure():
+    """An empty summary must not be committed as canon (it would displace the
+    verbatim fallback at every advisory site)."""
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        events, proj, read = await _stores(path)
+        await events.append(EventType.CHAPTER_CREATED, "c1",
+                            Chapter(id="c1", title="Ch 1", prose="some prose"))
+        await proj.catch_up()
+
+        class EmptyRunner:
+            async def ainvoke(self, inputs):
+                return {"structured_response": SummarizerOutput(gist="g", summary="  ")}
+
+        agent = Summarizer(EmptyRunner(), read, Committer(events), events)
+        await agent.run_once()
+        log = await events.events_since(0, event_types=[EventType.CHAPTER_SUMMARIZED])
+        assert log == []
+        assert await agent.readiness() > 0.0
+        await read.close(); await proj.close(); await events.close()
+    finally:
+        os.unlink(path)

@@ -69,7 +69,10 @@ def assemble_advisory(
     remaining = budget_tokens
     omitted = 0
     for entry in reversed(entries):  # newest first
-        if entry.summary is not None:
+        # Falsy (empty) summaries count as absent: an empty string must never
+        # displace the labeled verbatim fallback — that would be a new silent
+        # truncation path.
+        if entry.summary:
             line = f"- {entry.label}: {entry.summary}"
         elif entry.verbatim is not None:
             head_chars = max(0, int(remaining * len(entry.verbatim) /

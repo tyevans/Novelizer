@@ -87,3 +87,17 @@ def test_advisory_never_silent(items, budget):
     present = sum(1 for i in range(len(entries)) if f"Ch {i}" in out)
     if present < len(entries):
         assert "omitted]" in out
+
+
+def test_advisory_empty_summary_falls_back_to_labeled_verbatim():
+    """An empty-string summary must not displace the verbatim fallback —
+    that would be a new silent-truncation path."""
+    out = assemble_advisory(
+        [AdvisoryEntry(label="Ch One", summary="", verbatim="x" * 4000)], budget_tokens=50,
+    )
+    assert ELISION_MARKER in out and "x" in out
+
+
+def test_advisory_entry_with_no_content_is_still_named():
+    out = assemble_advisory([AdvisoryEntry(label="Ch One")], budget_tokens=50)
+    assert "Ch One" in out and "(no content)" in out

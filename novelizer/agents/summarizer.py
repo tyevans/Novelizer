@@ -98,6 +98,12 @@ class Summarizer(BaseAgent):
             logger.warning("%s: no usable structured response (%r); will retry next poll",
                            self.name, type(out).__name__)
             return None
+        if not out.summary.strip():
+            # An empty summary committed as canon would silently displace the
+            # chapter's verbatim fallback at every advisory site — treat it as
+            # a failed call so the chapter stays unstamped and retries.
+            logger.warning("%s: empty summary returned; will retry next poll", self.name)
+            return None
         return out
 
     async def commit(self, results: dict[str, SummarizerOutput], ctx: dict) -> None:
@@ -108,13 +114,23 @@ class Summarizer(BaseAgent):
             )
 
     async def _run(self) -> None:
+        fp_seen = await self._fingerprint()
         ctx = await self.poll()
         if not ctx["pending"]:
             self.note_pass()
             return
         results = await self.work(ctx)
         await self.commit(results, ctx)
-        await self._record_watermark()
+        fp_now = await self._fingerprint()
+        # pending > 0 at record time means a summarize call failed (its "will
+        # retry next poll" contract requires the gate stay open); moved chapter
+        # components mean prose arrived mid-run. Either way leave the watermark
+        # clear — same contract as the miner's fp_now[2] check. Own
+        # chapter.summarized commits are absorbed via fp_now otherwise.
+        if fp_now[2] == 0 and fp_now[:2] == fp_seen[:2]:
+            self._last_fingerprint = fp_now
+        else:
+            self._clear_watermark()
 
 
 def build_summarizer_runner(settings, callbacks=None):
