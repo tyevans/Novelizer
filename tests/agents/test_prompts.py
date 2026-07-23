@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from novelizer.agents.prompts import (
+    OUTPUT_CONVENTIONS_NOTE,
     PASS_PROMPT_INSTRUCTION,
     RETRIEVAL_NOTE,
     RETRIEVAL_NOTE_BASE,
@@ -99,6 +100,21 @@ class TestPassInstruction:
     def test_keeps_the_no_action_contract_the_agents_commit_on(self):
         assert "leave every list empty" in PASS_PROMPT_INSTRUCTION
         assert "feed_note" in PASS_PROMPT_INSTRUCTION
+
+
+class TestOutputConventionsNote:
+    def test_is_a_self_contained_section(self):
+        """Appended after other notes, so it must open its own heading."""
+        assert OUTPUT_CONVENTIONS_NOTE.startswith("\n\n## Output contract\n")
+
+    def test_points_at_the_pack_file(self):
+        """The pointer must name the exact readable path, not just the pack."""
+        assert "/skills/output-conventions/SKILL.md" in OUTPUT_CONVENTIONS_NOTE
+
+    def test_carries_the_inline_summary(self):
+        """Useful even when the agent never reads the file."""
+        assert "one short line" in OUTPUT_CONVENTIONS_NOTE
+        assert "markup" in OUTPUT_CONVENTIONS_NOTE
 
 
 class TestBackCompatReExports:

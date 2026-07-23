@@ -48,6 +48,18 @@ RETRIEVAL_NOTE_BASE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_SUFFIX
 
 RETRIEVAL_NOTE = _RETRIEVAL_NOTE_PREFIX + _RETRIEVAL_NOTE_MAP_SENTENCE + _RETRIEVAL_NOTE_SUFFIX
 
+# Appended in every tooled builder's backend branch (same seam as the
+# retrieval notes). The last sentence is a deliberate inline summary: the
+# note must do some good even when the agent never opens the file.
+OUTPUT_CONVENTIONS_NOTE = (
+    "\n\n## Output contract\n"
+    "Your structured output has a field-by-field contract: read "
+    "/skills/output-conventions/SKILL.md before your first emit if you are unsure "
+    "what belongs in which field. The short version: titles and names are one "
+    "short line; bodies go in prose/body fields and nowhere else; never invent "
+    "markup tags inside a field; cite only ids you actually saw."
+)
+
 DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."
 
 # Three-way rather than act/skip: the middle branch ("confirm first") is where
