@@ -1,54 +1,28 @@
 from __future__ import annotations
 from pydantic import BaseModel
 
+from agent_kit import (
+    AgentRunFailed,
+    AgentRunFinished,
+    AgentRunStarted,
+    SchedulerEligibilityChanged,
+    SchedulerPicked,
+    TelemetryEventType as _MachineryEventType,
+)
 
-class TelemetryEventType:
+class TelemetryEventType(_MachineryEventType):
     """Machinery event vocabulary. Persisted to telemetry.db (a separate
-    EventStore), never to the domain log."""
+    EventStore), never to the domain log. The five loop/scheduler constants
+    come from agent_kit (same strings, shared with every kit consumer); the
+    LLM/tool-call vocabulary below is recorder-side and stays here until the
+    recorder extraction campaign."""
 
-    SCHEDULER_PICKED = "scheduler.picked"
-    SCHEDULER_ELIGIBILITY_CHANGED = "scheduler.eligibility_changed"
-    AGENT_RUN_STARTED = "agent.run_started"
-    AGENT_RUN_FINISHED = "agent.run_finished"
-    AGENT_RUN_FAILED = "agent.run_failed"
     LLM_CALL_STARTED = "llm.call_started"
     LLM_CALL_FINISHED = "llm.call_finished"
     LLM_CALL_FAILED = "llm.call_failed"
     TOOL_CALL_STARTED = "tool.call_started"
     TOOL_CALL_FINISHED = "tool.call_finished"
     TOOL_CALL_FAILED = "tool.call_failed"
-
-
-class SchedulerPicked(BaseModel):
-    agent_name: str
-
-
-class SchedulerEligibilityChanged(BaseModel):
-    """Emitted on change of an agent's (eligible, reason) pair — never per tick."""
-
-    agent_name: str
-    eligible: bool
-    reason: str  # "paused" | "interval not elapsed" | "readiness 0" | "ready"
-
-
-class AgentRunStarted(BaseModel):
-    run_id: str
-    agent_name: str
-
-
-class AgentRunFinished(BaseModel):
-    run_id: str
-    agent_name: str
-    duration_s: float
-
-
-class AgentRunFailed(BaseModel):
-    run_id: str
-    agent_name: str
-    error_type: str
-    error_message: str
-    phase: str  # "llm_call" if the crash happened inside an open LLM call, else "agent"
-    duration_s: float
 
 
 class LlmCallStarted(BaseModel):
