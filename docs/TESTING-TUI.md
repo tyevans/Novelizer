@@ -71,7 +71,21 @@ both now fixed — keep them fixed:
   Measured: substrate+research_domain scope 142s → 14s. New postgres tests
   should just take `postgres_dsn` as before; per-database isolation is
   equivalent to the old per-container isolation (extensions like pgvector are
-  per-database and were always created by the code under test).
+  per-database and were always created by the code under test). For how to
+  consume `postgres_dsn`/`pg_container` from a new domain's tests, see
+  [substrate/README.md#testing-your-domain](../substrate/README.md#testing-your-domain);
+  this section is just the internals.
+
+  One readiness detail to leave alone: the container is polled with the
+  `_psql` helper in `tests/substrate/postgres_fixture.py`, which runs
+  `psql -h 127.0.0.1 ... SELECT 1` inside the container — and the
+  `-h 127.0.0.1` is load-bearing. The pgvector image's init sequence brings up
+  a *temporary* postgres that listens on the unix socket only, runs its init
+  scripts, then restarts as the real server that listens on TCP. Socket-based
+  `pg_isready` reports ready during that init window, before anything accepts
+  TCP connections, so a `-h 127.0.0.1 ... SELECT 1` is the only probe that
+  proves readiness the way tests actually connect (via the mapped TCP port).
+  Don't "simplify" the helper back to `pg_isready` — startup goes flaky.
 
 ## Running the FULL suite (read this before you background it)
 

@@ -12,18 +12,27 @@ For the CLI built on top of it, see `docs/reference/research-domain-cli.md`;
 for why the boundary between `substrate` and its domains is drawn the way it
 is, see `docs/explanation/architecture-boundaries.md`.
 
-## Primitives (stays)
+## Primitives
 
-- `EventTypeRegistry` (`substrate/event_registry.py`) -- the append-only
-  catalog of event types a domain is allowed to write, with tier ordering
-  and `is_gated` metadata for autonomy checks.
+- `EventTypeRegistry` (`substrate/event_registry.py`) -- the catalog of
+  event types a domain is allowed to write; `register()` refuses
+  duplicates, so a name maps to exactly one `EventTypeSpec`. Each spec
+  carries `gating_tier` (`always` / `never` / `tiered`) and, for tiered
+  specs, a `tier_level`. The autonomy check itself is the `is_gated()`
+  function (`substrate/policy.py`), which reads a spec from the registry
+  and evaluates it against a domain-supplied tier order.
 - `PostgresEventStore` (`substrate/postgres/events.py`) -- durable event
-  storage: `connect()`/`close()` manage the pool, `append()` writes one
-  event to a named stream, `read_stream()` replays a stream in order.
+  storage over one asyncpg connection: `connect()` opens it and installs
+  the `substrate_events` schema (append-only, enforced by DB triggers that
+  reject `UPDATE`/`DELETE`); `append()` writes one event to a named stream
+  (optional `parent_ids` and `actor`) and returns its `seq`; `read_stream()`
+  replays a stream in `seq` order; `close()` releases the connection.
 - `ProjectionCatalog` / `ProjectionSpec` (`substrate/projection.py`) --
   named read models. `register()` adds a spec (`invalidation_key` +
-  `recompute`); `invalidate()` marks a key dirty from a source event;
-  `recompute_dirty()` awaits/recomputes every dirty key and clears them.
+  `recompute`, where `recompute` may be a plain function or `async def`);
+  `invalidate()` marks a key dirty from a source event;
+  `recompute_dirty()` awaits/recomputes every dirty key, clears them, and
+  returns the `{key: result}` mapping.
 - `RuntimeBase` (`substrate/runtime.py`) -- the storage-agnostic lifecycle
   that wires the two together for a domain: `connect()`/`close()` proxy the
   underlying `PostgresEventStore`; `register_projection(catalog,
@@ -37,25 +46,25 @@ is, see `docs/explanation/architecture-boundaries.md`.
 
 ## Building a new domain
 
-Steps 1-3 are unchanged from the pre-`RuntimeBase` design; steps 4-5 replace
-whatever ad hoc wiring a domain used to hand-roll. `research_domain/` is the
-worked example -- read `research_domain/event_types.py`,
-`research_domain/projections.py`, and `research_domain/runtime.py` alongside
-these steps. For the CLI built on that runtime, see
-`docs/reference/research-domain-cli.md`; for the design rationale behind the
-`substrate`/domain boundary, see `docs/explanation/architecture-boundaries.md`.
+`research_domain/` is the worked example -- read
+`research_domain/event_types.py`, `research_domain/projections.py`, and
+`research_domain/runtime.py` alongside these steps. For the CLI built on
+that runtime, see `docs/reference/research-domain-cli.md`; for the design
+rationale behind the `substrate`/domain boundary, see
+`docs/explanation/architecture-boundaries.md`.
 
 1. **Define your event types and a registry builder.** Build an
    `EventTypeRegistry` (`substrate/event_registry.py`) and register one
    `EventTypeSpec` per event type your domain writes, e.g.
    `research_domain/event_types.py::build_research_registry()`.
 
-2. **Pick a tier order and set `is_gated`/`gating_tier` per event type.**
+2. **Pick a tier order and set `gating_tier`/`tier_level` per event type.**
    Each `EventTypeSpec` declares `gating_tier` (`always` / `never` /
    `tiered`) and, for `tiered` specs, a `tier_level` drawn from your
    domain's own ordered tier list (e.g. `RESEARCH_TIER_ORDER = ["auto",
-   "reviewed"]`). This is what the autonomy dial checks before letting an
-   event through unattended.
+   "reviewed"]`). At decision time, call `is_gated(event_name, registry,
+   tier_order, current_tier_index)` (`substrate/policy.py`) -- this is what
+   the autonomy dial checks before letting an event through unattended.
 
 3. **Register projections on a `ProjectionCatalog`.** For each read model,
    write a `build_*_catalog()` function that constructs a `ProjectionCatalog`
@@ -82,9 +91,48 @@ these steps. For the CLI built on that runtime, see
    `ResearchRuntime.append_event()` does (`append()` then `catch_up()`).
    Call `get_projection(projection_name)` to read the last-computed result
    for a projection. Call `close()` at shutdown to release the underlying
-   connection pool.
+   database connection.
 
-## Import rule (stays, unchanged)
+## Testing your domain
+
+For any test that hits real postgres, take the `postgres_dsn` fixture from
+`tests/substrate/postgres_fixture.py` -- the way every test in
+`tests/substrate/test_postgres_events.py` does:
+
+```python
+from tests.substrate.postgres_fixture import postgres_dsn
+
+async def test_my_domain_appends(postgres_dsn):
+    store = PostgresEventStore(postgres_dsn)
+    ...
+```
+
+What the fixture gives you: a DSN pointing at a fresh, throwaway
+`CREATE DATABASE` inside a single session-scoped pgvector container
+(`pg_container`, one `pgvector/pgvector:pg16` per test session). Per-database
+isolation is equivalent to the old container-per-test isolation -- extensions
+like pgvector are per-database and are created by the code under test -- but
+costs ~100ms per test instead of ~4s of `docker run` setup plus up to 10s of
+`docker stop` teardown. The database is dropped after each test with
+`DROP DATABASE ... WITH (FORCE)`, so even a pool your test failed to close
+gets kicked.
+
+You can do this from any test directory (a new domain's `tests/<domain>/`
+included): test modules import `postgres_dsn` directly, and the root
+`tests/conftest.py` re-exports `pg_container` so the session-scoped container
+dependency resolves for `tests/substrate` and `tests/research_domain` alike.
+No per-directory conftest wiring is needed -- just the one import above.
+
+When docker is not available (no `docker` binary, or `docker info` fails),
+the fixture skips your test rather than erroring, so postgres tests degrade
+gracefully on machines without docker.
+
+For the measured speed findings behind this design, the TCP-readiness pitfall
+in the container probe (don't "simplify" it back to `pg_isready`), and why
+you should never fix a slow property test by cutting `max_examples`, see
+"Why the suite is as fast as it is" in `docs/TESTING-TUI.md`.
+
+## Import rule
 
 Import everything from the top-level `substrate` package, not from its
 submodules -- `substrate/__init__.py` re-exports the full public surface,
