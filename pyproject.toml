@@ -35,6 +35,7 @@ novelizer = "novelizer.director.cli:main"
 [dependency-groups]
 dev = [
     "hypothesis>=6.156.6",
+    "import-linter>=2.13",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
 ]
@@ -44,4 +45,20 @@ asyncio_mode = "auto"
 addopts = "-m 'not live_llm'"
 markers = [
     "live_llm: requires a running OpenAI-compatible LLM endpoint (see Settings.llm_base_url)",
+]
+
+[tool.importlinter]
+root_packages = ["substrate", "novelizer", "research_domain"]
+
+[[tool.importlinter.contracts]]
+name = "substrate package boundary"
+type = "forbidden"
+source_modules = ["novelizer", "research_domain"]
+allow_indirect_imports = "true"
+forbidden_modules = [
+    "substrate.agent_registry",
+    "substrate.event_registry",
+    "substrate.policy",
+    "substrate.postgres",
+    "substrate.projection",
 ]
