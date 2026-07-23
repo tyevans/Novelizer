@@ -15,10 +15,10 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
-from deepagents.backends.utils import create_file_data, slice_read_response
 from wcmatch import glob as wcglob
 
 from novelizer.canon_fs.backend import READ_ONLY_ERROR
+from novelizer.canon_fs.reads import sliced_read
 from novelizer.canon_fs.outline_render import (
     render_beats, render_blueprint, render_brief, render_ledger,
     render_threads_plan,
@@ -123,11 +123,7 @@ class OutlineBackend(BackendProtocol):
             return ReadResult(
                 error=f"File '{file_path}' not found. Hint: ls the parent directory."
             )
-        file_data = create_file_data(content)
-        sliced = slice_read_response(file_data, offset, limit)
-        if isinstance(sliced, ReadResult):
-            return sliced
-        return ReadResult(file_data=create_file_data(sliced))
+        return sliced_read(content, offset=offset, limit=limit)
 
     async def als(self, path: str) -> LsResult:
         snap = await self._snapshot()
