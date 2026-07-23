@@ -39,6 +39,31 @@ async def test_skills_read_returns_frontmatter(stack):
     assert "name: outlining" in result.file_data["content"]
 
 
+async def test_skills_short_window_announces_the_rest_of_the_doc(stack):
+    """The longest shipped SKILL.md sits just under read_file's 100-line
+    default; the next paragraph added to it must not vanish silently."""
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    window = await composite.aread("/skills/outlining/SKILL.md", offset=0, limit=10)
+    content = window.file_data["content"]
+    assert "TRUNCATED" in content
+    assert "you were shown lines 1-10 of" in content
+    assert "offset=10, limit=2000" in content
+    # No path is quoted: the composite strips the /skills/ prefix before this
+    # backend ever sees it, so any path it echoed would be one the agent
+    # cannot call back with.
+    assert "/outlining/SKILL.md" not in content
+
+
+async def test_skills_full_read_is_untouched(stack):
+    _events, proj, read = stack
+    await proj.catch_up()
+    composite = build_composite(read)
+    result = await composite.aread("/skills/outlining/SKILL.md")
+    assert "TRUNCATED" not in result.file_data["content"]
+
+
 async def test_skills_ls_lists_all_packs(stack):
     _events, proj, read = stack
     await proj.catch_up()

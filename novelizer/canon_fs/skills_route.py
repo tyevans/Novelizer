@@ -15,7 +15,14 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 
+from deepagents.backends.utils import file_data_to_string
+
 from novelizer.canon_fs.backend import READ_ONLY_ERROR
+from novelizer.canon_fs.reads import sliced_read
+
+# A line budget no shipped skill doc will ever reach: `aread` asks the inner
+# backend for the file whole, then slices it here.
+_WHOLE_FILE = 1_000_000
 
 # Names that must never surface in an agent-visible `/skills/` listing:
 # packaging artifacts (`__init__.py` makes the directory an importable
@@ -117,7 +124,20 @@ class ReadOnlyBackend(BackendProtocol):
         return _filter_hidden_entries(result)
 
     async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return await self._inner.aread(file_path, offset, limit)
+        # Fetch whole, then slice here, so a short window can name the lines
+        # it withheld the way the canon backends do -- `FilesystemBackend`
+        # slices on disk and never reports the file's true length. Skill docs
+        # are small (the longest ships at 96 lines, four short of read_file's
+        # 100-line default), so the whole-file fetch is free.
+        whole = await self._inner.aread(file_path, 0, _WHOLE_FILE)
+        if whole.error or whole.file_data is None:
+            return whole
+        if whole.file_data.get("encoding") == "base64":
+            return await self._inner.aread(file_path, offset, limit)
+        return sliced_read(
+            file_data_to_string(whole.file_data),
+            offset=offset, limit=limit,
+        )
 
     async def agrep(self, pattern: str, path: str | None = None, glob: str | None = None) -> GrepResult:
         return await self._inner.agrep(pattern, path, glob)

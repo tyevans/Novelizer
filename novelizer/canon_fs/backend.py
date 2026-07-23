@@ -15,10 +15,10 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
-from deepagents.backends.utils import create_file_data, slice_read_response
 from wcmatch import glob as wcglob
 
 from novelizer.canon_fs.paths import build_path_index
+from novelizer.canon_fs.reads import sliced_read
 from novelizer.canon_fs.render import (
     render_chapter, render_character, render_secret, render_theme,
     render_thread, render_world_entry,
@@ -134,11 +134,10 @@ class CanonBackend(BackendProtocol):
                 error=f"File '{file_path}' not found. Hint: ls the parent directory."
             )
         kind, record_id = entry
-        file_data = create_file_data(self._render(snap, kind, record_id))
-        sliced = slice_read_response(file_data, offset, limit)
-        if isinstance(sliced, ReadResult):
-            return sliced
-        return ReadResult(file_data=create_file_data(sliced))
+        return sliced_read(
+            self._render(snap, kind, record_id),
+            offset=offset, limit=limit,
+        )
 
     async def als(self, path: str) -> LsResult:
         snap = await self._snapshot()

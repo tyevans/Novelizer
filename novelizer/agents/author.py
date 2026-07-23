@@ -33,9 +33,10 @@ ground truth. The summary in your task message is a POINTER to them, not the sou
 not write from the summary alone.
 Begin every pass by calling `write_todos` with a short plan, e.g. "read end of last
 chapter -> check stale threads/secrets -> draft -> set intents". Then:
-- `read_file` the most recent chapter IN FULL. You are continuing from its final moment,
-  not from a gist — match its place, time and cast, and pick up the business it left
-  unfinished.
+- `read_file` the most recent chapter IN FULL — pass `limit=2000`, or you get only its
+  first 100 lines and the scene you are continuing from is the one you never saw. You are
+  continuing from its final moment, not from a gist — match its place, time and cast, and
+  pick up the business it left unfinished.
 - `grep` or `search_canon` for anything the task notes flag (a stale thread's id, a
   secret and who holds it, a character you'll feature) and read the relevant span before
   you rely on it.

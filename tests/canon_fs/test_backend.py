@@ -119,7 +119,35 @@ async def test_aread_offset_limit_slices_lines(stack):
     full = await backend.aread("/chapters/001-the-drowned-bell.md")
     all_lines = full.file_data["content"].splitlines()
     window = await backend.aread("/chapters/001-the-drowned-bell.md", offset=2, limit=3)
-    assert window.file_data["content"].splitlines() == all_lines[2:5]
+    window_lines = window.file_data["content"].splitlines()
+    assert window_lines[:3] == all_lines[2:5]
+    # A short window ends in the notice naming what it withheld, so the agent
+    # cannot read a partial chapter as a whole one.
+    assert f"lines 3-5 of {len(all_lines)}" in window_lines[-1]
+
+
+async def test_chapter_longer_than_the_read_file_default_says_so(stack):
+    """Regression: four of the five chapters in the first full novel run were
+    longer than read_file's 100-line default, and the Author is told to read
+    the previous chapter IN FULL. The window has to announce itself."""
+    from deepagents.middleware.filesystem import DEFAULT_READ_LIMIT
+
+    events, proj, read = stack
+    await seed_canon(events, proj)
+    long_chapter = Chapter(id="ch2", title="The Long Night",
+                           prose="\n".join(f"Paragraph {i}." for i in range(1, 301)))
+    await events.append(EventType.CHAPTER_CREATED, long_chapter.id, long_chapter)
+    await proj.catch_up()
+    backend = CanonBackend(read)
+
+    window = await backend.aread("/chapters/002-the-long-night.md",
+                                 limit=DEFAULT_READ_LIMIT)
+    content = window.file_data["content"]
+    assert "TRUNCATED" in content
+    assert "offset=100, limit=2000" in content
+    # Frontmatter and title eat into the window: the prose stops well short
+    # of paragraph 300, which is exactly what the agent cannot otherwise see.
+    assert "Paragraph 90." in content and "Paragraph 150." not in content
 
 
 async def test_als_root_lists_kind_directories(stack):
