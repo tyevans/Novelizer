@@ -521,7 +521,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
     from deepagents import create_deep_agent
     from novelizer.agents.author import RETRIEVAL_NOTE
     from novelizer.agents.llm import build_chat_model
-    from novelizer.agents.middleware import ExcludeToolsMiddleware
+    from agent_kit import ExcludeToolsMiddleware
     # See build_author_runner: tool executions run under invoke-time graph
     # config, not constructor callbacks on the model, so telemetry callbacks
     # are bound graph-scope via with_config below.

@@ -1,4 +1,5 @@
-from novelizer.agents.middleware import ExcludeToolsMiddleware, TodoContextMiddleware
+from agent_kit import ExcludeToolsMiddleware
+from novelizer.agents.middleware import TodoContextMiddleware
 
 
 class FakeTool:
