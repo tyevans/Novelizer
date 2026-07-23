@@ -383,3 +383,23 @@ async def test_seeded_trace_survives_restart(rt):
         table = app.query_one("#er_trace", DataTable)
         rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
         assert any("run started" in r for r in rows)
+
+
+async def test_seeded_live_pane_survives_restart(rt):
+    """A restart mid-run must seed the Engine Room's live "All" pane, not
+    just the trace table -- seeding must adapt raw StoredEvents through
+    to_contract_event before feeding seed_state/seed_states."""
+    from novelizer.telemetry.events import LlmCallStarted
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                            LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                           model="qwen", prompt="[system]\nWrite the chapter."))
+    # A fresh app instance (a "restart") must show the seeded live state.
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "author" in vitals

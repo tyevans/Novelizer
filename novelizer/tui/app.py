@@ -328,8 +328,10 @@ class NovelizerApp(App):
         try:
             recent = await self.runtime.telemetry_store.events_tail(200)
             self._trace_events.extend(recent)
-            self._live_state = seed_state(recent[-50:], time.monotonic())
-            self._agent_live_states = seed_states(recent[-50:], time.monotonic())
+            now = time.monotonic()
+            contract_recent = [c for c in (to_contract_event(e) for e in recent[-50:]) if c is not None]
+            self._live_state = seed_state(contract_recent, now)
+            self._agent_live_states = seed_states(contract_recent, now)
             self._refresh_strip()
             engine_room = self.query_one("#engine_room", EngineRoom)
             engine_room.render_live(self._live_state)
