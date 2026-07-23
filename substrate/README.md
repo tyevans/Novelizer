@@ -6,61 +6,102 @@ domains: fiction (`novelizer/`) and a synthetic research domain
 `docs/superpowers/specs/2026-07-20-cross-domain-substrate-design.md` for the
 generalization history.
 
-## Primitives
+`research_domain/` is the worked example for everything on this page -- it
+exercises every primitive and the runtime-construction pattern end to end.
+For the CLI built on top of it, see `docs/reference/research-domain-cli.md`;
+for why the boundary between `substrate` and its domains is drawn the way it
+is, see `docs/explanation/architecture-boundaries.md`.
 
-- **Event type registry + gating** (`EventTypeRegistry`, `EventTypeSpec`,
-  `GatingTier`, `is_gated`) — declare which event types exist, whether each
-  is always/never/tiered-gated, and check gating against a tier order and
-  current tier index.
-- **Projections** (`ProjectionCatalog`, `ProjectionSpec`) — register named
-  projections with an invalidation key and a recompute function (sync or
-  async), mark keys dirty as events arrive, and recompute only the dirty
-  ones.
-- **Agent registry** (`AgentSpec`, `AgentContext`, `ToolGrant`,
-  `SubagentGrant`) — declare an agent's name, construction function, and
-  what gates its tool/subagent access.
-- **Postgres stores** (`PostgresEventStore`, `PostgresEmbeddingStore`,
-  `PostgresDepsStore`) — the append-only event log and supporting stores
-  backing all of the above.
+## Primitives (stays)
+
+- `EventTypeRegistry` (`substrate/event_registry.py`) -- the append-only
+  catalog of event types a domain is allowed to write, with tier ordering
+  and `is_gated` metadata for autonomy checks.
+- `PostgresEventStore` (`substrate/postgres/events.py`) -- durable event
+  storage: `connect()`/`close()` manage the pool, `append()` writes one
+  event to a named stream, `read_stream()` replays a stream in order.
+- `ProjectionCatalog` / `ProjectionSpec` (`substrate/projection.py`) --
+  named read models. `register()` adds a spec (`invalidation_key` +
+  `recompute`); `invalidate()` marks a key dirty from a source event;
+  `recompute_dirty()` awaits/recomputes every dirty key and clears them.
+- `RuntimeBase` (`substrate/runtime.py`) -- the storage-agnostic lifecycle
+  that wires the two together for a domain: `connect()`/`close()` proxy the
+  underlying `PostgresEventStore`; `register_projection(catalog,
+  projection_name, event_types)` binds a `ProjectionCatalog` projection to
+  the set of event types that should invalidate it; `append()` writes an
+  event to the runtime's stream; `catch_up()` replays the stream, invalidates
+  every registered projection whose event types match, and recomputes dirty
+  keys; `get_projection(projection_name)` returns the last-computed read
+  model for that projection. Domain runtimes subclass `RuntimeBase` -- see
+  `research_domain/` for the worked example, exercised end to end.
 
 ## Building a new domain
 
-This is the pattern `research_domain/` follows:
+Steps 1-3 are unchanged from the pre-`RuntimeBase` design; steps 4-5 replace
+whatever ad hoc wiring a domain used to hand-roll. `research_domain/` is the
+worked example -- read `research_domain/event_types.py`,
+`research_domain/projections.py`, and `research_domain/runtime.py` alongside
+these steps. For the CLI built on that runtime, see
+`docs/reference/research-domain-cli.md`; for the design rationale behind the
+`substrate`/domain boundary, see `docs/explanation/architecture-boundaries.md`.
 
-1. Define your event types with a registry builder:
-   ```python
-   from substrate import EventTypeRegistry, EventTypeSpec, GatingTier
+1. **Define your event types and a registry builder.** Build an
+   `EventTypeRegistry` (`substrate/event_registry.py`) and register one
+   `EventTypeSpec` per event type your domain writes, e.g.
+   `research_domain/event_types.py::build_research_registry()`.
 
-   def build_my_registry() -> EventTypeRegistry:
-       registry = EventTypeRegistry()
-       registry.register(EventTypeSpec(name="thing.happened", gating_tier=GatingTier.always))
-       return registry
-   ```
-2. Define your tier order (a list of tier-level names) and check gating with
-   `is_gated(event_name, registry, tier_order, current_tier_index)`.
-3. Register projections on a `ProjectionCatalog`:
-   ```python
-   from substrate import ProjectionCatalog, ProjectionSpec
+2. **Pick a tier order and set `is_gated`/`gating_tier` per event type.**
+   Each `EventTypeSpec` declares `gating_tier` (`always` / `never` /
+   `tiered`) and, for `tiered` specs, a `tier_level` drawn from your
+   domain's own ordered tier list (e.g. `RESEARCH_TIER_ORDER = ["auto",
+   "reviewed"]`). This is what the autonomy dial checks before letting an
+   event through unattended.
 
-   def build_my_catalog(recompute_fn) -> ProjectionCatalog:
-       catalog = ProjectionCatalog()
-       catalog.register(ProjectionSpec(name="my_projection", invalidation_key=..., recompute=recompute_fn))
-       return catalog
-   ```
-4. Wire a `PostgresEventStore` to append and read your domain's events.
+3. **Register projections on a `ProjectionCatalog`.** For each read model,
+   write a `build_*_catalog()` function that constructs a `ProjectionCatalog`
+   and calls `register()` with an `invalidation_key` and a `recompute`
+   closure (see `research_domain/projections.py`). Keep the catalog builder
+   free of storage concerns -- it only knows about payload shapes and lookup
+   dicts.
 
-## Import rule
+4. **Construct a `PostgresEventStore` and pass it to a `RuntimeBase`
+   subclass with your stream name.** `PostgresEventStore` takes a DSN;
+   `RuntimeBase.__init__(self, event_store, stream)` takes the store and the
+   name of the single stream your domain appends to and replays.
 
-Import from `substrate` directly:
+5. **Subclass `RuntimeBase` for your domain.** In `__init__`/setup, call
+   `register_projection(catalog, projection_name, event_types)` once per
+   catalog/event-types pairing so `catch_up()` knows which projections to
+   invalidate from which events (`ResearchRuntime.__init__` registers three:
+   `source_coverage` from `{"claim.proposed"}`, `contradiction_map` from
+   `{"claim.refuted"}`, `claim_dependency_graph` from `{"claim.corrected"}`).
+   At startup call `connect()` then `catch_up()` to replay the stream and
+   populate projections. Call `append()` to write new events -- domains that
+   need projections refreshed immediately after a write, rather than only at
+   the next explicit `catch_up()`, can wrap it the way
+   `ResearchRuntime.append_event()` does (`append()` then `catch_up()`).
+   Call `get_projection(projection_name)` to read the last-computed result
+   for a projection. Call `close()` at shutdown to release the underlying
+   connection pool.
+
+## Import rule (stays, unchanged)
+
+Import everything from the top-level `substrate` package, not from its
+submodules -- `substrate/__init__.py` re-exports the full public surface,
+`RuntimeBase` included:
 
 ```python
-from substrate import ProjectionCatalog, EventTypeRegistry, is_gated
+from substrate import (
+    EventTypeRegistry, EventTypeSpec, GatingTier,
+    PostgresEventStore, ProjectionCatalog, ProjectionSpec,
+    RuntimeBase,
+)
 ```
 
-Never import a submodule directly (`substrate.projection`, `substrate.postgres.events`,
-etc.) from `novelizer/` or `research_domain/` code. This is enforced by an
-import-linter contract — see the `[tool.importlinter]` section in
-`pyproject.toml`, and run `uv run lint-imports` to check locally.
+`research_domain/event_types.py` and `research_domain/runtime.py` both
+follow this rule (`from substrate import EventTypeRegistry, EventTypeSpec,
+GatingTier` and `from substrate import PostgresEventStore, RuntimeBase`
+respectively) -- match that pattern rather than reaching into
+`substrate.event_registry`, `substrate.postgres.events`, `substrate.runtime`,
+or any other submodule path directly.
 
-(Files under `tests/` are exempt from this rule — they test submodule
-internals directly by design.)
