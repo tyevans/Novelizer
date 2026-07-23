@@ -49,7 +49,7 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["substrate", "novelizer", "research_domain", "tui_kit"]
+root_packages = ["substrate", "novelizer", "research_domain", "tui_kit", "agent_kit"]
 
 [[tool.importlinter.contracts]]
 name = "substrate package boundary"
@@ -70,3 +70,23 @@ name = "tui_kit independence"
 type = "forbidden"
 source_modules = ["tui_kit"]
 forbidden_modules = ["novelizer", "substrate", "research_domain"]
+
+[[tool.importlinter.contracts]]
+name = "agent_kit independence"
+type = "forbidden"
+source_modules = ["agent_kit"]
+forbidden_modules = ["novelizer", "substrate", "research_domain", "tui_kit"]
+
+[[tool.importlinter.contracts]]
+name = "agent_kit package boundary"
+type = "forbidden"
+source_modules = ["novelizer", "research_domain"]
+allow_indirect_imports = "true"
+forbidden_modules = [
+    "agent_kit.base",
+    "agent_kit.scheduler",
+    "agent_kit.telemetry",
+    "agent_kit.run_context",
+    "agent_kit.llm",
+    "agent_kit.middleware",
+]
