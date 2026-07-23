@@ -13,6 +13,7 @@ import agent_kit
     ("continuity_checker", "build_continuity_mining_runner"),
     ("retconner", "build_retconner_runner"),
     ("structure_analyst", "build_structure_analyst_runner"),
+    ("summarizer", "build_summarizer_runner"),
 ])
 def test_runner_builders_pass_llm_max_tokens(monkeypatch, module, builder):
     """Every agent runner must cap generation: an uncapped local model with
