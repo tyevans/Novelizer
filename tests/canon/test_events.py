@@ -225,3 +225,17 @@ def test_book_completed_payload_defaults_and_constant():
     assert full.note == "landed"
 
     assert EventType.BOOK_COMPLETED == "book.completed"
+
+
+def test_chapter_processed_payload_roundtrip():
+    from novelizer.canon.events import ChapterProcessed, EventType
+    p = ChapterProcessed(agent="character_keeper", chapter_id="c1")
+    assert ChapterProcessed.model_validate_json(p.model_dump_json()) == p
+    assert EventType.CHAPTER_PROCESSED == "chapter.processed"
+
+
+def test_chapter_summarized_payload_roundtrip():
+    from novelizer.canon.events import ChapterSummarized, EventType
+    p = ChapterSummarized(chapter_id="c1", gist="Ana finds the key.", summary="Longer para.")
+    assert ChapterSummarized.model_validate_json(p.model_dump_json()) == p
+    assert EventType.CHAPTER_SUMMARIZED == "chapter.summarized"
