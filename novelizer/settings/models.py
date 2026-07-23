@@ -22,6 +22,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "world_architect_subagent_enabled", "character_keeper_subagent_enabled",
     "editor_subagent_enabled", "retconner_subagent_enabled", "structure_analyst_subagent_enabled",
     "plotter_subagent_enabled", "author_subagent_enabled", "checker_subagent_enabled",
+    "extractor_token_budget", "advisory_token_budget", "summarizer_interval",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -50,12 +51,17 @@ class EffectiveSettings(BaseModel):
     # (especially with server-side reasoning enabled) can generate past a
     # proxy's request timeout, so no request ever completes.
     llm_max_tokens: int = 4096
-    # Chars of prior-chapter prose shown to the Author as context.
+    # DEPRECATED (context-assembly v2): no code path reads this any more.
     prior_chapter_summary_chars: int = 200
-    # Chars of each recent chapter shown to the Character Keeper. Must cover
-    # whole chapters — characters introduced late in a chapter are invisible
-    # to discovery otherwise.
+    # DEPRECATED (context-assembly v2): no code path reads this any more.
     keeper_prose_chars: int = 6000
+    # Context-assembly protocol v2 (.specs/context-assembly-v2.md).
+    # Per-run verbatim budget for extractor sweeps (Keeper mining, Summarizer
+    # input): ~96k chars at the chars/4 heuristic — fits 128k-context local
+    # models with headroom for instructions and output.
+    extractor_token_budget: int = 24000
+    # Packed story-so-far budget for push-mode advisory blocks.
+    advisory_token_budget: int = 2000
     # Chapters elapsed since a thread's last touch before it's flagged stale.
     staleness_threshold_chapters: int = 3
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
@@ -76,6 +82,7 @@ class EffectiveSettings(BaseModel):
     muse_interval: int = 60
     triage_interval: int = 120
     projector_interval: float = 0.5
+    summarizer_interval: int = 300
 
     # Voice
     voice_pack: str = _DEFAULT_VOICE_PACK

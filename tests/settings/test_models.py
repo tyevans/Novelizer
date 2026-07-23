@@ -106,3 +106,15 @@ def test_plotter_interval_default_is_240():
     s = EffectiveSettings()
     assert s.plotter_interval == 240
     assert "plotter_interval" in STORY_OVERRIDABLE_KEYS
+
+
+def test_context_assembly_settings_defaults():
+    s = EffectiveSettings()
+    assert s.extractor_token_budget == 24000
+    assert s.advisory_token_budget == 2000
+    assert s.summarizer_interval == 300
+
+
+def test_context_assembly_settings_story_overridable():
+    assert {"extractor_token_budget", "advisory_token_budget",
+            "summarizer_interval"} <= STORY_OVERRIDABLE_KEYS
