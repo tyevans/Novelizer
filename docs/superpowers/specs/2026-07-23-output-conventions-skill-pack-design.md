@@ -158,6 +158,12 @@ Follow the existing shapes:
 - Adding `skills=` middleware wiring to the tooled agents that lack it —
   the pointer makes the pack reachable without it; wiring more agents into
   `SkillsMiddleware` is an independent decision.
+- The remaining backend-capable runners — triage (`build_triage_runner`), chat
+  personas (`novelizer/chat/runners.py`), and the research runner
+  (`novelizer/research/runner.py`) — do not get the note: they follow a
+  different prompt-assembly seam (no RETRIEVAL_NOTE today) and none of their
+  outputs are projected into canon filenames. Revisit if one grows a
+  freeform title-like field.
 
 ## Error handling
 

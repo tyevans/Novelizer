@@ -25,7 +25,7 @@ _HIDDEN_ENTRY_NAMES = {"__init__.py", "__pycache__"}
 # The single shared skills source every tooled builder passes. deepagents'
 # `SkillsMiddleware` treats each `sources` entry as a CONTAINER directory:
 # it lists the source, keeps `is_dir` entries, and reads
-# `<entry>/SKILL.md` for each. Our five packs
+# `<entry>/SKILL.md` for each. Our packs
 # (novelizer/skills_packs/<pack>/SKILL.md) are subdirectories of one
 # container, so the container itself -- `/skills` -- is the only valid
 # source shape; passing an individual pack dir (e.g. `/skills/outlining`)
@@ -40,7 +40,7 @@ _HIDDEN_ENTRY_NAMES = {"__init__.py", "__pycache__"}
 # selectivity (e.g. giving Author only scene-sequel + pacing) impossible
 # without duplicating pack data into per-agent container directories, so
 # that selectivity has been dropped: every tooled agent now sees the name
-# and description of all five packs.
+# and description of all packs.
 CRAFT_SKILLS = ["/skills"]
 
 

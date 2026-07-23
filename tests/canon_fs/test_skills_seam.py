@@ -16,7 +16,7 @@ via `abefore_agent`), which is exactly the path that was broken:
 
 This test builds the exact composite Runtime._phase_a_toolkit builds,
 constructs a real `SkillsMiddleware` against it exactly as the tooled
-builders do, and asserts all five packs load with descriptions and no
+builders do, and asserts all packs load with descriptions and no
 errors.
 """
 

@@ -53,7 +53,7 @@ An actual production failure. The drafting model emitted this
 
 ```json
 {
-  "title": "The First Change\n<prose>\nThe decision arrived without fanfare. [7,900 more characters of chapter body] </prose>\n[{\"intent\": \"plant\", \"name\": \"uneven reception across places\", \"note\": \"...\"}]",
+  "title": "The First Change\n<prose>\nThe decision arrived without fanfare. [7,900 more characters of chapter body] </prose>\n[{\"action\": \"plant\", \"name\": \"uneven reception across places\", \"note\": \"...\"}]",
   "prose": "The decision arrived without fanfare. ...",
   "thread_intents": []
 }

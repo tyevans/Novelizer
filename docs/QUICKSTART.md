@@ -269,10 +269,10 @@ snapshot — the arc aggregate is the plan it's measured against.
 
 ## 12. Craft skills and the workspace
 
-Agents no longer carry all their craft knowledge in their prompts. Five **skill packs**
+Agents no longer carry all their craft knowledge in their prompts. **Skill packs**
 ship with novelizer — outlining, promise-payoff, character-arcs, scene-sequel, pacing —
 and are mounted read-only at `/skills/`. Every tooled agent sees the *names and
-descriptions* of all five packs (progressive disclosure keeps that cost to a
+descriptions* of all packs (progressive disclosure keeps that cost to a
 handful of lines per pack) until a task actually calls for one; then it reads the pack
 body, and pulls reference tables (beat frameworks with their percentage positions,
 per-genre obligatory scenes, the arc-type outcome table, the try-fail outcome taxonomy,
