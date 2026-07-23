@@ -73,6 +73,9 @@ class ToolCallFinished:
     tool_name: str
     duration_s: float
     output_summary: str = ""
+    input_summary: str = ""  # pairs the result with the exact call when
+    # several same-named tool calls run in parallel; "" falls back to
+    # last-running-same-tool matching
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,7 @@ class ToolCallFailed:
     tool_name: str
     duration_s: float
     error_type: str
+    input_summary: str = ""  # same pairing contract as ToolCallFinished
 
 
 @dataclass(frozen=True)

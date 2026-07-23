@@ -169,8 +169,14 @@ one-to-one:
 | `LLM_CALL_STARTED` | `LLMCallStarted(run_id, agent_name, call_index, model, prompt)` |
 | `LLM_CALL_FINISHED` | `LLMCallFinished(run_id, agent_name, call_index, duration_s, output_tokens)` |
 | `TOOL_CALL_STARTED` | `ToolCallStarted(run_id, agent_name, tool_name, input_summary, delegate)` |
-| `TOOL_CALL_FINISHED` | `ToolCallFinished(run_id, agent_name, tool_name, duration_s, output_summary)` |
-| `TOOL_CALL_FAILED` | `ToolCallFailed(run_id, agent_name, tool_name, duration_s, error_type)` |
+| `TOOL_CALL_FINISHED` | `ToolCallFinished(run_id, agent_name, tool_name, duration_s, output_summary, input_summary)` |
+| `TOOL_CALL_FAILED` | `ToolCallFailed(run_id, agent_name, tool_name, duration_s, error_type, input_summary)` |
+
+`input_summary` on the two result events is optional but load-bearing when
+your domain runs same-named tool calls in parallel: `apply_bus_item` uses it
+to attach each result to the block that made that exact call. Omit it and
+results fall back to closing the *last* running block with that tool name,
+which scrambles call/result pairing under parallelism.
 
 `TokenDelta` and `ToolSummaryReady` don't come from `StoredEvent` at all in
 novelizer — they're bus-only, high-frequency items (`NovelizerTokenDelta`,

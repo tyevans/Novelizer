@@ -84,7 +84,12 @@ autonomous personalities should share one identity source (voice pack).
 `RETRIEVAL_NOTE_BASE`, `PASS_PROMPT_INSTRUCTION` and `DEFAULT_PASS_REMARK`, re-exported from
 `author.py`/`base.py` so the existing import sites keep resolving (migrate those, then drop the
 re-export). The retrieval note now names the index-then-read loop, the grep-vs-`search_canon`
-boundary, the no-write-from-summary rule and a stopping rule. The pass instruction is a three-way
+boundary, the no-write-from-summary rule and a stopping rule. Post-landing extension
+(2026-07-22, beyond the proposal): the note also states the tree layout — the six top-level
+directories, explicitly no `/canon` prefix — and the slug rule with a worked example
+(lowercase, punctuation runs to one dash, leading articles kept), plus a never-guess-paths
+rule, after a local model invented `/canon/...` paths and slugs with dropped articles,
+burning a whole continuity pass on not-found reads. The pass instruction is a three-way
 act / stand-aside / confirm-first decision anchored to "what changed since your last pass", with
 correct silence framed as success and a don't-miss-real-events counterweight.
 

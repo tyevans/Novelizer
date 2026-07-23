@@ -97,6 +97,22 @@ def test_tool_call_failed_translates():
                                  duration_s=0.3, error_type="ValueError")
 
 
+def test_tool_results_carry_input_summary_for_pairing():
+    """Telemetry's finished/failed payloads carry the call's input_summary;
+    the adapter must pass it through so run_model can attach parallel
+    same-tool results to the block that made that exact call."""
+    fin = _ev(11, TelemetryEventType.TOOL_CALL_FINISHED,
+             {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+              "duration_s": 1.2, "input_summary": "/characters/death.md",
+              "output_summary": "# Death"})
+    assert to_contract_event(fin).input_summary == "/characters/death.md"
+    fail = _ev(12, TelemetryEventType.TOOL_CALL_FAILED,
+              {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+               "duration_s": 0.3, "error_type": "ValueError",
+               "input_summary": "/world/the-silvanthrine.md"})
+    assert to_contract_event(fail).input_summary == "/world/the-silvanthrine.md"
+
+
 def test_scheduler_events_and_unknown_event_types_translate_to_none():
     picked = _ev(9, TelemetryEventType.SCHEDULER_PICKED, {"agent_name": "author"})
     assert to_contract_event(picked) is None
