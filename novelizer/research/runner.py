@@ -61,7 +61,7 @@ def _make_diagnostic_tools(read_store):
 
 def build_research_runner(settings, callbacks=None, backend=None, tools=None, read_store=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
 
     model = build_chat_model(

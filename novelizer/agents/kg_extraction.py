@@ -22,7 +22,7 @@ def kg_extraction_prompt(chapter_title: str, chapter_prose: str) -> str:
 def build_kg_extraction_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from langchain.agents.structured_output import ProviderStrategy
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     # Extraction is fact-finding, not composition: run cold regardless of the
     # room's creative temperature. At higher temperature the model free-runs
     # inside JSON string fields until the token cap (same failure mode as

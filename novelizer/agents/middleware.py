@@ -18,7 +18,7 @@ class TodoContextMiddleware(AgentMiddleware[Any, Any, Any]):
     `TodoListMiddleware` only injects static write_todos instructions -- the
     actual current list rides along solely as a `write_todos` ToolMessage in
     message history. `SummarizationMiddleware` (always attached by
-    `create_deep_agent`, see novelizer/agents/llm.py) can compact that
+    `create_deep_agent`, see agent_kit/llm.py) can compact that
     message away with no awareness that it held the todo state, leaving the
     model blind to its own plan mid-run even though `state["todos"]`
     survives untouched in graph state. This middleware closes that gap by

@@ -31,3 +31,27 @@ def test_context_window_parameterized():
     m = build_chat_model("m", "http://localhost:9999/v1", "k",
                          context_window_tokens=32_000)
     assert m.profile["max_input_tokens"] == 32_000
+
+
+def test_reasoning_content_is_recovered_from_the_raw_streamed_delta():
+    """Plain ChatOpenAI silently drops non-standard streamed fields like
+    reasoning_content -- _ReasoningAwareChatOpenAI must lift it back onto the
+    chunk so a telemetry callback can see it via additional_kwargs."""
+    from langchain_core.messages import AIMessageChunk
+    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
+    raw_chunk = {
+        "choices": [{"index": 0, "delta": {"content": "The sea",
+                                           "reasoning_content": "pondering the tide"},
+                    "finish_reason": None}],
+    }
+    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert gen_chunk.message.content == "The sea"
+    assert gen_chunk.message.additional_kwargs["reasoning_content"] == "pondering the tide"
+
+
+def test_reasoning_content_absent_leaves_chunk_unaffected():
+    from langchain_core.messages import AIMessageChunk
+    m = build_chat_model("my-model", "http://localhost:1234/v1", "key")
+    raw_chunk = {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}]}
+    gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
+    assert "reasoning_content" not in gen_chunk.message.additional_kwargs

@@ -21,7 +21,7 @@ CHAT_SKILLS = CRAFT_SKILLS
 
 def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, tools=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
     model_name = settings.author_model if agent_name == "author" else settings.agent_model
     model = build_chat_model(

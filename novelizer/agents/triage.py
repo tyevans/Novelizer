@@ -151,7 +151,7 @@ class Triage(BaseAgent):
 
 def build_triage_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
     if backend is not None:
         model = build_chat_model(

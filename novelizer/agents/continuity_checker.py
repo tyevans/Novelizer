@@ -520,7 +520,7 @@ class ContinuityChecker(BaseAgent):
 def build_continuity_checker_runner(settings, callbacks=None, backend=None, tools=None, subagents=None):
     from deepagents import create_deep_agent
     from novelizer.agents.author import RETRIEVAL_NOTE
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
     # See build_author_runner: tool executions run under invoke-time graph
     # config, not constructor callbacks on the model, so telemetry callbacks
@@ -550,7 +550,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
 def build_continuity_mining_runner(settings, callbacks=None):
     from deepagents import create_deep_agent
     from langchain.agents.structured_output import ProviderStrategy
-    from novelizer.agents.llm import build_chat_model
+    from agent_kit import build_chat_model
     # Mining is fact extraction, not composition: run cold regardless of the
     # room's creative temperature. At 0.8 the model free-runs inside JSON
     # string fields until the token cap (observed live: LengthFinishReasonError

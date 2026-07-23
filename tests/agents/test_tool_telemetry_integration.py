@@ -90,8 +90,8 @@ async def test_tool_calls_in_a_real_deep_agent_reach_the_telemetry_recorder(
     ])
     fake_model = _FakeToolCallingModel(messages=scripted_messages)
 
-    import novelizer.agents.llm as llm_mod
-    monkeypatch.setattr(llm_mod, "build_chat_model", lambda *a, **k: fake_model)
+    import agent_kit
+    monkeypatch.setattr(agent_kit, "build_chat_model", lambda *a, **k: fake_model)
 
     backend = CanonBackend(real_read_store)
     runner = build_author_runner(
