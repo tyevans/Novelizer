@@ -48,17 +48,22 @@ novelizer
 ```
 
 This opens the setup wizard (no crash on missing config — the wizard *is* the first-run
-path). You'll see:
+path). Every field has a visible label with a dim help line beneath it explaining what
+you're setting. You'll see:
 
 - **LLM base URL** — a text field pre-filled with `http://localhost:8080/v1`; point it at
-  your OpenAI-compatible endpoint.
-- **API key** — a password field; leave blank for local endpoints that don't require one.
+  your OpenAI-compatible endpoint (llama.cpp, vLLM, Ollama, LM Studio, OpenRouter…),
+  including the `/v1` suffix.
+- **API key** — a password field, sent as a Bearer token; leave blank for local endpoints
+  that don't require one.
 - **Stories directory** — pre-filled with `stories`; where your story directories will
-  live.
+  live. `~` expands; relative paths resolve from where you launch novelizer.
 - **Test connection** — a button; click it to probe the endpoint and populate the model
   pickers below from its live model list.
-- **author model** / **agent model** / **embedding model** — three dropdowns, disabled
-  until the connection test succeeds; pick a model for each.
+- **Author model** / **Agent model** / **Embedding model** — three dropdowns, disabled
+  (showing "run Test connection first") until the connection test succeeds. Author writes
+  the prose (pick your strongest model), Agent runs the support agents (a faster model
+  works well), Embedding builds the semantic index for canon search.
 - **Save & continue** — writes your global config and proceeds to the story picker (only
   enabled once you've saved or the connection test has populated the model lists).
 - **Skip model picks — save endpoint only** — an escape hatch if you just want the endpoint
@@ -66,7 +71,7 @@ path). You'll see:
 
 *Verified against: `novelizer/tui/setup_wizard.py`'s actual widget ids
 (`base_url`, `api_key`, `stories_dir`, `probe`, `author_model`, `agent_model`,
-`embed_model`, `save`, `skip`).*
+`embed_model`, `save`, `skip`) and its `_field` label/help copy.*
 
 After the wizard, a story picker appears — it lists any existing stories in your stories
 directory (empty on a first run) and lets you create a new one. `novelizer --story
@@ -188,8 +193,10 @@ Each agent has a settings flag (global, story, or `NOVELIZER_*` env, like any se
 `world_architect_tools_enabled`, `character_keeper_tools_enabled`, `editor_tools_enabled`,
 `retconner_tools_enabled`, `structure_analyst_tools_enabled` — all default `true`.
 
-Turning one off reverts that agent to its legacy push-only prompt (no canon tools; the
-Author/Checker/chat also revert from the chapter-index map to inline prose excerpts). Use
+Turning one off reverts that agent to its legacy push-only prompt (no canon tools, and
+pushed context reverts from index form — chapter maps, lore-title and cast name lists,
+entry-id listings, the Editor's cast pointer — back to inline prose excerpts, entry
+bodies, traits, and voice cards). Use
 this if a small local model handles tool-calling poorly. Flag changes take effect on
 restart — mid-session edits are deliberately inert until then.
 

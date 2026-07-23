@@ -149,7 +149,7 @@ async def test_input_submit_calls_app_send_and_escape_pops(db_path):
 
 
 from novelizer.telemetry.events import TelemetryEventType, AgentRunStarted, TokenDelta
-from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
+from tui_kit.widgets.live_stream_panel import LiveStreamPanel
 
 
 @pytest.mark.asyncio

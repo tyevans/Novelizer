@@ -190,6 +190,40 @@ async def test_chat_push_mode_recap_uses_summary_when_available(db_path):
 
 
 @pytest.mark.asyncio
+async def test_story_context_pull_mode_strips_world_bodies_and_traits_keeps_ids(db_path):
+    """Chat personas are tooled in pull mode and can read canon themselves.
+    The context keeps the thread/secret/theme id lists (the system prompt
+    says 'cite ids shown in the story context') but stops pushing lore
+    bodies and character traits."""
+    from novelizer.store.models import Character, WorldEntry
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = True
+    try:
+        await rt.events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Salt Charter", body="SECRET-LORE-BODY"),
+        )
+        await rt.events.append(
+            EventType.CHARACTER_CREATED, "ch1",
+            Character(id="ch1", name="Mira", traits="SECRET-TRAITS"),
+        )
+        await rt.events.append(
+            EventType.SECRET_CREATED, "s1",
+            SecretCreated(id="s1", title="The heir lives"),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert "The Salt Charter" in context
+        assert "SECRET-LORE-BODY" not in context
+        assert "Mira" in context
+        assert "SECRET-TRAITS" not in context
+        assert "s1" in context and "The heir lives" in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
 async def test_chat_push_mode_recap_labels_missing_summary(db_path):
     from novelizer.brain.context_assembly import ELISION_MARKER
 
@@ -203,6 +237,29 @@ async def test_chat_push_mode_recap_labels_missing_summary(db_path):
         await rt.projector.catch_up()
         context = await rt.chat._story_context()
         assert ELISION_MARKER in context
+    finally:
+        await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_story_context_default_mode_keeps_world_bodies_and_traits(db_path):
+    from novelizer.store.models import Character, WorldEntry
+
+    rt = await _runtime(db_path, {"chat_author": _R(ChatReply(reply_text="ok"))})
+    rt.chat.pull_mode = False
+    try:
+        await rt.events.append(
+            EventType.WORLD_ENTRY_CREATED, "w1",
+            WorldEntry(id="w1", title="The Salt Charter", body="SECRET-LORE-BODY"),
+        )
+        await rt.events.append(
+            EventType.CHARACTER_CREATED, "ch1",
+            Character(id="ch1", name="Mira", traits="SECRET-TRAITS"),
+        )
+        await rt.projector.catch_up()
+        context = await rt.chat._story_context()
+        assert "SECRET-LORE-BODY" in context
+        assert "SECRET-TRAITS" in context
     finally:
         await rt.close()
 

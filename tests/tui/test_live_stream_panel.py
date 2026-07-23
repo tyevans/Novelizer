@@ -2,13 +2,14 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import Static
 from textual.containers import VerticalScroll
-from novelizer.tui.widgets.live_stream_panel import LiveStreamPanel
-from novelizer.tui.widgets.engine_room_model import Block, LiveRunState
+from tui_kit.widgets.live_stream_panel import LiveStreamPanel
+from tui_kit.run_model import Block, LiveRunState
+from novelizer.tui.identity import NOVELIZER_AGENT_THEME
 
 
 class _Harness(App):
     def compose(self) -> ComposeResult:
-        yield LiveStreamPanel(id="panel")
+        yield LiveStreamPanel(theme=NOVELIZER_AGENT_THEME, id="panel")
 
 
 @pytest.mark.asyncio

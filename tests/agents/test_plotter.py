@@ -838,3 +838,14 @@ async def test_flags_from_structured_output_are_filed(stack):
 def test_spec_carries_subagent_grant():
     from novelizer.agents.plotter import SPEC
     assert SPEC.subagent_grant.enabled_setting == "plotter_subagent_enabled"
+
+
+async def test_poll_does_not_fetch_world_entries(stack):
+    """poll() fetched world[:10] that neither _summarize nor commit ever read
+    -- a dead fetch left over from before the pull-tools rollout."""
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="W", body="b"))
+    await proj.catch_up()
+    plotter = Plotter(FakeRunner(PlotterOutput()), read, committer)
+    ctx = await plotter.poll()
+    assert "world" not in ctx

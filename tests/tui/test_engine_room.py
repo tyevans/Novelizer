@@ -2,7 +2,7 @@ import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
-from novelizer.tui.widgets.activity_strip import ActivityStrip
+from tui_kit.widgets.activity_strip import ActivityStrip
 from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFailed, TokenDelta,
 )
@@ -97,7 +97,7 @@ async def test_engine_room_hidden_by_default_and_toggles_with_e(rt):
 
 
 async def test_engine_room_streams_tokens_into_live_pane(rt):
-    from novelizer.tui.widgets.engine_room import EngineRoom
+    from tui_kit.widgets.engine_room import EngineRoom
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
@@ -236,15 +236,16 @@ async def test_agent_tab_titles_carry_glyph_and_color():
     """A plain str TabPane title gets markup-parsed (Widget.render_str ->
     Content.from_markup) and silently loses any style not spelled as markup
     -- titles must be pre-styled Content, not str, or they render colorless."""
-    from novelizer.tui.widgets.engine_room import EngineRoom
-    from novelizer.tui.identity import identity_for
+    from tui_kit.widgets.engine_room import EngineRoom
+    from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME, identity_for
     from textual.content import Content
     from textual.widgets import TabbedContent
     from textual.app import App
 
     class _Harness(App):
         def compose(self):
-            yield EngineRoom(id="engine_room")
+            yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
+                              id="engine_room")
 
     app = _Harness()
     async with app.run_test() as pilot:
@@ -334,7 +335,7 @@ async def test_stream_pane_renders_markup_hostile_tokens_verbatim(rt):
         rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text=_HOSTILE))
         await pilot.pause(0.8)
         assert not any("telemetry" in m and "error" in m for m in app.messages)
-        from novelizer.tui.widgets.engine_room import EngineRoom
+        from tui_kit.widgets.engine_room import EngineRoom
         assert "known_id=False" in app.query_one("#engine_room", EngineRoom).stream_text()
 
 
@@ -383,3 +384,54 @@ async def test_seeded_trace_survives_restart(rt):
         table = app.query_one("#er_trace", DataTable)
         rows = [table.get_row_at(i)[0] for i in range(table.row_count)]
         assert any("run started" in r for r in rows)
+
+
+async def test_seeded_live_pane_survives_restart(rt):
+    """A restart mid-run must seed the Engine Room's live "All" pane, not
+    just the trace table -- seeding must adapt raw StoredEvents through
+    to_contract_event before feeding seed_state/seed_states."""
+    from novelizer.telemetry.events import LlmCallStarted
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                            LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                           model="qwen", prompt="[system]\nWrite the chapter."))
+    # A fresh app instance (a "restart") must show the seeded live state.
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "author" in vitals
+
+
+async def test_seeded_per_agent_live_pane_survives_restart(rt):
+    """seed_states() (the per-agent branch) must also be fed adapted
+    contract events on restart, not just seed_state()'s All-pane branch --
+    and a raw StoredEvent type with no to_contract_event mapping mixed into
+    the replay (a scheduler event) must be filtered out rather than
+    breaking the per-agent seeding."""
+    from novelizer.telemetry.events import LlmCallStarted, SchedulerPicked
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                            LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                           model="qwen", prompt="[system]\nWrite the chapter."))
+    # Scheduler events have no to_contract_event mapping (translate to None);
+    # they must not raise or otherwise poison the per-agent replay.
+    await rt.telemetry.emit(TelemetryEventType.SCHEDULER_PICKED, "sched",
+                            SchedulerPicked(agent_name="editor"))
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                            AgentRunStarted(run_id="r2", agent_name="editor"))
+    # A fresh app instance (a "restart") must show each agent's own seeded
+    # live state in its own per-agent vitals pane.
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        author_vitals = str(app.query_one("#er_vitals_author").renderable)
+        editor_vitals = str(app.query_one("#er_vitals_editor").renderable)
+        assert "author" in author_vitals
+        assert "editor" in editor_vitals

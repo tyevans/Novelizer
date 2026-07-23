@@ -17,9 +17,15 @@ _RETRIEVAL_NOTE_PREFIX = (
     "You have file tools over the story canon (ls, read_file, grep, glob) and semantic "
     "search (search_canon). Work index-then-read: grep/glob for an exact name, slug, or "
     "phrase, search_canon for a theme or 'where did X happen' when you don't know the "
-    "words — locate the file, then read_file the span you need. Chapter files are named "
-    "by ordinal and title slug, not by chapter number: `chapters/001-the-salt-road.md`, "
-    "never `chapters/ch01.md` or `chapters/ch1.md`. Use `chapters/*.md` to list them all. "
+    "words — locate the file, then read_file the span you need. The tree has exactly six "
+    "top-level directories — /chapters, /characters, /world, /threads, /secrets, /themes — "
+    "and no /canon prefix: paths start at those roots. Filenames are the record's full "
+    "title slugged: lowercase, each run of spaces or punctuation becomes one dash, leading "
+    "articles kept — 'The Mourning Courts of Vael' is world/the-mourning-courts-of-vael.md. "
+    "Chapter files add an ordinal prefix and are never named by chapter number: "
+    "`chapters/001-the-salt-road.md`, not `chapters/ch01.md` or `chapters/ch1.md`; use "
+    "`chapters/*.md` to list them all. Never guess a path from memory — if a read misses, "
+    "ls or glob the directory and use a path listed there. "
 )
 
 # Only for agents whose pushed context carries a chapter index; without one the

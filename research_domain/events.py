@@ -3,11 +3,19 @@ from pydantic import BaseModel
 
 
 class ClaimProposed(BaseModel):
-    """Payload for claim.proposed — mints a new claim's identity."""
+    """Payload for claim.proposed — mints a new claim's identity.
+
+    origin distinguishes how the claim entered the log: "extracted" means
+    the extractor swept the source document itself; "verification" means
+    the claim is a counter-claim minted while verifying some other claim.
+    Missing origin (pre-existing streams written before this field existed)
+    defaults to "extracted" for back-compat.
+    """
 
     claim_id: str
     source_id: str
     text: str
+    origin: str = "extracted"
 
 
 class SourceCorroborated(BaseModel):

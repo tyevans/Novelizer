@@ -12,6 +12,7 @@ EXPECTED_PUBLIC_API = [
     "PostgresEventStore",
     "ProjectionCatalog",
     "ProjectionSpec",
+    "RuntimeBase",
     "SubagentGrant",
     "ToolGrant",
     "is_gated",

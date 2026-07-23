@@ -10,7 +10,7 @@ EXPECTED_ORDER = [
 ]
 
 
-def test_registry_has_nine_specs_in_scheduling_order():
+def test_registry_lists_every_spec_in_scheduling_order():
     assert [spec.name for spec in AGENT_REGISTRY] == EXPECTED_ORDER
 
 

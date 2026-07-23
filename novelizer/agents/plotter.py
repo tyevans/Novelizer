@@ -149,7 +149,6 @@ class Plotter(BaseAgent):
 
     async def poll(self) -> dict:
         chapters = await self._read.list_chapters()
-        world = await self._read.list_world_entries()
         characters = await self._read.list_characters()
         blueprint = await self._read.get_active_blueprint()
         beats = await self._read.list_beats()
@@ -164,7 +163,6 @@ class Plotter(BaseAgent):
         arcs = await self._read.list_arcs(active_only=False)
         return {
             "chapters": chapters,
-            "world": world[:10],
             "characters": characters,
             "blueprint": blueprint,
             "beats": beats,

@@ -269,3 +269,37 @@ def test_build_retconner_runner_with_backend_bounds_recursion():
 def test_spec_carries_subagent_grant():
     from novelizer.agents.retconner import SPEC
     assert SPEC.subagent_grant.enabled_setting == "retconner_subagent_enabled"
+
+
+async def test_pull_mode_false_keeps_conflicting_entry_bodies(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Suns", body="SECRET ENTRY BODY"))
+    await events.append(EventType.FLAG_CREATED, "r1",
+                        Flag(id="r1", category="contradiction", description="two vs one",
+                             related_entry_ids=["w1"], proposed_resolution="one sun"))
+    await proj.catch_up()
+    runner = FakeRunner(RetconAmendments(resolution="cannot_reproduce", reason="n/a"))
+    agent = Retconner(runner, read, committer, pull_mode=False)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "SECRET ENTRY BODY" in sent
+
+
+async def test_pull_mode_true_pushes_entry_ids_and_titles_only(stack):
+    """The system prompt already declares inlined bodies stale pointers and
+    orders a live re-read; a tooled Retconner gets ids to read, not bodies
+    to trust."""
+    events, proj, read, committer = stack
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(id="w1", title="Suns", body="SECRET ENTRY BODY"))
+    await events.append(EventType.FLAG_CREATED, "r1",
+                        Flag(id="r1", category="contradiction", description="two vs one",
+                             related_entry_ids=["w1"], proposed_resolution="one sun"))
+    await proj.catch_up()
+    runner = FakeRunner(RetconAmendments(resolution="cannot_reproduce", reason="n/a"))
+    agent = Retconner(runner, read, committer, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "[w1] Suns" in sent
+    assert "SECRET ENTRY BODY" not in sent

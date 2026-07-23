@@ -52,3 +52,42 @@ def identity_for(agent_name: str) -> AgentIdentity:
         return ident
     label = agent_name.replace("_", " ").title() or "System"
     return AgentIdentity(agent_name, label, "·", "-", "dim")
+
+
+# Mirrors AGENT_REGISTRY's scheduling order in novelizer/agents/registry.py --
+# kept as a plain tuple (not imported) so this module stays free of the heavy
+# agent-construction import chain. Keep in sync if agents are added/removed.
+AGENT_NAMES = (
+    "world_architect", "character_keeper", "muse", "plotter", "author",
+    "editor", "continuity_checker", "retconner", "structure_analyst",
+)
+
+_VERBS = {
+    "author": "drafting",
+    "editor": "reviewing",
+    "world_architect": "worldbuilding",
+    "character_keeper": "tending characters",
+    "continuity_checker": "checking continuity",
+    "retconner": "retconning",
+    "structure_analyst": "scoring structure",
+}
+
+
+class NovelizerAgentTheme:
+    """novelizer's tui_kit.contracts.AgentTheme implementation, backed by
+    the IDENTITIES registry and the agent-verb table above."""
+
+    def glyph(self, agent_name: str) -> str:
+        return identity_for(agent_name).glyph
+
+    def label(self, agent_name: str) -> str:
+        return identity_for(agent_name).label
+
+    def style(self, agent_name: str) -> str:
+        return identity_for(agent_name).style
+
+    def verb(self, agent_name: str) -> str:
+        return _VERBS.get(agent_name, "working")
+
+
+NOVELIZER_AGENT_THEME = NovelizerAgentTheme()

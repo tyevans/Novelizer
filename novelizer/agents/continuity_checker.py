@@ -185,8 +185,15 @@ class ContinuityChecker(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> tuple[ContinuityOutput | None, dict[str, MinedFactsOutput]]:
-        world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
-        chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
+        if self.pull_mode:
+            # Index only: the prompt requires reading both sides of a conflict
+            # before filing, so pushed bodies and traits are the stale summary
+            # it must not work from -- ids and names locate, read_file grounds.
+            world = "\n".join(f"[{e.id[:8]}] {e.title}" for e in ctx["world"][:20]) or "None."
+            chars = "\n".join(f"[{c.id[:8]}] {c.name}" for c in ctx["characters"][:10]) or "None."
+        else:
+            world = "\n".join(f"[{e.id[:8]}] {e.title}: {e.body[:200]}" for e in ctx["world"][:20]) or "None."
+            chars = "\n".join(f"[{c.id[:8]}] {c.name}: {c.traits}" for c in ctx["characters"][:10]) or "None."
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
         if self.pull_mode:

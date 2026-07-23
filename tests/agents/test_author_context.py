@@ -10,7 +10,7 @@ See docs/agent-prompting/proposal-author.md §3.
 from __future__ import annotations
 
 from novelizer.agents.author import _summarize
-from novelizer.store.models import Chapter, Character
+from novelizer.store.models import Chapter, Character, WorldEntry
 
 
 def _ctx(**over):
@@ -38,6 +38,21 @@ class TestCastBlockCarriesIds:
 
     def test_empty_cast_unchanged(self):
         assert "Characters:\nNone yet." in _summarize(_ctx())
+
+
+class TestWorldBlockPushVsPull:
+    def test_push_mode_keeps_body_excerpt(self):
+        entries = [WorldEntry(id="w1", title="The Salt Charter", body="SECRET LORE BODY")]
+        sent = _summarize(_ctx(world=entries))
+        assert "SECRET LORE BODY" in sent
+
+    def test_pull_mode_world_block_is_titles_only(self):
+        """A tooled Author reads lore itself; pushed bodies are exactly the
+        summary the retrieval note tells it not to write from."""
+        entries = [WorldEntry(id="w1", title="The Salt Charter", body="SECRET LORE BODY")]
+        sent = _summarize(_ctx(world=entries), pull_mode=True)
+        assert "The Salt Charter" in sent
+        assert "SECRET LORE BODY" not in sent
 
 
 class TestPriorChapterFidelity:

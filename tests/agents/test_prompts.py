@@ -43,6 +43,30 @@ class TestRetrievalNote:
         """Keepers get no pushed chapter index, so the map sentence would lie."""
         assert "INDEX" not in RETRIEVAL_NOTE_BASE
 
+    def test_names_all_six_root_directories(self):
+        """The tree layout must be stated, not guessable: a local model
+        inferred a phantom /canon/ root from the surrounding canon language
+        and burned a whole pass on not-found reads."""
+        for directory in ("/chapters", "/characters", "/world", "/threads",
+                          "/secrets", "/themes"):
+            for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
+                assert directory in note
+
+    def test_disowns_the_canon_prefix_hallucination(self):
+        for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
+            assert "no /canon" in note
+
+    def test_teaches_the_slug_convention_with_a_worked_example(self):
+        """Slugs keep leading articles ('The Silvanthrine' ->
+        the-silvanthrine.md); agents guessed slugs with articles dropped."""
+        for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
+            assert "lowercase" in note
+            assert "the-mourning-courts-of-vael.md" in note
+
+    def test_tells_agents_to_list_rather_than_guess_paths(self):
+        for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
+            assert "Never guess a path" in note
+
     def test_carries_a_stopping_rule_against_turn_burning(self):
         for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
             assert "stop searching" in note

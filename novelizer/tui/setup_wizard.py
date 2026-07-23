@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Select, Static
+from textual.widget import Widget
+from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 
 from novelizer.settings.setup_core import build_global_config_data, probe_endpoint
 
 _MODEL_SELECT_IDS = ("author_model", "agent_model", "embed_model")
+
+
+def _field(label: str, widget: Widget, help_text: str) -> Iterator[Widget]:
+    """A labelled form field: visible label, the widget, dim help line.
+    Labels must not live in placeholders — those vanish once a value is set."""
+    yield Label(label, classes="field-label")
+    yield widget
+    yield Static(help_text, classes="field-help")
 
 
 class SetupWizardApp(App[dict | None]):
@@ -22,7 +33,14 @@ class SetupWizardApp(App[dict | None]):
     #wizard {
         padding: 1 2;
     }
-    #wizard Input, #wizard Select {
+    #wizard .field-label {
+        text-style: bold;
+    }
+    #wizard .field-help {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    #wizard #probe {
         margin-bottom: 1;
     }
     """
@@ -35,14 +53,41 @@ class SetupWizardApp(App[dict | None]):
         yield Header()
         with VerticalScroll(id="wizard"):
             yield Static("Point novelizer at your OpenAI-compatible LLM endpoint.")
-            yield Input(value="http://localhost:8080/v1", id="base_url", placeholder="LLM base URL")
-            yield Input(id="api_key", placeholder="API key (leave blank for local endpoints)", password=True)
-            yield Input(value="stories", id="stories_dir", placeholder="Stories directory")
+            yield from _field(
+                "LLM base URL",
+                Input(value="http://localhost:8080/v1", id="base_url"),
+                "OpenAI-compatible endpoint (llama.cpp, vLLM, Ollama, LM Studio, "
+                "OpenRouter…). Include the /v1 suffix.",
+            )
+            yield from _field(
+                "API key",
+                Input(id="api_key", password=True),
+                "Sent as a Bearer token. Leave blank for local endpoints that don't need auth.",
+            )
+            yield from _field(
+                "Stories directory",
+                Input(value="stories", id="stories_dir"),
+                "Where your stories live. ~ expands; relative paths resolve from "
+                "where you launch novelizer.",
+            )
             yield Button("Test connection", id="probe")
             yield Static("", id="probe_result")
-            yield Select([], prompt="author model (test connection first)", id="author_model", disabled=True)
-            yield Select([], prompt="agent model (test connection first)", id="agent_model", disabled=True)
-            yield Select([], prompt="embedding model (test connection first)", id="embed_model", disabled=True)
+            yield from _field(
+                "Author model",
+                Select([], prompt="run Test connection first", id="author_model", disabled=True),
+                "Writes the prose — pick your strongest model.",
+            )
+            yield from _field(
+                "Agent model",
+                Select([], prompt="run Test connection first", id="agent_model", disabled=True),
+                "Runs the support agents (editor, continuity, plotting…). "
+                "A faster model works well.",
+            )
+            yield from _field(
+                "Embedding model",
+                Select([], prompt="run Test connection first", id="embed_model", disabled=True),
+                "Builds the semantic index used for canon search. Must be an embedding model.",
+            )
             with Horizontal(id="wizard_actions"):
                 yield Button("Save & continue", id="save", variant="success", disabled=True)
                 yield Button("Skip model picks — save endpoint only", id="skip")

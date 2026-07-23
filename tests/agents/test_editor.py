@@ -160,6 +160,43 @@ async def test_editor_prompt_includes_character_voices_when_present(stack):
     assert "Character voices:" in sent
 
 
+async def test_editor_pull_mode_replaces_voice_cards_with_cast_pointer(stack):
+    """A tooled Editor is told to pull a voice card when it suspects drift;
+    pushing every card alongside that instruction is the push/pull redundancy
+    the pull-tools rollout was meant to remove. The pointer keeps the ids the
+    voice_drift_flags output must cite."""
+    events, proj, read, committer = stack
+    await events.append(
+        EventType.CHARACTER_CREATED, "ch1",
+        Character(id="ch1", name="Mira", voice="Speaks in short, clipped sentences; never says 'I love you' outright."),
+    )
+    await events.append(
+        EventType.CHAPTER_CREATED, "c1",
+        Chapter(id="c1", title="One", prose="p", character_ids=["ch1"]),
+    )
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert "Character voices:" not in sent
+    assert "Speaks in short, clipped sentences" not in sent
+    assert "Mira (id:ch1)" in sent
+
+
+async def test_editor_pull_mode_empty_cast_adds_no_pointer_block(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
+    await proj.catch_up()
+    runner = FakeRunner(EditorVerdict(verdict="approve", notes="clean"))
+    agent = Editor(runner, read, committer, pull_mode=True)
+    ctx = await agent.poll()
+    await agent.work(ctx)
+    sent = runner.calls[-1]["messages"][0]["content"]
+    assert sent == "Chapter title: One\n\nProse:\np"
+
+
 async def test_editor_prompt_omits_voices_section_when_none_set(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "ch1", Character(id="ch1", name="Mira"))

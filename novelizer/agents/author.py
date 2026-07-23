@@ -158,7 +158,12 @@ def _summarize(
     staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
     pull_mode: bool = False,
 ) -> str:
-    world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
+    if pull_mode:
+        # Titles only: a tooled Author reads lore itself, and pushed bodies
+        # are exactly the summary the retrieval note says not to write from.
+        world = "\n".join(f"- {e.title}" for e in ctx["world"][:10]) or "None yet."
+    else:
+        world = "\n".join(f"- {e.title}: {e.body[:150]}" for e in ctx["world"][:10]) or "None yet."
     # Ids beside the names: character_ids is a required output field, and a cast
     # block of bare names leaves the Author guessing at them.
     chars = "\n".join(

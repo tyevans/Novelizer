@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from langchain_openai import ChatOpenAI
+
+# Default context window for local OpenAI-compatible endpoints. deepagents'
+# create_deep_agent always attaches SummarizationMiddleware; without a model
+# profile it falls back to a fixed 170k-token trigger — past a 128k window,
+# so compaction would never fire before a request overflows. Stamping
+# max_input_tokens switches deepagents onto its fraction-based defaults
+# (trigger at 85%, keep last 10%), sized for the actual window.
+CONTEXT_WINDOW_TOKENS = 128_000
+
+# Tool-heavy passes can exceed LangGraph's default of 25; 50 still tripped
+# in practice, so give agent graphs generous headroom.
+GRAPH_RECURSION_LIMIT = 100
+
+
+class _ReasoningAwareChatOpenAI(ChatOpenAI):
+    """ChatOpenAI, plus surfacing provider-specific reasoning/thinking deltas
+    into additional_kwargs.
+
+    Plain ChatOpenAI targets the official OpenAI API only: non-standard
+    streamed fields like reasoning_content (what vLLM and other local
+    reasoning-enabled OpenAI-compatible servers send) are silently dropped in
+    _convert_delta_to_message_chunk before a callback ever sees them. This
+    override re-reads the raw delta dict streamed alongside content and
+    stashes reasoning_content (or the `reasoning` key some proxies use) back
+    onto the chunk, so a telemetry callback's on_llm_new_token can read it
+    via chunk.message.additional_kwargs."""
+
+    def _convert_chunk_to_generation_chunk(self, chunk, default_chunk_class, base_generation_info):
+        generation_chunk = super()._convert_chunk_to_generation_chunk(
+            chunk, default_chunk_class, base_generation_info)
+        if generation_chunk is None:
+            return generation_chunk
+        choices = chunk.get("choices") or chunk.get("chunk", {}).get("choices", [])
+        if not choices:
+            return generation_chunk
+        delta = choices[0].get("delta") or {}
+        reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+        if reasoning:
+            generation_chunk.message.additional_kwargs["reasoning_content"] = reasoning
+        return generation_chunk
+
+
+def build_chat_model(
+    model: str, base_url: str, api_key: str, temperature: float = 0.8,
+    max_tokens: int | None = None, callbacks=None, streaming=None,
+    context_window_tokens: int = CONTEXT_WINDOW_TOKENS,
+):
+    """Build a LangChain chat model bound to an OpenAI-compatible endpoint.
+
+    max_tokens caps generation per request: an uncapped local model can
+    ramble past a proxy's request timeout and never return, which the caller
+    sees as a hang.
+
+    callbacks (telemetry handlers) imply streaming=True by default — token-
+    by-token delivery is what makes on_llm_new_token fire. Pass `streaming`
+    explicitly to decouple the two.
+    """
+    if streaming is None:
+        streaming = callbacks is not None
+    return _ReasoningAwareChatOpenAI(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        callbacks=callbacks,
+        streaming=streaming,
+        profile={"max_input_tokens": context_window_tokens},
+    )
+
+
+def build_agent_runner(
+    *, model, system_prompt: str, response_format, tools=None,
+    middleware=None, backend=None, callbacks=None,
+    recursion_limit: int = GRAPH_RECURSION_LIMIT,
+):
+    """Build a deepagents graph satisfying the Runner protocol: the generic
+    form of the per-domain runner builders. Callers pass their system
+    prompt, a pydantic response_format, and their tools; the result's
+    ainvoke returns a dict whose "structured_response" key carries the
+    parsed response_format instance."""
+    from deepagents import create_deep_agent
+
+    kwargs: dict = {
+        "model": model,
+        "system_prompt": system_prompt,
+        "response_format": response_format,
+    }
+    if tools is not None:
+        kwargs["tools"] = list(tools)
+    if middleware is not None:
+        kwargs["middleware"] = list(middleware)
+    if backend is not None:
+        kwargs["backend"] = backend
+    graph = create_deep_agent(**kwargs)
+    config: dict = {"recursion_limit": recursion_limit}
+    if callbacks:
+        config["callbacks"] = callbacks
+    return graph.with_config(config)

@@ -56,8 +56,10 @@ class WorldArchitect(BaseAgent):
         committer: Committer,
         interval: int = 120,
         personality: str = "",
+        pull_mode: bool = False,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="world_architect", personality=personality)
+        self.pull_mode = pull_mode
 
     async def readiness(self) -> float:
         # A pending director seed always wakes the Architect, watermark or
@@ -91,7 +93,13 @@ class WorldArchitect(BaseAgent):
         }
 
     async def work(self, ctx: dict) -> WorldEntriesDraft | None:
-        existing = "\n".join(f"- [{e.domain}] {e.title}: {e.body[:100]}" for e in ctx["entries"][:20]) or "The world is empty."
+        if self.pull_mode:
+            # Domains and titles only: the prompt orders a tool-based survey
+            # before canonizing anything, and pushed body slices are the
+            # summary that survey replaces.
+            existing = "\n".join(f"- [{e.domain}] {e.title}" for e in ctx["entries"][:20]) or "The world is empty."
+        else:
+            existing = "\n".join(f"- [{e.domain}] {e.title}: {e.body[:100]}" for e in ctx["entries"][:20]) or "The world is empty."
         seeds = "\n".join(f"Director seed: {s.body}" for s in ctx["signals"]) or "None."
         cast = self._guarded_line("In character", self.personality)
         sparks = architect_settings_note(ctx.get("hand"))
@@ -186,6 +194,7 @@ def _construct(ctx: AgentContext) -> WorldArchitect:
         runner, ctx.read, ctx.committer,
         interval=ctx.settings.default_agent_interval,
         personality=ctx.personalities.get("world_architect", ""),
+        pull_mode=enabled,
     )
 
 
