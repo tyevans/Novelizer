@@ -29,6 +29,30 @@ hang signature so nobody re-diagnoses it from scratch.
 - `live_llm`-marked tests are deselected by `addopts = "-m 'not live_llm'"` in
   `pyproject.toml`; a full run reporting "N deselected" is normal.
 
+## Why the suite is as fast as it is (2026-07-22)
+
+A "tests are slow, must be doing real inference" investigation found **zero live
+inference** in the default run (`live_llm` deselection works) and two real costs,
+both now fixed — keep them fixed:
+
+- **SQLite fsync dominated everything.** `db.connect` opens WAL databases at
+  `synchronous=FULL`, so every event append fsyncs; property tests appending
+  thousands of events ran at ~19% CPU (pure disk wait). `tests/conftest.py` now
+  patches `db.connect` to add `PRAGMA synchronous=OFF` for test DBs only.
+  Measured: worst property test 19.7s → 2.6s, canon/brain/telemetry scope
+  170s → 32s, identical Hypothesis example counts. Don't "fix" slow property
+  tests by cutting `max_examples` — check for I/O wait first (`time` the run;
+  low CPU% = waiting, not computing).
+- **A Docker pgvector container per test.** `postgres_dsn` used to `docker run`
+  + `pg_isready`-poll + `docker stop` around every test (~4s setup, up to 10s
+  teardown, ~25 tests ≈ 2 min). It's now a session-scoped container
+  (`pg_container`, surfaced in `tests/conftest.py`) with a throwaway
+  `CREATE DATABASE` per test (~100ms) and `DROP ... WITH (FORCE)` teardown.
+  Measured: substrate+research_domain scope 142s → 14s. New postgres tests
+  should just take `postgres_dsn` as before; per-database isolation is
+  equivalent to the old per-container isolation (extensions like pgvector are
+  per-database and were always created by the code under test).
+
 ## Running the FULL suite (read this before you background it)
 
 The full suite (`uv run pytest -q -W error`) takes ~2 minutes of CPU but has a known
