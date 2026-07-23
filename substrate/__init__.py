@@ -7,6 +7,7 @@ from substrate.postgres.deps import PostgresDepsStore
 from substrate.postgres.embeddings import PostgresEmbeddingStore
 from substrate.postgres.events import PostgresEventStore
 from substrate.projection import ProjectionCatalog, ProjectionSpec
+from substrate.runtime import RuntimeBase
 
 __all__ = [
     "AgentContext",
@@ -19,6 +20,7 @@ __all__ = [
     "PostgresEventStore",
     "ProjectionCatalog",
     "ProjectionSpec",
+    "RuntimeBase",
     "SubagentGrant",
     "ToolGrant",
     "is_gated",
