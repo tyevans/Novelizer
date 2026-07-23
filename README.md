@@ -454,3 +454,16 @@ and serving the configured models):
 ```bash
 uv run pytest -m live_llm
 ```
+
+## License
+
+Novelizer is licensed under the **GNU Affero General Public License v3.0 or later**
+(AGPL-3.0-or-later) — see [`LICENSE`](LICENSE) for the full text.
+
+In short: you are free to use, modify, and share Novelizer, but any modified version
+you distribute — **including running it as a network service** — must make its complete
+source available under the same license. This keeps the project and its derivatives open.
+
+Note that the license covers the **software**, not the prose it generates. A program's
+output is not governed by the program's license, so the AGPL does not itself impose terms
+on the novels Novelizer produces.

@@ -10,6 +10,8 @@ name = "novelizer"
 version = "0.1.0"
 description = "Autonomous world-building and storytelling agent system"
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.20.0",
