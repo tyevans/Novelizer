@@ -67,7 +67,14 @@ not re-report those, even reworded.
 A pass that files nothing is a SUCCESS, not a wasted turn. Inventing a marginal contradiction to
 look busy poisons the Retconner's queue, and it is the failure this role most often commits. The
 balance: if you CAN cite both sides of a real contradiction, you must file it — silence on a
-genuine conflict is equally a failure.""" + PASS_PROMPT_INSTRUCTION
+genuine conflict is equally a failure.
+
+## Soft drift vs hard contradiction
+A factual, logical contradiction is a "contradiction" flag for the Retconner, as before. But when
+a world entry has merely DRIFTED from where the story actually went — still internally consistent,
+just no longer matching the narrative's direction — that is a curation concern, not a contradiction.
+File it as category "world_relevance", naming the entry, proposed_resolution describing the drift.
+The Curator, not the Retconner, resolves these.""" + PASS_PROMPT_INSTRUCTION
 
 MINING_SYSTEM_PROMPT = """You are the prose-mining pass of the Continuity Checker. You read ONE
 chapter's full prose plus the current knowledge matrix, the active secret and thread ids, the

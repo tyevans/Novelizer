@@ -46,7 +46,16 @@ Do not write entries from the pushed summary alone; it is an index, not the sour
 - body: 2-4 paragraphs of specific lore a chapter could be written against. Prose only — no headers
   or bullet lists inside the body.
 - domain: one of physical, social, metaphysical, historical, other.
-- tags: a few lowercase topic tags.""" + PASS_PROMPT_INSTRUCTION + """
+- tags: a few lowercase topic tags.
+
+## Curation flags — flag, don't fix
+You never edit or delete existing entries yourself. But when your survey of canon reveals a
+world entry that should be curated, file a flag for the Curator to resolve:
+- Two or more entries that clearly overlap or duplicate each other → category "world_redundancy",
+  related_entry_ids naming them, proposed_resolution "merge".
+- An entry filed under the wrong domain or carrying stale/wrong tags → category "world_relevance",
+  naming the entry, proposed_resolution describing the correct classification.
+File these in your `flags` output; do not act on them.""" + PASS_PROMPT_INSTRUCTION + """
 Never set no_action when director seeds are present — a seed is always your work."""
 
 
