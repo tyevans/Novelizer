@@ -75,6 +75,13 @@ async def test_detail_view_for_beat_and_blueprint():
 
 
 @pytest.mark.asyncio
+async def test_detail_view_for_brief():
+    read = _Read(blueprint=_BP(), beats=[], briefs=[_Brief("br1", 3, "raise the stakes")])
+    brief_view = await browser_model.detail_view(read, "outline", "brief:br1")
+    assert brief_view is not None and "raise the stakes" in brief_view.body.plain
+
+
+@pytest.mark.asyncio
 async def test_detail_view_missing_returns_none():
     read = _Read(blueprint=_BP(), beats=[], briefs=[])
     assert await browser_model.detail_view(read, "outline", "beat:nope") is None

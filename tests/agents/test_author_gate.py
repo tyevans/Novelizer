@@ -1,5 +1,7 @@
 import pytest
-from novelizer.agents.author import Author
+from novelizer.agents.author import Author, _summarize
+
+PROVISIONAL_NOTE = "No outline exists yet — you are drafting ahead of the Plotter under a"
 
 
 class _Read:
@@ -60,3 +62,30 @@ async def test_fallback_opens_when_proposal_and_world_present():
 async def test_disabled_gate_drafts_without_blueprint():
     a = _author(_Read(blueprint=None), gate_enabled=False)
     assert await a.readiness() == 1.0
+
+
+@pytest.mark.asyncio
+async def test_draft_backlog_decays_readiness_when_gate_open():
+    a = _author(_Read(blueprint=object(), drafts=0))
+    assert await a.readiness() == 1.0
+    a = _author(_Read(blueprint=object(), drafts=1))
+    assert await a.readiness() == pytest.approx(1.0 - 1 / 3)
+    a = _author(_Read(blueprint=object(), drafts=3))
+    assert await a.readiness() == 0.0
+
+
+def _bare_ctx():
+    return {
+        "world": [], "characters": [], "previous": [], "chapters": [], "signals": [],
+        "threads": [], "secrets": [], "knowledge_matrix": {}, "themes": [], "causal_edges": [],
+    }
+
+
+def test_provisional_note_fires_when_gate_enabled_and_no_blueprint_or_brief():
+    out = _summarize(_bare_ctx(), gate_enabled=True)
+    assert PROVISIONAL_NOTE in out
+
+
+def test_provisional_note_absent_when_gate_disabled():
+    out = _summarize(_bare_ctx(), gate_enabled=False)
+    assert PROVISIONAL_NOTE not in out

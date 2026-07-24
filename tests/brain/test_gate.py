@@ -57,6 +57,12 @@ async def test_fallback_closed_with_proposal_but_no_world():
 
 
 @pytest.mark.asyncio
+async def test_fallback_closed_when_open_proposal_is_not_a_blueprint():
+    read = FakeRead(proposals=[_Prop("open", EventType.CHARACTER_CREATED)], world=[object()])
+    assert await gate.genesis_fallback_open(read) is False
+
+
+@pytest.mark.asyncio
 async def test_disabled_gate_always_lets_author_draft():
     read = FakeRead()
     assert await gate.author_may_draft(read, gate_enabled=False) is True

@@ -1,9 +1,10 @@
 """Outline-first soft gate: decides whether the Author may draft yet.
 
-The single source of truth for "does a first-pass outline exist?" Pure and
+The single source of truth for "does an active blueprint exist?" Pure and
 async — takes a ReadStore-shaped object, reads no wall clock, mints no events.
-The gate lives in the readiness layer (each gated agent multiplies its
-readiness by this), never in the scheduler: keeping it soft is the whole point.
+The gate lives in the readiness layer (the Author's readiness() short-circuits
+to 0.0 while closed), never in the scheduler: keeping it soft is the whole
+point.
 """
 from __future__ import annotations
 

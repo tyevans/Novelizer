@@ -155,6 +155,7 @@ def _summarize(
     summaries: dict[str, str] | None = None,
     staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
     pull_mode: bool = False,
+    gate_enabled: bool = True,
 ) -> str:
     if pull_mode:
         # Titles only: a tooled Author reads lore itself, and pushed bodies
@@ -200,7 +201,7 @@ def _summarize(
         chapters_block = f"Previous chapters:\n{prev}"
     brief = ctx.get("brief")
     provisional = ""
-    if ctx.get("blueprint") is None and brief is None:
+    if gate_enabled and ctx.get("blueprint") is None and brief is None:
         provisional = (
             "\n\nNo outline exists yet — you are drafting ahead of the Plotter under a "
             "fallback. Keep this chapter provisional and exploratory; do not invent a "
@@ -307,6 +308,7 @@ class Author(BaseAgent):
                 summaries={s.chapter_id: s.summary for s in ctx["summaries"]},
                 staleness_threshold_chapters=self._staleness_threshold_chapters,
                 pull_mode=self.pull_mode,
+                gate_enabled=self.gate_enabled,
             )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
