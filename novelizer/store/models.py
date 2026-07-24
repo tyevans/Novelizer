@@ -26,6 +26,7 @@ class CanonStatus(StrEnum):
     active = "active"
     superseded = "superseded"
     contested = "contested"
+    retired = "retired"
 
 
 class EditorialStatus(StrEnum):
