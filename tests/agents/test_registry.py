@@ -5,7 +5,7 @@ from novelizer.agents.registry_types import AgentSpec
 EXPECTED_ORDER = [
     "world_architect", "character_keeper", "muse",
     "plotter", "author",
-    "editor", "continuity_checker", "retconner", "structure_analyst",
+    "editor", "continuity_checker", "retconner", "curator", "structure_analyst",
     "summarizer", "triage", "flaglabeler",
 ]
 
