@@ -149,11 +149,18 @@ simply become the new source of idleness.
 
 ### 8. Visible progress is part of the design
 
-Strict gating without visible progress is indistinguishable from a hang. New
-telemetry `BACKGROUND_PROGRESS(kind, done, total)` drives an `indexing 42/210`
-readout, and the new `"background catch-up"` eligibility reason explains *why*
-agents are held. Without these, strict gating merely relabels the idleness this
-work exists to remove.
+Strict gating without visible progress is indistinguishable from a hang. The
+`"background catch-up"` eligibility reason explains *why* agents are held, and a
+pull-based `Runtime.background_progress()` reports combined pending lag across
+both drains so the status bar can render `indexing N/M`. Without these, strict
+gating merely relabels the idleness this work exists to remove.
+
+*Implementation note:* the design originally called for a push
+`BACKGROUND_PROGRESS(kind, done, total)` telemetry event. It was dropped during
+build: the indexers expose only pending `lag()`, not a done/total high-water
+mark, so `total` had no data source, and every TUI status loop already polls.
+The pull readout covers legibility without adding an unused generic event to the
+kit. The `"background catch-up"` reason is the only telemetry-surface change.
 
 ### 9. Settings
 
@@ -167,6 +174,15 @@ for every existing story.
 
 ## Consequences, accepted
 
+- **A down embed/KG endpoint freezes the whole room indefinitely.** With the
+  gate strict, if the endpoint the drain depends on is unreachable, lag never
+  returns to zero and no agent ever dispatches. Poison-skip does not rescue
+  this — an outage is not a poison event; it fails every event forever without
+  the cursor advancing. This was raised explicitly and the user chose to keep
+  the gate strict: agents must never run ahead of un-indexed canon, and the
+  operator sees the frozen room plus the `background_progress()` backlog
+  readout (`indexing N/M`) and fixes the endpoint. No max-wait escape hatch was
+  added. This is a known, deliberate operational property, not a gap.
 - **Every chapter the Author writes immediately creates lag and pauses the
   whole room** until it is embedded and KG-extracted. That is the direct
   consequence of "strict + background-first," and it was chosen deliberately.

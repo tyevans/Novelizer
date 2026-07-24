@@ -11,6 +11,11 @@ import-linter contract (see pyproject.toml).
 from agent_kit.base import (
     BaseAgent,
     Runner,
+    # Re-exported at the package root (not in __all__ -- it stays a kit
+    # internal) so a domain consumer feeding the pool's AIMD from its own drain
+    # loop can reach it without importing agent_kit.base directly, which the
+    # package-boundary contract forbids.
+    _is_rate_limit_error,
 )
 from agent_kit.llm import (
     CONTEXT_WINDOW_TOKENS,

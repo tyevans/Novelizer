@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_kit.base import _is_rate_limit_error
+from agent_kit import _is_rate_limit_error
 
 
 async def drain_pending(
