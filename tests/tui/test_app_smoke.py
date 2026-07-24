@@ -42,6 +42,7 @@ async def test_feed_renders_authored_chapter():
         default_agent_interval=1,
         continuity_interval=1,
         projector_interval=0.1,
+        outline_gate_enabled=False,  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
     )
     rt = Runtime(settings, runners=_room_runners())
     await rt.start()

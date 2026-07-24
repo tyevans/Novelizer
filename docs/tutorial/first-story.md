@@ -399,10 +399,13 @@ shape.
 **What you'll see in THE ROOM.** Every line in the feed starts with a fixed speaker
 column — a glyph and a name in that agent's color — so it reads like a screenplay:
 `✎ Author`, `§ Editor`, `⌂ Architect`, `♥ Keeper`, `★ Director` (you). Within the
-first minute or so, expect the world-building to start. The World Architect treats a
-pending seed as top priority, and the Author fires early too, so the exact order
-varies — but a typical opening run of the feed looks like this (your titles and names
-will be your own):
+first minute or so, expect the world-building and outlining to start. The World
+Architect treats a pending seed as top priority, and the Plotter proposes a first-pass
+blueprint from the same seed before any prose exists — the Author holds off until that
+blueprint is adopted (or, in an unattended run, until world exists and a blueprint is at
+least proposed), so it is normal for the first lines you see to be lore and outline
+rather than a drafted chapter. A typical opening run of the feed looks like this (your
+titles and names will be your own):
 
 ```text
 ⌂ Architect   lore: The Tide-Tax Ledger  ◆ lore

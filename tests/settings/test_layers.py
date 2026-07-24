@@ -72,7 +72,7 @@ def test_global_config_fields_match_overridable_plus_global_only_keys():
     assert set(GlobalConfig.model_fields) == STORY_OVERRIDABLE_KEYS | {
         "llm_base_url", "llm_api_key", "llm_max_tokens", "default_stories_dir", "last_opened_story",
         "suppress_flat_migration_prompt", "max_concurrent_agents", "llm_pool_size",
-        "background_drain_concurrency",
+        "background_drain_concurrency", "outline_gate_enabled",
     }
 
 

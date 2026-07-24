@@ -8,6 +8,7 @@ from novelizer.brain.context import (
     stale_threads_note,
 )
 from novelizer.brain.context_assembly import AdvisoryEntry, assemble_advisory
+from novelizer.brain.gate import author_may_draft
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
@@ -60,8 +61,10 @@ gap exists that prose alone should not paper over. Before you draft in that situ
     is a payoff owed to the reader.
   - If a beat's ideal-position window (per the blueprint) covers the next ordinal and
     is unfulfilled, that beat is the chapter's spine.
-  - No blueprint adopted, or no beat/thread/promise clearly due: this is a sign the
-    Plotter's queue is empty or behind, not license to write toward nothing.
+  - No blueprint adopted: this should not normally happen — the Plotter mints
+    a blueprint from the premise before you draft. If you are here, you are in
+    the fallback: keep the chapter provisional (see your task note) and say in
+    your feed note that the Plotter still owes a blueprint.
 - You cannot mint a blueprint or a chapter brief yourself — only the Plotter emits
   those. Do not fabricate a brief in your own head and silently treat it as
   authoritative. Instead:
@@ -152,6 +155,7 @@ def _summarize(
     summaries: dict[str, str] | None = None,
     staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
     pull_mode: bool = False,
+    gate_enabled: bool = True,
 ) -> str:
     if pull_mode:
         # Titles only: a tooled Author reads lore itself, and pushed bodies
@@ -196,6 +200,13 @@ def _summarize(
         prev = "\n".join(lines) or "None yet."
         chapters_block = f"Previous chapters:\n{prev}"
     brief = ctx.get("brief")
+    provisional = ""
+    if gate_enabled and ctx.get("blueprint") is None and brief is None:
+        provisional = (
+            "\n\nNo outline exists yet — you are drafting ahead of the Plotter under a "
+            "fallback. Keep this chapter provisional and exploratory; do not invent a "
+            "chapter's worth of new threads/promises/secrets, and say so in your feed note."
+        )
     brief_block = ""
     if brief is not None:
         brief_block = (
@@ -213,7 +224,7 @@ def _summarize(
     return (
         f"World lore:\n{world}\n\nCharacters:\n{chars}\n\n"
         f"{chapters_block}\n\nDirector notes:\n{notes}{pool}{sparks}{voice}{cast}{brain}{secrets}{causal}"
-        f"{ledger}{pacing_plan}{brief_block}\n\nWrite the next chapter."
+        f"{ledger}{pacing_plan}{provisional}{brief_block}\n\nWrite the next chapter."
     )
 
 
@@ -244,6 +255,7 @@ class Author(BaseAgent):
         advisory_token_budget: int = 2000,
         staleness_threshold_chapters: int = STALENESS_THRESHOLD_CHAPTERS,
         pull_mode: bool = False,
+        gate_enabled: bool = True,
     ) -> None:
         super().__init__(runner, read_store, committer, interval, name="author", personality=personality)
         self._casting_note = casting_note
@@ -251,8 +263,14 @@ class Author(BaseAgent):
         self._advisory_token_budget = advisory_token_budget
         self._staleness_threshold_chapters = staleness_threshold_chapters
         self.pull_mode = pull_mode
+        self.gate_enabled = gate_enabled
 
     async def readiness(self) -> float:
+        # Outline-first soft gate: stand down until a first-pass blueprint
+        # exists (or the genesis fallback opens). Kept in readiness so it stays
+        # soft — the scheduler is untouched.
+        if not await author_may_draft(self._read, gate_enabled=self.gate_enabled):
+            return 0.0
         drafts = len(await self._read.list_chapters(status="draft"))
         return max(0.0, 1.0 - drafts / 3)
 
@@ -272,6 +290,7 @@ class Author(BaseAgent):
             "hand": await self._read.get_active_hand(),
             "promises": await self._read.list_promises(),
             "brief": await self._read.get_open_brief_for_ordinal(len(chapters) + 1),
+            "blueprint": await self._read.get_active_blueprint(),
             "summaries": await self._read.list_chapter_summaries(),
         }
 
@@ -289,6 +308,7 @@ class Author(BaseAgent):
                 summaries={s.chapter_id: s.summary for s in ctx["summaries"]},
                 staleness_threshold_chapters=self._staleness_threshold_chapters,
                 pull_mode=self.pull_mode,
+                gate_enabled=self.gate_enabled,
             )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
@@ -396,6 +416,7 @@ def _construct(ctx: AgentContext) -> Author:
         advisory_token_budget=ctx.settings.advisory_token_budget,
         staleness_threshold_chapters=ctx.settings.staleness_threshold_chapters,
         pull_mode=enabled,
+        gate_enabled=ctx.settings.outline_gate_enabled,
     )
 
 

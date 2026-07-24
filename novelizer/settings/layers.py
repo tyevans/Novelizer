@@ -72,6 +72,7 @@ class GlobalConfig(BaseModel):
     plotter_subagent_enabled: bool | None = None
     author_subagent_enabled: bool | None = None
     checker_subagent_enabled: bool | None = None
+    outline_gate_enabled: bool | None = None
 
 
 class StoryConfig(BaseModel):
