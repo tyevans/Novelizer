@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 from novelizer.canon.events import EventType
+from novelizer.store.poison_ladder import PoisonLadder
 from novelizer.text_chunk import chunk_prose
 
 logger = logging.getLogger(__name__)
@@ -37,13 +38,15 @@ class KGProjector:
     need (e.g. a Director-facing entity browser) shows up.
     """
 
-    def __init__(self, events, read_store, kg_store, embedding_store, extraction_runner, cursor_path: str) -> None:
+    def __init__(self, events, read_store, kg_store, embedding_store, extraction_runner,
+                 cursor_path: str, poison_skip_after: int = 3) -> None:
         self._events = events
         self._read = read_store
         self._kg = kg_store
         self._emb = embedding_store
         self._runner = extraction_runner
         self._cursor_path = Path(cursor_path)
+        self._poison = PoisonLadder(poison_skip_after)
 
     def _load_cursor(self) -> int:
         try:
@@ -56,6 +59,14 @@ class KGProjector:
         tmp_path.write_text(json.dumps({"last_sequence": seq}))
         os.replace(tmp_path, self._cursor_path)
 
+    async def lag(self) -> int:
+        """Read-only: how many KG-relevant events haven't been extracted yet.
+        Counts against this projector's own 6 event types, not the canon
+        indexer's 24, so the two lags are not interchangeable. Never mutates
+        the cursor and never calls _index_one."""
+        last = self._load_cursor()
+        return await self._events.count_since(last, event_types=list(INDEXED_EVENT_TYPES))
+
     async def catch_up(self) -> int:
         processed = 0
         try:
@@ -65,9 +76,23 @@ class KGProjector:
                 try:
                     await self._index_one(ev.event_type, ev.aggregate_id, ev.sequence)
                 except Exception as e:
-                    logger.warning("kg indexing stopped at seq %s (%s: %s); will retry",
-                                    ev.sequence, type(e).__name__, e)
-                    break
+                    if not self._poison.record_failure(ev.sequence):
+                        logger.warning("kg indexing stopped at seq %s (%s: %s); will retry",
+                                        ev.sequence, type(e).__name__, e)
+                        break
+                    # Extraction is an LLM call, so it is the likeliest thing
+                    # here to fail identically forever (the seq 33 incident
+                    # below). Losing one chapter's facts beats a cursor that
+                    # never drains and background lag that never clears.
+                    logger.error(
+                        "kg indexing abandoning seq %s (aggregate %s) after %s consecutive "
+                        "failures (%s: %s); its facts will never be extracted",
+                        ev.sequence, ev.aggregate_id, self._poison.skip_after,
+                        type(e).__name__, e,
+                    )
+                    self._save_cursor(ev.sequence)
+                    continue  # a skipped event is not a processed one
+                self._poison.record_success(ev.sequence)
                 self._save_cursor(ev.sequence)
                 processed += 1
         except Exception as e:

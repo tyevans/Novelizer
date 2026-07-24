@@ -40,6 +40,57 @@ async def test_events_since_type_filter(store):
     assert [e.event_type for e in only] == [EventType.WORLD_ENTRY_CREATED]
 
 
+async def test_count_since_excludes_at_or_below(store):
+    await store.append(EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+    await store.append(EventType.CHAPTER_CREATED, "c2", Chapter(title="B", prose="b"))
+    assert await store.count_since(0) == 2
+    assert await store.count_since(1) == 1
+    assert await store.count_since(2) == 0
+
+
+async def test_count_since_type_filter(store):
+    await store.append(EventType.CHAPTER_CREATED, "c1", Chapter(title="A", prose="a"))
+    await store.append(EventType.WORLD_ENTRY_CREATED, "w1", WorldEntry(title="W", body="w"))
+    assert await store.count_since(0, event_types=[EventType.WORLD_ENTRY_CREATED]) == 1
+    assert await store.count_since(0, event_types=[EventType.THREAD_PLANTED]) == 0
+    # A falsy filter means "every type", exactly as events_since reads it. The
+    # lag() callers build this list from a module constant, so an empty one
+    # must not silently flip the meaning to "count nothing".
+    assert await store.count_since(0, event_types=None) == 2
+    assert await store.count_since(0, event_types=[]) == 2
+
+
+_COUNTABLE_TYPES = [
+    EventType.CHAPTER_CREATED, EventType.WORLD_ENTRY_CREATED, EventType.THREAD_PLANTED,
+]
+
+
+@settings(deadline=None, max_examples=25)
+@given(
+    kinds=st.lists(st.sampled_from(_COUNTABLE_TYPES), max_size=12),
+    cursor=st.integers(min_value=0, max_value=13),
+    filter_size=st.integers(min_value=0, max_value=len(_COUNTABLE_TYPES)),
+)
+async def test_count_since_always_agrees_with_events_since(kinds, cursor, filter_size):
+    """count_since exists only to avoid hydrating rows lag() throws away, so
+    its answer must be indistinguishable from len(events_since(...)) for every
+    cursor and every filter -- including the empty one."""
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    s = EventStore(path)
+    await s.init()
+    try:
+        for i, kind in enumerate(kinds):
+            await s.append_raw(kind, f"a{i}", {"i": i})
+        event_types = _COUNTABLE_TYPES[:filter_size]
+        assert await s.count_since(cursor, event_types=event_types) == len(
+            await s.events_since(cursor, event_types=event_types)
+        )
+    finally:
+        await s.close()
+        os.unlink(path)
+
+
 @settings(deadline=None)  # SQLite I/O under load trips the 200ms default; wall-clock is not the invariant here
 @given(n=st.integers(min_value=1, max_value=25))
 async def test_sequences_are_strictly_increasing(n):

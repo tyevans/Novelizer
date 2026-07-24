@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from novelizer.canon.events import EventType
+from novelizer.store.poison_ladder import PoisonLadder
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +44,17 @@ class CanonIndexer:
     but hydrating CURRENT records from ReadStore so create/revise/update
     share one path). Failure-tolerant by contract: an embed-endpoint outage
     logs a warning and leaves the cursor at the last indexed event, so the
-    next catch_up retries. Never writes to world.db.
+    next catch_up retries -- up to poison_skip_after consecutive attempts on
+    the same event, after which it is abandoned. Never writes to world.db.
     """
 
-    def __init__(self, events, read_store, embedding_store, cursor_path: str) -> None:
+    def __init__(self, events, read_store, embedding_store, cursor_path: str,
+                 poison_skip_after: int = 3) -> None:
         self._events = events
         self._read = read_store
         self._emb = embedding_store
         self._cursor_path = Path(cursor_path)
+        self._poison = PoisonLadder(poison_skip_after)
 
     def _load_cursor(self) -> int:
         try:
@@ -67,11 +71,11 @@ class CanonIndexer:
 
     async def lag(self) -> int:
         """Read-only: how many indexable events haven't been embedded yet.
-        Reuses _load_cursor and the same events_since query catch_up makes,
-        never mutates the cursor and never calls _index_one."""
+        Reuses _load_cursor and the same filter catch_up applies, but counts
+        in SQL -- a 10k-event backlog is a COUNT, not 10k hydrated rows.
+        Never mutates the cursor and never calls _index_one."""
         last = self._load_cursor()
-        stored = await self._events.events_since(last, event_types=list(INDEXED_EVENT_TYPES))
-        return len(stored)
+        return await self._events.count_since(last, event_types=list(INDEXED_EVENT_TYPES))
 
     async def catch_up(self) -> int:
         processed = 0
@@ -84,9 +88,22 @@ class CanonIndexer:
                 try:
                     await self._index_one(ev.event_type, ev.aggregate_id)
                 except Exception as e:  # endpoint down, malformed record, ...
-                    logger.warning("canon indexing stopped at seq %s (%s: %s); will retry",
-                                   ev.sequence, type(e).__name__, e)
-                    break
+                    if not self._poison.record_failure(ev.sequence):
+                        logger.warning("canon indexing stopped at seq %s (%s: %s); will retry",
+                                       ev.sequence, type(e).__name__, e)
+                        break
+                    # Abandoning an event loses its embedding until something
+                    # else touches that record -- but a cursor pinned on it
+                    # never drains, and background lag holds every agent.
+                    logger.error(
+                        "canon indexing abandoning seq %s (aggregate %s) after %s consecutive "
+                        "failures (%s: %s); it will never be embedded",
+                        ev.sequence, ev.aggregate_id, self._poison.skip_after,
+                        type(e).__name__, e,
+                    )
+                    self._save_cursor(ev.sequence)
+                    continue  # a skipped event is not a processed one
+                self._poison.record_success(ev.sequence)
                 self._save_cursor(ev.sequence)
                 processed += 1
         except Exception as e:
