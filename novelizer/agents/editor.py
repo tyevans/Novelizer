@@ -9,6 +9,7 @@ from novelizer.brain.context import (
     beat_drift_note, causal_flags_note, ledger_note, pacing_flags_note, resolution_pacing_note,
 )
 from novelizer.brain.sag_spike import SAG_SPIKE_DELTA
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -310,7 +311,7 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None, suba
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=EditorVerdict,
-            backend=backend, tools=tools, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

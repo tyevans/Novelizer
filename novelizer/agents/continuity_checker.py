@@ -14,6 +14,7 @@ from novelizer.brain.paradoxes import find_paradoxes, paradox_description
 from novelizer.brain.mining import MINED_SOURCE_TAG, thread_touch_log
 from novelizer.brain.watermarks import current_done_ids
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
@@ -551,7 +552,7 @@ def build_continuity_checker_runner(settings, callbacks=None, backend=None, tool
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ContinuityOutput,
-            backend=backend, tools=tools, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

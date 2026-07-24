@@ -3,6 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import TriageVerdict
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -162,7 +163,7 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None, suba
         )
         graph = create_deep_agent(
             model=model, system_prompt=SYSTEM_PROMPT, response_format=TriageVerdict,
-            backend=backend, tools=tools, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

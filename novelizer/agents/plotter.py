@@ -35,11 +35,6 @@ forcing the remaining beats into the wrong-sized frame."""
 _READINESS_BRIEF_RUNWAY = 2
 _READINESS_BRIEF_LOOKAHEAD = 3
 
-# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
-# middleware's container source contract makes per-agent pack selectivity
-# unavailable, so every tooled agent shares the same source list.
-PLOTTER_SKILLS = CRAFT_SKILLS
-
 
 def _summarize(ctx: dict, personality: str = "") -> str:
     chapters = ctx["chapters"]
@@ -309,7 +304,7 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None, sub
         system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
-            backend=backend, tools=tools, skills=PLOTTER_SKILLS, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[TodoContextMiddleware()],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
