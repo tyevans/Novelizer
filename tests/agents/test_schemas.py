@@ -227,3 +227,32 @@ def test_no_action_defaults_false_on_pass_capable_outputs():
     assert KeeperOutput().no_action is False
     assert WorldEntriesDraft().no_action is False
     assert ContinuityOutput().no_action is False
+
+
+def test_curation_decision_shapes():
+    from novelizer.agents.schemas import CurationDecision, WorldEntryDraft
+
+    # default is the safe no-op
+    assert CurationDecision().action == "reject"
+
+    revise = CurationDecision(
+        action="revise",
+        entry=WorldEntryDraft(title="Tavern", body="Tighter prose.", supersedes_id="w1"),
+    )
+    assert revise.entry.supersedes_id == "w1"
+
+    merge = CurationDecision(
+        action="merge",
+        entry=WorldEntryDraft(title="The Tavern", body="Consolidated.", supersedes_id="w1"),
+        retire_ids=["w2", "w3"],
+    )
+    assert merge.retire_ids == ["w2", "w3"]
+
+    retire = CurationDecision(action="retire", retire_ids=["w9"], reason="no longer serves the story")
+    assert retire.retire_ids == ["w9"]
+
+    # unknown domain on the carried entry is coerced, never raised
+    assert CurationDecision(
+        action="revise",
+        entry=WorldEntryDraft(title="X", body="y", domain="nonsense"),
+    ).entry.domain == "other"
