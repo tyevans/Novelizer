@@ -22,6 +22,7 @@ class EventType:
     FLAG_REJECTED = "flag.rejected"
     FLAG_ESCALATED = "flag.escalated"
     FLAG_ESCALATION_CLEARED = "flag.escalation_cleared"
+    FLAG_LABELED = "flag.labeled"
     PROPOSAL_CREATED = "proposal.created"
     PROPOSAL_APPROVED = "proposal.approved"
     PROPOSAL_REJECTED = "proposal.rejected"
@@ -86,6 +87,18 @@ class AgentRemark(BaseModel):
 
     agent_name: str
     note: str
+
+
+class FlagLabeled(BaseModel):
+    """Payload for flag.labeled — the FlagLabeler's post-filing title/summary
+    pass. Deliberately a NARROW event, not a re-`Flag` under flag.created: its
+    projection touches only `title`/`summary` on the existing row (a json_set),
+    so a label committed from a stale read can never clobber a status or
+    escalation another agent changed in the meantime. `id` is the flag's id."""
+
+    id: str
+    title: str = ""
+    summary: str = ""
 
 
 class ThreadPlanted(BaseModel):

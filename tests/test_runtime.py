@@ -192,7 +192,8 @@ async def test_full_pipeline_runs_under_runtime(settings):
     try:
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor", "continuity_checker",
-            "retconner", "structure_analyst", "muse", "plotter", "triage", "summarizer",
+            "retconner", "curator", "structure_analyst", "muse", "plotter", "triage", "summarizer",
+            "flaglabeler",
         }
         # Drive each agent once directly (deterministic), projecting between.
         for name in ["world_architect", "author", "editor"]:
@@ -361,8 +362,8 @@ async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
         await rt.start()
         assert {a.name for a in rt.agents} == {
             "world_architect", "author", "character_keeper", "editor",
-            "continuity_checker", "retconner", "structure_analyst", "muse",
-            "plotter", "triage", "summarizer",
+            "continuity_checker", "retconner", "curator", "structure_analyst", "muse",
+            "plotter", "triage", "summarizer", "flaglabeler",
         }
         assert rt.structure_analyst is not None
         assert rt.structure_analyst._committer is rt.committer

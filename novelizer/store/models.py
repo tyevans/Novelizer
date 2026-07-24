@@ -357,6 +357,14 @@ class Flag(BaseModel):
     created_at: datetime = Field(default_factory=_now)
     category: str
     description: str
+    title: str = ""
+    """Short human-readable label set by a quick post-filing LLM pass
+    (FlagLabeler). Empty until that pass runs — and empty forever for flags
+    projected before this field existed, which replay unchanged. UI falls back
+    to a `description` prefix when it is blank."""
+    summary: str = ""
+    """One-sentence plain summary from the same post-filing pass. Same empty
+    default and replay contract as `title`."""
     related_entry_ids: list[str] = Field(default_factory=list)
     proposed_resolution: str = ""
     status: FlagStatus = FlagStatus.open
