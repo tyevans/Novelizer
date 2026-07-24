@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
@@ -171,11 +172,17 @@ class ScriptedContinuityRunner:
 
 
 class AdvancingClock:
-    """A fake monotonic clock that jumps well past every agent interval on each
-    call, so interval-gating never blocks agent eligibility across ticks."""
+    """A fake monotonic clock that jumps well past any backoff ladder deadline
+    on each call, so an agent that took a no-progress step back is eligible
+    again by the next tick and the loop below cannot stall on it.
+
+    Seeded from time.monotonic() rather than zero: the agents' own ladders are
+    stamped with the real monotonic clock (novelizer's BaseAgent takes no clock
+    injection), and a scheduler clock starting behind those deadlines would
+    read every backed-off agent as still backed off."""
 
     def __init__(self, step: float = 10_000.0) -> None:
-        self._t = 0.0
+        self._t = time.monotonic()
         self._step = step
 
     def __call__(self) -> float:

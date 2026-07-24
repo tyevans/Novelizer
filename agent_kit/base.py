@@ -16,20 +16,11 @@ from agent_kit.telemetry import (
 
 logger = logging.getLogger(__name__)
 
-# An agent that ran on fresh material but explicitly chose not to act steps
-# back for this many intervals instead of one, freeing dispatch slots.
-PASS_BACKOFF_MULTIPLIER = 3
-
-# A run killed by a rate limit means the endpoint is saturated — usually by
-# this very fleet. Rejoining at full cadence next interval feeds the pile-up,
-# so the agent steps back this many intervals instead.
-RATE_LIMIT_BACKOFF_MULTIPLIER = 3
-
 # --- backoff ladders, in absolute seconds ---------------------------------
 #
-# These replace the "N × interval" scheme above. Their unit is seconds rather
-# than a multiple of an operator-configured number, because once dispatch stops
-# waiting on a clock there is no interval left to multiply.
+# Their unit is seconds rather than a multiple of an operator-configured
+# interval, because dispatch no longer waits on a clock: there is no interval
+# left to multiply. These are the only backpressure the chassis applies.
 
 # A crashed run says nothing about how long the cause will last, so the first
 # retry is nearly immediate — most agent failures are transient (a malformed
@@ -110,8 +101,6 @@ class BaseAgent:
             self.name = name
         self.personality = personality
         self.paused = False
-        self._last_run = 0.0
-        self._backoff_until = 0.0
         self._last_fingerprint: tuple | None = None
         self.telemetry = None  # TelemetryEmitter; injected post-construction
         # "Did run <id> actually produce anything?" — public and injectable
@@ -142,45 +131,31 @@ class BaseAgent:
     def resume(self) -> None:
         self.paused = False
 
-    def ready_for_interval(self, now: float) -> bool:
-        return (now - self._last_run) >= self.interval and now >= self._backoff_until
-
     def ready(self, now: float) -> bool:
-        """Dispatchable on the progress ladders alone: no interval, no
-        _last_run, no legacy _backoff_until. An agent that has never run is
-        ready now, however long its configured interval is — waiting on a
-        clock while a dispatch slot sits free is the whole bug this replaces.
-
-        _backoff_until is deliberately excluded: note_pass() moves both it and
-        the idle ladder, so consulting both would charge one declared pass
-        twice, in two different units."""
+        """Dispatchable on the progress ladders alone: no interval, no clock.
+        An agent that has never run is ready now, however large its configured
+        interval is — waiting on a clock while a dispatch slot sits free is the
+        whole bug this replaces."""
         return now >= max(self._fail_until, self._idle_until)
 
-    def mark_ran(self, now: float) -> None:
-        self._last_run = now
-
     def seconds_until_ready(self, now: float) -> float:
-        """Countdown over every gate currently live. The interval gate is still
-        what the scheduler dispatches on this phase, so it stays in the max
-        alongside the ladders — reporting a ladder-only countdown would show
-        the status bar "ready in 0s" for an agent that will not be dispatched
-        for another quarter hour. Clamped at zero: this renders directly."""
-        return max(0.0, self.interval - (now - self._last_run), self._backoff_until - now,
-                   self._fail_until - now, self._idle_until - now)
+        """Countdown over the two ladders, and nothing else — dispatch consults
+        exactly these, so the status bar reads the same deadlines the scheduler
+        does and can never disagree with it. Clamped at zero: this renders
+        directly, and a past deadline must not show as a negative wait."""
+        return max(0.0, self._fail_until - now, self._idle_until - now)
 
     def note_pass(self, now: float | None = None) -> None:
-        """Record an explicit "nothing to do" verdict: engage the idle ladder,
-        and (still, this phase) back off for PASS_BACKOFF_MULTIPLIER intervals
-        instead of one. Same clock family as the scheduler's default
-        (time.monotonic); inject `clock` at construction to keep agent backoff
-        and a scheduler's injected clock in the same timeline.
+        """Record an explicit "nothing to do" verdict by engaging the idle
+        ladder. Same clock family as the scheduler's default (time.monotonic);
+        inject `clock` at construction to keep agent backoff and a scheduler's
+        injected clock in the same timeline.
 
         This is the early exit for an agent that has already established it has
         nothing to do: it need not wait for a probe to reach the same verdict,
         and it works for consumers that wired no probe at all."""
         if now is None:
             now = self._clock()
-        self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
         self._pass_declared_run = current_run_id.get()
         self._advance_idle(now)
 
@@ -233,14 +208,6 @@ class BaseAgent:
         else:
             self._advance_idle(self._clock())
 
-    def note_rate_limited(self, now: float | None = None) -> None:
-        """Record a run killed by endpoint saturation: back off for
-        RATE_LIMIT_BACKOFF_MULTIPLIER intervals so the fleet drains instead
-        of hammering a limit that just proved itself exhausted."""
-        if now is None:
-            now = self._clock()
-        self._backoff_until = now + self.interval * RATE_LIMIT_BACKOFF_MULTIPLIER
-
     async def _fingerprint(self) -> tuple | None:
         """External state this agent's work depends on. None (default)
         disables watermarking. Subclasses return a small tuple; captured
@@ -285,14 +252,12 @@ class BaseAgent:
                                error_type=type(e).__name__, error_message=str(e),
                                phase=phase, duration_s=time.monotonic() - started),
             )
-            if _is_rate_limit_error(e):
-                self.note_rate_limited()
-            # The fail ladder takes every raise, rate limit included: a later
-            # phase gates dispatch on it alone, and a 429 that only moved the
-            # interval backoff would silently lose its backpressure then.
-            # The idle ladder is untouched — a run that crashed committed
-            # nothing by definition, and charging both ladders for one event
-            # would double-penalize a single failure.
+            # The fail ladder takes every raise, rate limit included: dispatch
+            # gates on it alone, so a 429 needs no separate backoff — it backs
+            # the agent off through this same path, and Phase 3's shared pool
+            # reabsorbs rate-limit backpressure fleet-wide. The idle ladder is
+            # untouched: a run that crashed committed nothing by definition, and
+            # charging both ladders for one event would double-penalize it.
             self._advance_fail(self._clock())
             raise
         else:

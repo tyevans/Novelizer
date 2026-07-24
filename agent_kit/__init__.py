@@ -9,8 +9,6 @@ Import from this top level only; submodule imports are forbidden by an
 import-linter contract (see pyproject.toml).
 """
 from agent_kit.base import (
-    PASS_BACKOFF_MULTIPLIER,
-    RATE_LIMIT_BACKOFF_MULTIPLIER,
     BaseAgent,
     Runner,
 )
@@ -37,8 +35,6 @@ from agent_kit.telemetry import (
 __all__ = [
     "BaseAgent",
     "Runner",
-    "PASS_BACKOFF_MULTIPLIER",
-    "RATE_LIMIT_BACKOFF_MULTIPLIER",
     "Scheduler",
     "TelemetryEventType",
     "TelemetryEmitter",

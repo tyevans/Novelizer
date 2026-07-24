@@ -98,7 +98,7 @@ class Scheduler:
         override = await self._override_provider() if self._override_provider else None
         eligible = [
             a for a in self._agents
-            if not a.paused and a.name not in self._in_flight and a.ready_for_interval(now)
+            if not a.paused and a.name not in self._in_flight and a.ready(now)
         ]
         if not eligible:
             await self._emit_eligibility(now, scores={})
@@ -131,7 +131,7 @@ class Scheduler:
                     TelemetryEventType.SCHEDULER_PICKED, a.name,
                     SchedulerPicked(agent_name=a.name),
                 )
-            task = asyncio.create_task(self._run(a, now))
+            task = asyncio.create_task(self._run(a))
             # Retrieve (and discard) the exception so fire-and-forget crashes
             # don't log "Task exception was never retrieved"; failures are
             # recorded via _last_error inside _run and re-raised within the
@@ -151,8 +151,8 @@ class Scheduler:
                 state = (False, "paused")
             elif a.name in self._in_flight:
                 state = (False, "running")
-            elif not a.ready_for_interval(now):
-                state = (False, "interval not elapsed")
+            elif not a.ready(now):
+                state = (False, "backing off")
             elif a.name in scores and scores[a.name] <= 0.0:
                 state = (False, "readiness 0")
             else:
@@ -172,7 +172,7 @@ class Scheduler:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _run(self, agent, now: float) -> None:
+    async def _run(self, agent) -> None:
         logger.info("scheduler: running %s", agent.name)
         try:
             await agent.run_once()
@@ -182,10 +182,9 @@ class Scheduler:
         else:
             self._last_error.pop(agent.name, None)
         finally:
-            # mark_ran even on failure: a crashing agent must consume its
-            # interval (backoff) instead of staying eligible and hot-looping,
-            # which starves every other agent of scheduler slots.
-            agent.mark_ran(now)
+            # A crashing agent no longer hot-loops the pool: run_once advances
+            # the fail ladder on every raise, so ready() holds it out on its
+            # own. Backing off is the ladder's job now, not the scheduler's.
             self._in_flight.pop(agent.name, None)
             self._run_count[agent.name] = self._run_count.get(agent.name, 0) + 1
             # Sticky display marker, distinct from the honest in-flight

@@ -362,7 +362,8 @@ async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert [e.payload["note"] for e in remarks] == ["All quiet on the cast front — write on."]
     import time
-    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+    assert agent._idle_streak == 1
+    assert not agent.ready(time.monotonic())
 
 
 async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):

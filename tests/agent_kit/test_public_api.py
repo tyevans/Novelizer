@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import agent_kit
 
+# The two interval-multiplier backoff constants are deliberately absent: the
+# ladders they were replaced by are seconds-based and internal to the chassis,
+# so nothing outside agent_kit has a reason to name them.
 EXPECTED = {
-    "BaseAgent", "Runner", "PASS_BACKOFF_MULTIPLIER", "RATE_LIMIT_BACKOFF_MULTIPLIER",
+    "BaseAgent", "Runner",
     "Scheduler",
     "TelemetryEventType", "TelemetryEmitter",
     "AgentRunStarted", "AgentRunFinished", "AgentRunFailed",

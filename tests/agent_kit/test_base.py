@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from agent_kit import base as kit_base
-from agent_kit.base import BaseAgent, PASS_BACKOFF_MULTIPLIER
+from agent_kit.base import BaseAgent
 from agent_kit.run_context import current_agent_name, current_run_id
 from agent_kit.telemetry import TelemetryEventType
 
@@ -30,57 +30,71 @@ class FakeEmitter:
         return run_id in self._llm or "*" in self._llm
 
 
-# --- interval / backoff machinery ---------------------------------------
+# --- the interval machinery is gone --------------------------------------
+#
+# `interval` stops being a gate. The CONSTRUCTOR PARAMETER stays, because all
+# eleven agents and AGENT_REGISTRY pass one and the settings keys that feed it
+# have to keep loading; it simply stops affecting anything.
 
-@given(interval=st.integers(min_value=1, max_value=10_000),
-       elapsed=st.floats(min_value=0, max_value=100_000, allow_nan=False))
-def test_ready_for_interval_iff_interval_elapsed(interval, elapsed):
+def test_interval_gating_methods_are_gone():
+    """A method that still exists is a method something can still call. These
+    two were the clock gate: `ready_for_interval` was the filter that ran
+    before agents were ever scored, and `mark_ran` was how a dispatch charged
+    an agent for the time it had not yet spent."""
+    assert not hasattr(BaseAgent, "ready_for_interval")
+    assert not hasattr(BaseAgent, "mark_ran")
+
+
+def test_interval_gating_state_is_gone():
+    agent = BaseAgent(NullRunner(), interval=10)
+    assert not hasattr(agent, "_last_run")
+    assert not hasattr(agent, "_backoff_until")
+
+
+def test_interval_multiplier_constants_are_gone():
+    """Backoff is expressed in absolute seconds now. A multiplier over an
+    operator-configured interval has nothing left to multiply, and leaving the
+    constants importable would invite a caller to reintroduce the unit."""
+    assert not hasattr(kit_base, "PASS_BACKOFF_MULTIPLIER")
+    assert not hasattr(kit_base, "RATE_LIMIT_BACKOFF_MULTIPLIER")
+
+
+def test_interval_is_still_accepted_and_stored_but_inert():
+    """Compatibility: every agent still passes an interval and the TUI still
+    displays it. It must construct, round-trip, and change nothing."""
+    agent = BaseAgent(NullRunner(), interval=900)
+    assert agent.interval == 900
+    assert agent.ready(0.0)
+    assert agent.seconds_until_ready(0.0) == 0.0
+
+
+@given(interval=st.integers(min_value=0, max_value=100_000),
+       now=st.floats(min_value=0, max_value=100_000, allow_nan=False))
+def test_no_interval_value_can_hold_an_agent_back(interval, now):
+    """Asserted over the whole range, absurd values included: there is no
+    interval large enough to make a fresh agent wait."""
     agent = BaseAgent(NullRunner(), interval=interval)
-    agent.mark_ran(1000.0)
-    now = 1000.0 + elapsed
-    assert agent.ready_for_interval(now) == (elapsed >= interval)
-
-
-@given(interval=st.integers(min_value=1, max_value=10_000),
-       elapsed=st.floats(min_value=0, max_value=100_000, allow_nan=False))
-def test_seconds_until_ready_zero_iff_ready(interval, elapsed):
-    agent = BaseAgent(NullRunner(), interval=interval)
-    agent.mark_ran(1000.0)
-    now = 1000.0 + elapsed
-    remaining = agent.seconds_until_ready(now)
-    assert remaining >= 0.0
-    assert (remaining == 0.0) == agent.ready_for_interval(now)
-
-
-@given(interval=st.integers(min_value=1, max_value=10_000))
-def test_note_pass_backs_off_multiplier_intervals(interval):
-    agent = BaseAgent(NullRunner(), interval=interval)
-    agent.mark_ran(1000.0)
-    agent.note_pass(now=1000.0)
-    just_before = 1000.0 + interval * PASS_BACKOFF_MULTIPLIER - 0.001
-    at = 1000.0 + interval * PASS_BACKOFF_MULTIPLIER
-    assert not agent.ready_for_interval(just_before)
-    assert agent.ready_for_interval(at)
+    assert agent.ready(now)
+    assert agent.seconds_until_ready(now) == 0.0
 
 
 def test_note_pass_defaults_to_monotonic_now():
     agent = BaseAgent(NullRunner(), interval=10)
     agent.note_pass()
-    assert not agent.ready_for_interval(time.monotonic())
+    assert not agent.ready(time.monotonic())
 
 
 def test_note_pass_uses_injected_clock():
     agent = BaseAgent(NullRunner(), interval=10, clock=lambda: 1000.0)
-    agent.mark_ran(1000.0)
     agent.note_pass()  # no arg -> injected clock, not real monotonic
-    assert not agent.ready_for_interval(1029.9)
-    assert agent.ready_for_interval(1030.0)
+    assert not agent.ready(1000.0 + kit_base.IDLE_BACKOFF_BASE_S - 0.001)
+    assert agent.ready(1000.0 + kit_base.IDLE_BACKOFF_BASE_S)
 
 
 def test_default_clock_is_monotonic():
     agent = BaseAgent(NullRunner(), interval=10)
     agent.note_pass()
-    assert not agent.ready_for_interval(time.monotonic())
+    assert not agent.ready(time.monotonic())
 
 
 def test_pause_resume_flag():
@@ -217,53 +231,45 @@ class BackoffProbe(BaseAgent):
         raise self._fail
 
 
-async def test_run_once_rate_limit_failure_backs_off_extra_intervals():
-    """A run killed by a rate limit means the endpoint is saturated; the agent
-    must step back RATE_LIMIT_BACKOFF_MULTIPLIER intervals instead of rejoining
-    the pile-up at full cadence next interval."""
+async def test_rate_limit_backoff_is_no_longer_measured_in_intervals():
+    """A 429 still backs the agent off, but on the seconds-based fail ladder.
+    A fifteen-minute interval must not make the step-back forty-five minutes
+    long -- the backoff is now bounded by the ladder cap, whatever the
+    operator configured."""
     import openai
-    from agent_kit.base import RATE_LIMIT_BACKOFF_MULTIPLIER
-    agent = BackoffProbe(_rate_limit_error())
+    agent = BackoffProbe(_rate_limit_error(), interval=900)
     with pytest.raises(openai.RateLimitError):
         await agent.run_once()
-    agent.mark_ran(1000.0)  # the scheduler's finally-block does this
-    horizon = 1000.0 + agent.interval * RATE_LIMIT_BACKOFF_MULTIPLIER
-    assert not agent.ready_for_interval(horizon - 0.001)
-    assert agent.ready_for_interval(horizon)
+    assert not agent.ready(1000.0)
+    assert 0.0 < agent.seconds_until_ready(1000.0) <= kit_base.FAIL_BACKOFF_CAP_S
 
 
-async def test_run_once_wrapped_rate_limit_failure_still_backs_off():
+def test_rate_limit_error_is_recognized_directly():
+    """The detector is provider-agnostic by design (class name + status code),
+    and it is what the AIMD pool will consult; it stays under test on its own
+    now that no interval multiplier makes its effect observable."""
+    assert kit_base._is_rate_limit_error(_rate_limit_error()) is True
+
+
+def test_rate_limit_error_is_recognized_through_a_wrapper_chain():
     """Frameworks re-raise provider errors with the original as __cause__ or
-    __context__; the backoff must see through one such wrapper chain."""
+    __context__; detection must see through one such wrapper chain."""
     wrapper = RuntimeError("graph step failed")
     wrapper.__cause__ = _rate_limit_error()
-    agent = BackoffProbe(wrapper)
-    with pytest.raises(RuntimeError):
-        await agent.run_once()
-    agent.mark_ran(1000.0)
-    assert not agent.ready_for_interval(1000.0 + agent.interval + 0.001)
-
-
-async def test_run_once_generic_failure_does_not_back_off():
-    agent = BackoffProbe(ValueError("boom"))
-    with pytest.raises(ValueError):
-        await agent.run_once()
-    agent.mark_ran(1000.0)
-    assert agent.ready_for_interval(1000.0 + agent.interval)
+    assert kit_base._is_rate_limit_error(wrapper) is True
+    assert kit_base._is_rate_limit_error(ValueError("boom")) is False
 
 
 # --- progress probe + second-based backoff ladders -------------------------
 #
-# Everything below is the event-driven-scheduling chassis. It is deliberately
-# PARALLEL to the interval machinery pinned above: `interval`, `_last_run`,
-# `ready_for_interval()` and `mark_ran()` keep their exact current behavior in
-# this phase, and the scheduler still dispatches on them. The ladders are what
-# a later phase flips dispatch over to.
+# Everything below is the event-driven-scheduling chassis, and it is now the
+# ONLY thing gating dispatch: `interval`, `_last_run`, `ready_for_interval()`
+# and `mark_ran()` are gone, and the scheduler dispatches on `ready()` alone.
 #
 # The ladder constants are reached through `kit_base.X` rather than a top-level
-# `from agent_kit.base import X` on purpose: before they exist, a module-level
-# import would fail this whole file at collection and take the twenty tests
-# above down with it, hiding which tests are actually the new red.
+# `from agent_kit.base import X` on purpose: a module-level import of a name
+# that has moved or vanished would fail this whole file at collection and take
+# every test above down with it, hiding which tests are actually red.
 
 
 class FakeClock:
@@ -488,9 +494,8 @@ async def test_fail_ladder_advances_on_raise_and_resets_on_success():
 
 
 async def test_rate_limit_failure_also_advances_the_fail_ladder():
-    """note_rate_limited still moves the legacy interval backoff, but the
-    ladder is what a later phase gates on -- a 429 must land on it too, or
-    flipping the gate over silently drops rate-limit backpressure."""
+    """The fail ladder is the only gate on dispatch now, so a 429 must land on
+    it -- anywhere else and rate-limit backpressure is silently lost."""
     clock = FakeClock()
     agent = LadderAgent(fail=_rate_limit_error(), interval=10, clock=clock)
     import openai
@@ -498,8 +503,6 @@ async def test_rate_limit_failure_also_advances_the_fail_ladder():
         await agent.run_once()
     assert agent._fail_streak == 1
     assert not agent.ready(clock())
-    # additive: the legacy multiplier backoff is untouched
-    assert agent._backoff_until == clock() + 10 * kit_base.RATE_LIMIT_BACKOFF_MULTIPLIER
 
 
 async def test_failing_run_does_not_reset_idle_backoff():
@@ -578,24 +581,13 @@ def test_fresh_agent_is_ready():
     assert agent.ready(0.0)
 
 
-def test_ready_ignores_interval_and_last_run():
+def test_ready_ignores_interval_however_large():
     """`ready` is the whole change: dispatch stops waiting on a clock. An
-    agent that has never run and carries a fifteen-minute interval is
-    dispatchable right now, while ready_for_interval -- still live this
-    phase -- keeps saying no."""
+    agent carrying a fifteen-minute interval is dispatchable right now, and
+    stays dispatchable a moment after it has run."""
     agent = BaseAgent(NullRunner(), interval=900)
-    agent.mark_ran(1000.0)
     assert agent.ready(1000.0)
-    assert not agent.ready_for_interval(1000.0)
-
-
-def test_ready_ignores_the_legacy_interval_backoff():
-    """`_backoff_until` belongs to the interval scheme and is measured in
-    intervals; the ladders are the seconds-based replacement. Mixing them
-    would double-charge note_pass, which sets both."""
-    agent = BaseAgent(NullRunner(), interval=10)
-    agent._backoff_until = 9_999.0
-    assert agent.ready(1000.0)
+    assert agent.ready(1000.1)
 
 
 # --- note_pass as an early exit -------------------------------------------
@@ -614,14 +606,16 @@ def test_note_pass_engages_the_idle_ladder_directly():
         assert not agent.ready(clock())
 
 
-def test_note_pass_still_moves_the_legacy_interval_backoff():
-    """Additive, not a replacement: the interval scheme is still what the
-    scheduler dispatches on this phase, so note_pass must keep doing both."""
+def test_note_pass_backoff_does_not_scale_with_the_interval():
+    """A declared pass costs the same step back whatever the operator set the
+    interval to. Two agents an order of magnitude apart in interval must come
+    back at the same moment."""
     clock = FakeClock()
-    agent = BaseAgent(NullRunner(), interval=10, clock=clock)
-    agent.note_pass()
-    assert agent._backoff_until == clock() + 10 * PASS_BACKOFF_MULTIPLIER
-    assert agent._idle_until == clock() + kit_base.IDLE_BACKOFF_BASE_S
+    brief = BaseAgent(NullRunner(), interval=10, clock=clock)
+    patient = BaseAgent(NullRunner(), interval=900, clock=clock)
+    brief.note_pass()
+    patient.note_pass()
+    assert brief._idle_until == patient._idle_until == clock() + kit_base.IDLE_BACKOFF_BASE_S
 
 
 async def test_note_pass_inside_a_run_wins_over_the_probe():
@@ -652,23 +646,20 @@ async def test_note_pass_survives_a_probeless_agent():
 
 # --- seconds_until_ready ---------------------------------------------------
 #
-# This phase is additive, so dispatch still requires BOTH the interval gate and
-# the ladders. seconds_until_ready is what the TUI status bar renders through
-# Scheduler.status(), so it stays the max over every live gate -- interval,
-# legacy backoff, and both ladders -- and only loses the first two when a later
-# phase deletes the interval gate. Reporting a ladder-only countdown now would
-# show "ready in 0s" for an agent the scheduler will not dispatch for minutes.
+# The countdown over the two ladders, and nothing else -- the interval and the
+# legacy backoff terms go with the gate they belonged to. This is what the TUI
+# status bar renders through Scheduler.status(), so it must agree exactly with
+# what the scheduler will actually do: any term left in that dispatch no longer
+# consults would show a countdown for a wait that will not happen.
 
 def test_seconds_until_ready_includes_the_fail_ladder():
     agent = BaseAgent(NullRunner(), interval=0)
-    agent.mark_ran(1000.0)
     agent._fail_until = 1050.0
     assert agent.seconds_until_ready(1000.0) == 50.0
 
 
 def test_seconds_until_ready_includes_the_idle_ladder():
     agent = BaseAgent(NullRunner(), interval=0)
-    agent.mark_ran(1000.0)
     agent._idle_until = 1075.0
     assert agent.seconds_until_ready(1000.0) == 75.0
 
@@ -677,49 +668,51 @@ def test_seconds_until_ready_ignores_elapsed_ladder_deadlines():
     """Deadlines in the past must contribute nothing. A negative countdown
     would render as a negative "next ready in" in the status bar."""
     agent = BaseAgent(NullRunner(), interval=0)
-    agent.mark_ran(1000.0)
     agent._fail_until = 500.0
     agent._idle_until = 200.0
+    assert agent.seconds_until_ready(1000.0) == 0.0
+
+
+def test_seconds_until_ready_drops_the_interval_term():
+    """A fifteen-minute interval must not show up as a fifteen-minute wait for
+    an agent the scheduler would dispatch this very tick."""
+    agent = BaseAgent(NullRunner(), interval=900)
     assert agent.seconds_until_ready(1000.0) == 0.0
 
 
 @settings(deadline=None, max_examples=50)
 @given(
     interval=st.integers(min_value=0, max_value=1000),
-    elapsed=st.floats(min_value=0, max_value=5000, allow_nan=False),
+    now=st.floats(min_value=0, max_value=5000, allow_nan=False),
     fail_offset=st.floats(min_value=0, max_value=400, allow_nan=False),
     idle_offset=st.floats(min_value=0, max_value=400, allow_nan=False),
 )
-def test_seconds_until_ready_is_the_max_over_every_live_gate(
-        interval, elapsed, fail_offset, idle_offset):
+def test_seconds_until_ready_is_the_max_over_the_two_ladders(
+        interval, now, fail_offset, idle_offset):
     agent = BaseAgent(NullRunner(), interval=interval)
-    agent.mark_ran(1000.0)
-    now = 1000.0 + elapsed
     agent._fail_until = now + fail_offset
     agent._idle_until = now + idle_offset
-    expected = max(0.0, interval - elapsed, agent._backoff_until - now,
-                   fail_offset, idle_offset)
-    assert agent.seconds_until_ready(now) == pytest.approx(expected)
+    assert agent.seconds_until_ready(now) == pytest.approx(max(fail_offset, idle_offset))
 
 
 @settings(deadline=None, max_examples=50)
 @given(
     interval=st.integers(min_value=0, max_value=1000),
-    elapsed=st.floats(min_value=0, max_value=5000, allow_nan=False),
+    now=st.floats(min_value=0, max_value=5000, allow_nan=False),
     fail_offset=st.floats(min_value=-400, max_value=400, allow_nan=False),
     idle_offset=st.floats(min_value=-400, max_value=400, allow_nan=False),
 )
-def test_zero_seconds_until_ready_implies_ready(interval, elapsed, fail_offset, idle_offset):
-    """The converse does not hold this phase -- the interval gate can hold an
-    agent that both ladders have released -- but a zero countdown must never
-    describe an agent the ladders are still backing off."""
+def test_zero_seconds_until_ready_iff_ready(interval, now, fail_offset, idle_offset):
+    """Now an equivalence, where it was only one direction: with the interval
+    gate gone the countdown and the dispatch decision read the same two
+    deadlines, so the status bar can never disagree with the scheduler."""
     agent = BaseAgent(NullRunner(), interval=interval)
-    agent.mark_ran(1000.0)
-    now = 1000.0 + elapsed
     agent._fail_until = now + fail_offset
     agent._idle_until = now + idle_offset
-    if agent.seconds_until_ready(now) == 0.0:
-        assert agent.ready(now)
+    remaining = agent.seconds_until_ready(now)
+    assert remaining >= 0.0
+    assert math.isfinite(remaining)
+    assert (remaining == 0.0) == agent.ready(now)
 
 
 # --- ladder properties -----------------------------------------------------
