@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 _CATEGORY_OWNERS: dict[str, str] = {
     "contradiction": "retconner",
     "pacing": "structure_analyst",
-    "worldbuilding": "world_architect",
+    "worldbuilding": "curator",
+    "world_craft": "curator",
+    "world_relevance": "curator",
+    "world_redundancy": "curator",
     "thematic": "plotter",
     "voice_drift": "retconner",
 }
@@ -32,7 +35,8 @@ For the ONE flag you're shown: decide "real" or "dismiss". You never edit canon 
 invent a fix — that's the owning agent's job once the flag is confirmed. Your only output is a
 verdict, an optional reason, and (only for a flag whose category has no known owner) an optional
 `reclassify_category` if you can tell what it actually is from a fixed vocabulary the owning
-agents understand: contradiction, pacing, worldbuilding, thematic, voice_drift. If none fit,
+agents understand: contradiction, pacing, worldbuilding, world_craft, world_relevance,
+world_redundancy, thematic, voice_drift. If none fit,
 leave `reclassify_category` blank — it stays a catch-all and ages toward stale.
 
 ## How to work
