@@ -17,13 +17,14 @@ from novelizer.canon.events import BookCompleted, ChapterBriefSuperseded, EventT
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.muse.prompts import inspiration_note
-from novelizer.store.models import Flag
+from novelizer.store.models import Flag, SignalKind
 
 logger = logging.getLogger(__name__)
 
 PLOTTER_SYSTEM_PROMPT = """You are the Plotter — the writers' room's showrunner. You do not write prose.
-You keep the story aimed at a shape: propose a blueprint when none exists (pick a framework
-and target length that fit the world and genre), keep 1-3 chapter briefs drafted ahead of the
+You keep the story aimed at a shape: propose a blueprint from the premise before any prose or
+world exists — you go first; pick a framework and target length that fit the premise, genre and
+(if any) the world so far; keep 1-3 chapter briefs drafted ahead of the
 Author (each with a goal, threads to touch, beats to hit, a value shift, and a planned outcome
 biased toward yes_but/no_and), judge when a drafted chapter fulfilled a beat, plan resolution
 windows for threads and secret reveals, and plant or re-window promises. Revise briefs freely;
@@ -124,11 +125,25 @@ class Plotter(BaseAgent):
     async def readiness(self) -> float:
         chapters = await self._read.list_chapters()
         world = await self._read.list_world_entries()
-        if not chapters and not world:
-            return 0.0
         blueprint = await self._read.get_active_blueprint()
-        if chapters and blueprint is None:
-            return 1.0
+        if blueprint is None:
+            # Outline-first: the Plotter goes before anyone, minting the first
+            # blueprint from the premise alone. Stand down once we've proposed
+            # and are only waiting on Director approval.
+            proposals = await self._read.list_proposals(status="open")
+            if any(p.target_event_type == EventType.BLUEPRINT_ADOPTED for p in proposals):
+                return 0.0
+            seeds = await self._read.list_unconsumed_signals(target_agent=self.name)
+            if seeds or chapters or world:
+                return 1.0
+            return 0.0
+        # The pre-blueprint genesis guard (no signals/chapters/world -> 0.0)
+        # lives entirely inside the `blueprint is None` branch above. Once a
+        # blueprint is active, readiness follows brief-runway logic below --
+        # and that's intentionally high (1.0) right after adoption, when
+        # chapters and world are still empty: that's exactly when the Plotter
+        # needs to draft the first chapter briefs so the Author has
+        # assignments. Outline-first replaces the old "wait for prose" order.
         open_briefs = await self._read.list_briefs("open")
         chapter_count = len(chapters)
         open_briefs_ahead = sum(
@@ -237,7 +252,10 @@ class Plotter(BaseAgent):
                             related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
                 await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
         await self._remark(out.feed_note)
-        await self._consume_signals(ctx["signals"])
+        # Leave premise seeds for the World Architect (seed -> world is its job);
+        # the Plotter only reads them to shape the blueprint. Consume everything
+        # else targeted at the Plotter as before.
+        await self._consume_signals([s for s in ctx["signals"] if s.kind != SignalKind.seed])
 
     async def _reap_stale_open_briefs(self, open_briefs: list, drafted_chapter_count: int) -> None:
         """Mechanically supersede open briefs whose target_ordinal has already

@@ -83,7 +83,20 @@ async def browser_sections(read, *, staleness_threshold: int) -> list:
         else f"Threads ({len(open_threads)})"
     )
     flags_label = f"Flags ({len(open_flags)}) ⚠" if stale_flags else f"Flags ({len(open_flags)})"
-    return [
+    blueprint = await read.get_active_blueprint()
+    outline_section = None
+    if blueprint is not None:
+        beats = await read.list_beats()
+        open_briefs = await read.list_briefs("open")
+        items = [{"id": "blueprint",
+                  "label": f"Blueprint · {blueprint.framework} · {len(chapters)}/{blueprint.target_chapter_count}"}]
+        for b in beats:
+            mark = "✓" if b.fulfilled_by_chapter_id else "·"
+            items.append({"id": f"beat:{b.id}", "label": f"{mark} {b.name}"})
+        for br in open_briefs:
+            items.append({"id": f"brief:{br.id}", "label": f"ch{br.target_ordinal}: {br.goal[:32]}"})
+        outline_section = {"key": "outline", "label": f"Outline ({len(beats)} beats)", "items": items}
+    sections = [
         {"key": "chapters", "label": f"Chapters ({len(chapters)})",
          "items": [{"id": c.id, "label": f"{_status_dot(c.editorial_status)} {c.title}"} for c in chapters]},
         {"key": "characters", "label": f"Characters ({len(characters)})",
@@ -97,6 +110,7 @@ async def browser_sections(read, *, staleness_threshold: int) -> list:
         {"key": "themes", "label": f"Themes ({len(themes)})",
          "items": [{"id": t.id, "label": t.title} for t in themes]},
     ]
+    return ([outline_section] + sections) if outline_section else sections
 
 
 @dataclass(frozen=True)
@@ -169,4 +183,29 @@ async def detail_view(read, section_key: str, item_id: str) -> DetailView | None
         if not theme:
             return None
         return _view(theme.title, f"touched {theme.touch_count}x", theme.last_note)
+    if section_key == "outline":
+        blueprint = await read.get_active_blueprint()
+        if blueprint is None:
+            return None
+        if item_id == "blueprint":
+            meta = f"{blueprint.framework} · target {blueprint.target_chapter_count} ch · {blueprint.genre}"
+            return _view("Blueprint", meta)
+        if item_id.startswith("beat:"):
+            beat_id = item_id.split(":", 1)[1]
+            beat = next((b for b in await read.list_beats() if b.id == beat_id), None)
+            if beat is None:
+                return None
+            fulfilled = beat.fulfilled_by_chapter_id or "—"
+            meta = f"ideal {beat.ideal_pct:.0%} ±{beat.tolerance_pct:.0%} · {beat.expected_polarity}"
+            return _view(beat.name, meta, "", [("Fulfilled by", fulfilled)])
+        if item_id.startswith("brief:"):
+            brief_id = item_id.split(":", 1)[1]
+            brief = next((b for b in await read.list_briefs() if b.id == brief_id), None)
+            if brief is None:
+                return None
+            meta = f"ch {brief.target_ordinal} · {brief.status}"
+            fields = [("Goal", brief.goal), ("Value shift", brief.value_shift),
+                      ("Planned outcome", brief.planned_outcome)]
+            return _view(f"Brief · ch{brief.target_ordinal}", meta, brief.synopsis, fields)
+        return None
     return None

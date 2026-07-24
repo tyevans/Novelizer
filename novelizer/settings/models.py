@@ -64,6 +64,10 @@ class EffectiveSettings(BaseModel):
     advisory_token_budget: int = 2000
     # Chapters elapsed since a thread's last touch before it's flagged stale.
     staleness_threshold_chapters: int = 3
+    # Outline-first soft gate: when True, the Author will not draft until a
+    # first-pass blueprint exists (or the genesis fallback opens). Turn OFF to
+    # restore the legacy outline-optional behavior (draft first, retrofit later).
+    outline_gate_enabled: bool = True
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
     sag_spike_delta: float = 0.3
     # Muse: era bucket for name draws (victorian/interwar/midcentury/late20th/modern)

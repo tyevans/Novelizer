@@ -50,6 +50,7 @@ async def test_author_loop_survives_exception_and_feed_keeps_working():
         default_agent_interval=100,
         continuity_interval=100,
         projector_interval=0.1,
+        outline_gate_enabled=False,  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
     )
     rt = Runtime(settings, runners=_idle_room_runners())
     await rt.start()

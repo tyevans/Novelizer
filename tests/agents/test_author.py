@@ -330,7 +330,11 @@ async def test_author_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(
     sent = runner.calls[-1]["messages"][0]["content"]
     expected = (
         "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
-        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\n"
+        "No outline exists yet — you are drafting ahead of the Plotter under a "
+        "fallback. Keep this chapter provisional and exploratory; do not invent a "
+        "chapter's worth of new threads/promises/secrets, and say so in your feed note.\n\n"
+        "Write the next chapter."
     )
     assert sent == expected
 
@@ -495,7 +499,11 @@ async def test_author_prompt_byte_identical_to_pre_m4_3_shape_when_brain_silent(
     sent = runner.calls[-1]["messages"][0]["content"]
     expected = (
         "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
-        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\n"
+        "No outline exists yet — you are drafting ahead of the Plotter under a "
+        "fallback. Keep this chapter provisional and exploratory; do not invent a "
+        "chapter's worth of new threads/promises/secrets, and say so in your feed note.\n\n"
+        "Write the next chapter."
     )
     assert sent == expected
 
@@ -599,7 +607,11 @@ async def test_author_prompt_byte_identical_to_pre_causal_shape_when_no_edges(st
     sent = runner.calls[-1]["messages"][0]["content"]
     expected = (
         "World lore:\nNone yet.\n\nCharacters:\nNone yet.\n\n"
-        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\nWrite the next chapter."
+        "Previous chapters:\nNone yet.\n\nDirector notes:\nNone.\n\n"
+        "No outline exists yet — you are drafting ahead of the Plotter under a "
+        "fallback. Keep this chapter provisional and exploratory; do not invent a "
+        "chapter's worth of new threads/promises/secrets, and say so in your feed note.\n\n"
+        "Write the next chapter."
     )
     assert sent == expected
 
