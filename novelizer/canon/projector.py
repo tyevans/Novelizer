@@ -281,6 +281,17 @@ class Projector:
                 "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,0)",
                 (p["id"], data, p.get("status", "open"), p.get("category", "")),
             )
+        elif t == EventType.FLAG_LABELED:
+            # Narrow update: patch only title/summary into the existing row's
+            # data blob. It never writes the status/category/escalated columns,
+            # so a label built from a stale read cannot resurrect a status or
+            # escalation a later flag.* event has since changed — ordering by
+            # event sequence keeps this label subordinate to any create/resolve/
+            # escalate that lands after it. No-op if the flag row is absent.
+            await self._conn.execute(
+                "UPDATE flags SET data = json_set(data, '$.title', ?, '$.summary', ?) WHERE id=?",
+                (p.get("title", ""), p.get("summary", ""), p["id"]),
+            )
         elif t in (EventType.RETCON_REQUEST_CREATED, EventType.RETCON_REQUEST_RESOLVED,
                    EventType.RETCON_REQUEST_REJECTED):
             # Legacy alias: pre-Flag databases only ever emitted these three

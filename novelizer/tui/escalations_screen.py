@@ -51,7 +51,8 @@ class EscalationsScreen(Screen):
         table = self.query_one("#escalations-table", DataTable)
         table.clear()
         for flag in self._flags:
-            table.add_row(flag.severity or "-", flag.category, flag.description[:60], key=flag.id)
+            table.add_row(flag.severity or "-", flag.category,
+                          flag.title or flag.description[:60], key=flag.id)
         self._selected = None
         self.query_one("#escalations-detail", Static).update("")
         self.query_one("#escalations-related", Static).update("")

@@ -272,6 +272,16 @@ class FlagDraft(BaseModel):
     proposed_resolution: str = ""
 
 
+class FlagLabel(BaseModel):
+    """FlagLabeler's structured output: a short title and a one-sentence summary
+    generated from a filed flag's category + description, for the flags/
+    escalations queue. Not a canon judgment — it never changes what the flag
+    means, only how it reads at a glance."""
+
+    title: str = ""
+    summary: str = ""
+
+
 class KeeperOutput(BaseModel):
     new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
