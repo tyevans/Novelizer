@@ -11,7 +11,7 @@ from __future__ import annotations
 from rich.console import Group
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static, TabbedContent, TabPane
 
 from novelizer.tui.widgets.brain_model import (
@@ -40,17 +40,23 @@ class BrainPanel(Vertical):
     def compose(self) -> ComposeResult:
         with TabbedContent(id="brain_tabs"):
             with TabPane("1 Shape", id="tab_shape"):
-                yield Static("", id="shape_body")
+                with VerticalScroll():
+                    yield Static("", id="shape_body")
             with TabPane("2 Threads", id="tab_threads"):
-                yield Static("", id="threads_body")
+                with VerticalScroll():
+                    yield Static("", id="threads_body")
             with TabPane("3 Secrets", id="tab_secrets"):
-                yield Static("", id="secrets_body")
+                with VerticalScroll():
+                    yield Static("", id="secrets_body")
             with TabPane("4 Cause", id="tab_causeway"):
-                yield Static("", id="causeway_body")
+                with VerticalScroll():
+                    yield Static("", id="causeway_body")
             with TabPane("5 Outline", id="tab_outline"):
-                yield Static("", id="outline_body")
+                with VerticalScroll():
+                    yield Static("", id="outline_body")
             with TabPane("6 Arcs", id="tab_arcs"):
-                yield Static("", id="arcs_body")
+                with VerticalScroll():
+                    yield Static("", id="arcs_body")
         yield Static("", id="brain_strip")
 
     async def refresh_from(self, read, *, threshold: int, delta: float, lag: int = 0) -> None:
