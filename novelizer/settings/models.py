@@ -72,6 +72,12 @@ class EffectiveSettings(BaseModel):
     muse_exclusion_hands: int = 3
     # Scheduler dispatch pool size: how many agents may run concurrently.
     max_concurrent_agents: int = 2
+    # Shared LLM concurrency ceiling (the AdaptivePool target). Global-only,
+    # like max_concurrent_agents: it sizes the vLLM endpoint's real capacity (an
+    # installation/hardware fact, stated as 4-8 usable), not a per-story creative
+    # knob, so it is deliberately NOT in STORY_OVERRIDABLE_KEYS. Both the
+    # scheduler and background KG extraction draw permits from this one pool.
+    llm_pool_size: int = 6
 
     # Cadence (seconds)
     author_interval: int = 300

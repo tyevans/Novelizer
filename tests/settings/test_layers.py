@@ -66,9 +66,11 @@ def test_story_config_fields_match_overridable_keys():
 
 
 def test_global_config_fields_match_overridable_plus_global_only_keys():
+    # llm_pool_size (Phase 3) joins the global-only set: like max_concurrent_agents
+    # it sizes a shared resource ceiling and must not be set per story.
     assert set(GlobalConfig.model_fields) == STORY_OVERRIDABLE_KEYS | {
         "llm_base_url", "llm_api_key", "llm_max_tokens", "default_stories_dir", "last_opened_story",
-        "suppress_flat_migration_prompt", "max_concurrent_agents",
+        "suppress_flat_migration_prompt", "max_concurrent_agents", "llm_pool_size",
     }
 
 
@@ -95,6 +97,16 @@ def test_parse_global_accepts_max_concurrent_agents():
 def test_max_concurrent_agents_not_story_overridable():
     assert "max_concurrent_agents" not in StoryConfig.model_fields
     assert "max_concurrent_agents" not in STORY_OVERRIDABLE_KEYS
+
+
+def test_parse_global_accepts_llm_pool_size():
+    cfg = parse_global({"llm_pool_size": 8}, source="g.toml")
+    assert cfg.llm_pool_size == 8
+
+
+def test_llm_pool_size_not_story_overridable():
+    assert "llm_pool_size" not in StoryConfig.model_fields
+    assert "llm_pool_size" not in STORY_OVERRIDABLE_KEYS
 
 
 def test_parse_global_accepts_prior_chapter_summary_chars():

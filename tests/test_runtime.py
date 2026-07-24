@@ -52,6 +52,24 @@ async def test_start_wires_a_working_slice(settings):
         await rt.close()
 
 
+async def test_start_wires_a_shared_llm_pool_into_the_scheduler(settings):
+    """Phase 3: Runtime.start() constructs one AdaptivePool sized from
+    llm_pool_size and hands the SAME object to the scheduler. That single shared
+    ceiling is the whole point -- the scheduler and (later) the KG drain must
+    draw permits from one pool, not two independent budgets on one vLLM
+    endpoint. Duck-typed on purpose: no import of agent_kit.pool here, so its
+    absence reds only this test (AttributeError: no attribute 'pool'), never the
+    whole file's collection."""
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.pool is not None
+        assert rt.pool.size == settings.llm_pool_size
+        assert rt.scheduler._pool is rt.pool
+    finally:
+        await rt.close()
+
+
 async def test_runtime_wires_gating_committer_and_policy(settings):
     rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
     try:

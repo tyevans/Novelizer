@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Awaitable, Callable, Sequence
 
+from agent_kit.base import _is_rate_limit_error
 from agent_kit.telemetry import (
     SchedulerEligibilityChanged,
     SchedulerPicked,
@@ -27,12 +28,18 @@ class Scheduler:
         max_concurrent_agents: int = 2,
         telemetry=None,
         override_provider: Callable[[], Awaitable[str | None]] | None = None,
+        pool=None,
     ) -> None:
         self._agents = list(agents)
         self._tick_sleep = tick_sleep
         self._clock = clock
         self._telemetry = telemetry
         self._override_provider = override_provider
+        # Optional shared LLM concurrency ceiling (AdaptivePool). None => today's
+        # unlimited behavior, mirroring the override_provider seam. When present,
+        # a permit gates each whole run inside _run, and the same pool object is
+        # shared with the KG drain -- one fleet-wide ceiling on a single endpoint.
+        self._pool = pool
         self._running = False
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
@@ -175,7 +182,24 @@ class Scheduler:
     async def _run(self, agent) -> None:
         logger.info("scheduler: running %s", agent.name)
         try:
-            await agent.run_once()
+            if self._pool is None:
+                await agent.run_once()
+            else:
+                # A permit covers the whole run. On the way out, feed the pool
+                # exactly one AIMD signal: congestion on a real 429, success on a
+                # clean run, and nothing at all on a plain crash -- a malformed
+                # response or a bug is not congestion, and must not shrink the
+                # fleet-wide ceiling every other consumer draws from. The permit
+                # is released by slot()'s own finally whichever way the body exits.
+                async with self._pool.slot():
+                    try:
+                        await agent.run_once()
+                    except Exception as e:
+                        if _is_rate_limit_error(e):
+                            self._pool.note_rate_limited()
+                        raise
+                    else:
+                        self._pool.note_success()
         except Exception as e:
             self._last_error[agent.name] = f"{type(e).__name__}: {e}"
             raise

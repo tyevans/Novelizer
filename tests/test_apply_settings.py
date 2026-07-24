@@ -1,5 +1,5 @@
 from novelizer.runtime import Runtime
-from novelizer.settings import EffectiveSettings
+from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
 
 
 class _R:
@@ -77,6 +77,27 @@ async def test_no_changes_is_noop(tmp_path):
     rt = await _started_runtime(tmp_path)
     assert rt.apply_settings(rt.settings) == {"applied": [], "restart_required": [], "errors": []}
     await rt.close()
+
+
+async def test_llm_pool_size_applies_live(tmp_path):
+    """Phase 3: the shared AIMD pool's target ceiling applies live, exactly like
+    max_concurrent_agents -- apply_settings pokes the running pool's `size` in
+    place (self.pool.size = new.llm_pool_size); no restart, no reconstruction.
+    AIMD keeps managing `_limit` under the new ceiling from there."""
+    rt = await _started_runtime(tmp_path, llm_pool_size=6)
+    assert rt.pool.size == 6
+    result = rt.apply_settings(rt.settings.model_copy(update={"llm_pool_size": 4}))
+    assert rt.pool.size == 4
+    assert "llm_pool_size" in result["applied"]
+    assert result["restart_required"] == []
+    assert rt.settings.llm_pool_size == 4
+    await rt.close()
+
+
+def test_llm_pool_size_is_not_restart_required():
+    """The live-apply contract, pinned statically: a pool-size change must never
+    land in restart_required."""
+    assert "llm_pool_size" not in RESTART_REQUIRED_KEYS
 
 
 async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_live_change(tmp_path, monkeypatch):

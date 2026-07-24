@@ -9,7 +9,7 @@ from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.canon.events import EventType
-from agent_kit import Scheduler
+from agent_kit import AdaptivePool, Scheduler
 from novelizer.store.models import SignalKind
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
@@ -312,10 +312,16 @@ class Runtime:
             # BaseAgent subclass does not thread kit kwargs through, and
             # eleven agent constructors should not have to grow one.
             agent.progress_probe = progress_probe
+        # One shared LLM concurrency ceiling for the whole fleet. Today the
+        # scheduler and background KG extraction hit one vLLM endpoint with no
+        # common limit -- the 429-pileup source. AIMD on this single pool is that
+        # shared ceiling; the KG drain draws permits from the same object.
+        self.pool = AdaptivePool(s.llm_pool_size)
         self.scheduler = Scheduler(
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
             override_provider=_make_override_provider(self.read),
+            pool=self.pool,
         )
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,
@@ -357,6 +363,12 @@ class Runtime:
                 # Read fresh per-tick, no cached construction to rebuild --
                 # applies live, same as cadence settings.
                 self.scheduler._max_concurrent = new.max_concurrent_agents
+                applied.append(key)
+            elif key == "llm_pool_size":
+                # Poke the running pool's ceiling in place -- no reconstruction,
+                # no restart. AIMD keeps managing _limit under the new size from
+                # here, exactly like max_concurrent_agents applies live.
+                self.pool.size = new.llm_pool_size
                 applied.append(key)
             elif key == "muse_era":
                 self.muse._era = new.muse_era

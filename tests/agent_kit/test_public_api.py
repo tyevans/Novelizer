@@ -8,6 +8,10 @@ import agent_kit
 EXPECTED = {
     "BaseAgent", "Runner",
     "Scheduler",
+    # Top-level export is mandatory, not convenience: the import-linter package
+    # boundary forbids consumers from reaching agent_kit.pool directly, so the
+    # runtime binds AdaptivePool through the package root.
+    "AdaptivePool",
     "TelemetryEventType", "TelemetryEmitter",
     "AgentRunStarted", "AgentRunFinished", "AgentRunFailed",
     "SchedulerPicked", "SchedulerEligibilityChanged",

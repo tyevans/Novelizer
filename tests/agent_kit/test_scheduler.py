@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import contextlib
 
 from hypothesis import given, settings, strategies as st
 
@@ -471,3 +472,176 @@ async def test_a_free_slot_implies_no_dispatchable_agent(specs, cap):
                 assert excused, f"{a.name} was dispatchable while a slot sat free"
     finally:
         await sched.drain_in_flight()
+
+
+# --- Phase 3: the shared AIMD pool gates EXECUTION, not dispatch ------------
+#
+# There is no concurrency limiter anywhere today, and background KG extraction
+# makes its own LLM calls entirely outside max_concurrent_agents -- two
+# independent consumers on one vLLM endpoint with no shared ceiling, the source
+# of 429 pile-ups. Phase 3 threads one shared pool through the scheduler: an
+# optional injectable `pool` (default None => today's behavior, mirroring the
+# override_provider seam), consulted inside _run around agent.run_once().
+#
+# A permit covers ONE WHOLE AGENT RUN, so it is acquired in _run, not in tick.
+# tick() still creates every dispatchable task -- dispatch does not block on the
+# pool; the runs then serialize on the permit inside _run. That is deliberate:
+# the KG drain draws from the same pool, so gating dispatch would stall the tick
+# loop on a ceiling another consumer holds.
+#
+# These tests drive the scheduler against a local SpyPool rather than the real
+# AdaptivePool, so they pin the scheduler's contract (slot bracket + which AIMD
+# signal fires for which outcome) independently of the pool's internals, and so
+# a missing agent_kit.pool never collection-errors this file. They still start
+# RED: Scheduler does not accept `pool=` yet -> TypeError: __init__() got an
+# unexpected keyword argument 'pool'.
+
+
+class SpyPool:
+    """The pool surface the scheduler touches: an async `slot()` context manager
+    plus the two explicit AIMD signals. Enforces a fixed concurrency limit and
+    records how often each signal fired, so a scheduler test can prove the
+    wiring without depending on the real AdaptivePool."""
+
+    def __init__(self, limit: int = 99) -> None:
+        self._sema = asyncio.Semaphore(limit)
+        self._active = 0
+        self.max_concurrent = 0
+        self.rate_limited = 0
+        self.successes = 0
+
+    @contextlib.asynccontextmanager
+    async def slot(self):
+        await self._sema.acquire()
+        self._active += 1
+        self.max_concurrent = max(self.max_concurrent, self._active)
+        try:
+            yield
+        finally:
+            self._active -= 1
+            self._sema.release()
+
+    def note_rate_limited(self) -> None:
+        self.rate_limited += 1
+
+    def note_success(self) -> None:
+        self.successes += 1
+
+
+class RateLimitError(Exception):
+    """Named + status-coded so agent_kit.base._is_rate_limit_error matches it on
+    either signal, exactly as it matches a real provider 429."""
+    status_code = 429
+
+
+class RateLimitedAgent(StubAgent):
+    async def run_once(self):
+        raise RateLimitError("429 slow down")
+
+
+class PoolSlowAgent(StubAgent):
+    """Records the peak number of run_once bodies running at once, so a test can
+    prove the pool serialized them below the dispatch cap."""
+
+    def __init__(self, name, score, live, log):
+        super().__init__(name, score)
+        self._live = live
+        self._log = log
+
+    async def run_once(self):
+        self.ran += 1
+        self._live[0] += 1
+        self._log.append(self._live[0])
+        await asyncio.sleep(0.01)
+        self._live[0] -= 1
+
+
+async def test_pool_defaults_to_none_and_runs_unlimited():
+    """The default seam: no pool wired => _run behaves exactly as today."""
+    a = StubAgent("a", 0.9)
+    sched = Scheduler([a], clock=lambda: 1000.0)
+    assert sched._pool is None
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert a.ran == 1
+    assert sched.status()[0]["run_count"] == 1
+
+
+async def test_pool_none_still_records_error_on_a_rate_limit_crash():
+    """Regression guard: adding the pool seam must not change the no-pool error
+    path -- a 429 with pool=None is recorded and re-raised, same as any crash."""
+    a = RateLimitedAgent("a", 0.9)
+    sched = Scheduler([a], clock=lambda: 1000.0)
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert "RateLimitError" in sched.status()[0]["last_error"]
+
+
+async def test_pool_is_a_tighter_ceiling_than_the_dispatch_cap():
+    """Three agents are dispatched under a cap of 3, but a limit-1 pool lets only
+    one run_once body execute at a time. Dispatch is NOT gated by the pool: tick
+    creates all three tasks, and they serialize inside _run on the permit."""
+    live = [0]
+    log: list[int] = []
+    agents = [PoolSlowAgent(n, 0.9, live, log) for n in "abc"]
+    pool = SpyPool(limit=1)
+    sched = Scheduler(agents, clock=lambda: 1000.0, max_concurrent_agents=3, pool=pool)
+
+    dispatched = await sched.tick()
+    assert set(dispatched) == {"a", "b", "c"}, "dispatch must not block on the pool"
+    assert len(sched._in_flight) == 3, "all three runs are created; they queue on the permit"
+    await sched.drain_in_flight()
+
+    assert max(log) == 1, "the pool must serialize run bodies below the dispatch cap"
+    assert pool.max_concurrent == 1
+    assert sum(a.ran for a in agents) == 3
+
+
+async def test_a_clean_run_notes_success_exactly_once():
+    a = StubAgent("a", 0.9)
+    pool = SpyPool()
+    sched = Scheduler([a], clock=lambda: 1000.0, pool=pool)
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert pool.successes == 1
+    assert pool.rate_limited == 0
+
+
+async def test_a_rate_limit_run_notes_congestion_exactly_once():
+    a = RateLimitedAgent("a", 0.9)
+    pool = SpyPool()
+    sched = Scheduler([a], clock=lambda: 1000.0, pool=pool)
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert pool.rate_limited == 1
+    assert pool.successes == 0
+
+
+async def test_a_non_rate_limit_crash_notes_neither_signal():
+    """Only a real 429 is congestion. A plain crash (a malformed LLM response, a
+    bug) must not shrink the fleet-wide pool -- that would let one broken agent
+    throttle every other consumer."""
+    a = CrashingAgent("a", 0.9)  # raises RuntimeError("kaput")
+    pool = SpyPool()
+    sched = Scheduler([a], clock=lambda: 1000.0, pool=pool)
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert pool.rate_limited == 0
+    assert pool.successes == 0
+
+
+async def test_pool_permit_is_released_when_a_run_crashes():
+    """The permit is released even when run_once raises -- a leaked permit
+    permanently shrinks usable concurrency (at limit 1, a permanent deadlock)."""
+    a = CrashingAgent("a", 0.9)
+    pool = SpyPool(limit=1)
+    sched = Scheduler([a], clock=lambda: 1000.0, pool=pool)
+    await sched.tick()
+    await sched.drain_in_flight()
+    assert pool._active == 0, "a crashing run leaked its pool permit"
+    # The pool is still usable: a leaked limit-1 permit would hang the next run.
+    b = StubAgent("b", 0.9)
+    sched2 = Scheduler([b], clock=lambda: 1000.0, pool=pool)
+    await sched2.tick()
+    await sched2.drain_in_flight()
+    assert b.ran == 1

@@ -55,6 +55,19 @@ def test_max_concurrent_agents_default_is_2():
     assert "max_concurrent_agents" not in STORY_OVERRIDABLE_KEYS
 
 
+def test_llm_pool_size_default_is_6():
+    """Phase 3: the shared AIMD pool's target ceiling. 6 is the middle of the
+    stated 4-8 usable vLLM concurrency. Global-only, not story-overridable --
+    it describes the endpoint's real capacity, an installation/hardware fact,
+    not a per-story creative choice, exactly like max_concurrent_agents."""
+    assert EffectiveSettings().llm_pool_size == 6
+    assert "llm_pool_size" not in STORY_OVERRIDABLE_KEYS
+
+
+def test_llm_pool_size_round_trips_through_effective_settings():
+    assert EffectiveSettings(llm_pool_size=8).llm_pool_size == 8
+
+
 def test_prior_chapter_summary_chars_default_is_200():
     assert EffectiveSettings().prior_chapter_summary_chars == 200
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS
