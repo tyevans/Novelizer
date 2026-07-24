@@ -137,7 +137,13 @@ class Plotter(BaseAgent):
             if seeds or chapters or world:
                 return 1.0
             return 0.0
-        # steady state below (unchanged)
+        # The pre-blueprint genesis guard (no signals/chapters/world -> 0.0)
+        # lives entirely inside the `blueprint is None` branch above. Once a
+        # blueprint is active, readiness follows brief-runway logic below --
+        # and that's intentionally high (1.0) right after adoption, when
+        # chapters and world are still empty: that's exactly when the Plotter
+        # needs to draft the first chapter briefs so the Author has
+        # assignments. Outline-first replaces the old "wait for prose" order.
         open_briefs = await self._read.list_briefs("open")
         chapter_count = len(chapters)
         open_briefs_ahead = sum(

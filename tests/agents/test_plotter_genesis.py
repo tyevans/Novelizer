@@ -1,6 +1,6 @@
 import pytest
 from novelizer.agents.plotter import Plotter
-from novelizer.store.models import DirectorSignal, SignalKind
+from novelizer.store.models import BlueprintRecord, DirectorSignal, SignalKind
 from novelizer.canon.events import EventType
 
 
@@ -59,6 +59,20 @@ async def test_genesis_wakes_on_premise_seed():
 async def test_genesis_idle_without_premise():
     p = _plotter(_Read())               # no seed, no world, no chapters
     assert await p.readiness() == 0.0
+
+
+@pytest.mark.asyncio
+async def test_ready_to_draft_first_briefs_right_after_blueprint_adoption():
+    """Outline-first genesis: once a blueprint is active, the Plotter is
+    immediately ready (1.0) even with no chapters and no world entries yet --
+    that's exactly the moment it needs to draft the first chapter briefs so
+    the Author has assignments. This is the reachable state right after
+    blueprint adoption, before the World Architect creates entries and before
+    the Author drafts chapter 1. Deliberately different from the old
+    pre-blueprint 0.0 guard, which does not apply once a blueprint exists."""
+    blueprint = BlueprintRecord(id="bp1", framework="three-act", target_chapter_count=12)
+    p = _plotter(_Read(blueprint=blueprint, chapters=[], world=[], briefs=[]))
+    assert await p.readiness() == 1.0
 
 
 @pytest.mark.asyncio
