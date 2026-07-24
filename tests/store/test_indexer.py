@@ -242,3 +242,21 @@ async def test_arc_resolved_refreshes_vector_with_outcome(stack):
 
     doc = store._arcs.get(ids=["arc1"])["documents"][0]
     assert "resolved: truth_embraced" in doc
+
+
+async def test_retired_world_entry_removed_from_index(stack):
+    events, proj, read, store, indexer = stack
+    from novelizer.canon.events import WorldEntryRetired
+
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1",
+                        WorldEntry(id="w1", title="Bell Cult", body="dusk bells"))
+    await proj.catch_up()
+    await indexer.catch_up()
+    assert any(h.kind == "world" for h in await store.search("bell", n=20))
+
+    await events.append(EventType.WORLD_ENTRY_RETIRED, "w1",
+                        WorldEntryRetired(entry_id="w1", reason="redundant"))
+    await proj.catch_up()
+    await indexer.catch_up()
+    hits = await store.search("bell", n=20)
+    assert "w1" not in {h.id for h in hits}
