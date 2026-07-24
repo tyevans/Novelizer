@@ -6,7 +6,7 @@ EXPECTED_ORDER = [
     "world_architect", "character_keeper", "muse",
     "plotter", "author",
     "editor", "continuity_checker", "retconner", "structure_analyst",
-    "summarizer", "triage",
+    "summarizer", "triage", "flaglabeler",
 ]
 
 
