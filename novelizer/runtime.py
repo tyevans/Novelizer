@@ -8,6 +8,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
+from novelizer.canon.events import EventType
 from agent_kit import Scheduler
 from novelizer.store.models import SignalKind
 from novelizer.telemetry.bus import TelemetryBus
@@ -63,6 +64,40 @@ def _make_override_provider(read_store):
             None,
         )
     return provider
+
+
+# Canon events that do not count as an agent having made progress. A remark is
+# an agent talking about its work, not doing it -- and BaseAgent._remark()
+# commits one as a real canon event (novelizer/agents/base.py), so without this
+# exclusion every agent that chatters "nothing to add this pass" would read as
+# productive and the idle ladder would never engage for anyone.
+#
+# Signal consumption is bookkeeping for the same reason. An agent with pending
+# director signals deliberately skips note_pass() even when it has decided to
+# do nothing (so input is never silently stranded), then marks the signals
+# consumed -- leaving a run whose only commit says "I read this and declined".
+# Counting that as work keeps a converged agent at full cadence for as long as
+# a director keeps trickling signals in. Excluding it costs nothing: a run that
+# also did something real commits something else too, and still reads as
+# progress.
+NON_PROGRESS_EVENT_TYPES = frozenset({
+    EventType.AGENT_REMARKED,
+    EventType.DIRECTOR_SIGNAL_CONSUMED,
+})
+
+
+def _make_progress_probe(events):
+    """agent_kit.BaseAgent's progress seam, answered from the event log rather
+    than declared by the agent: GatingCommitter stamps every commit with the
+    ambient run id, so "did this run make progress?" is exactly "did it commit
+    anything to canon that wasn't just chatter?".
+
+    Measured rather than self-reported, so it holds for agents added later
+    without each one growing a bespoke fingerprint method."""
+    async def probe(run_id: str) -> bool:
+        committed = await events.events_for_run(run_id)
+        return any(e.event_type not in NON_PROGRESS_EVENT_TYPES for e in committed)
+    return probe
 
 
 class Runtime:
@@ -270,8 +305,13 @@ class Runtime:
         # the planner ticks before the writer in a fresh room -- AGENT_REGISTRY
         # order encodes scheduling order, same as this list did before.
         self.agents = [self.agents_by_name[spec.name] for spec in AGENT_REGISTRY]
+        progress_probe = _make_progress_probe(self.events)
         for agent in self.agents:
             agent.telemetry = self.telemetry
+            # Injected post-construction alongside telemetry: novelizer's
+            # BaseAgent subclass does not thread kit kwargs through, and
+            # eleven agent constructors should not have to grow one.
+            agent.progress_probe = progress_probe
         self.scheduler = Scheduler(
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,

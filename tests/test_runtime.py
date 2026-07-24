@@ -755,3 +755,58 @@ def test_tooled_bare_builder_unchanged_when_tools_disabled(runtime):
 
     wrapped = runtime._tooled(builder, enabled=False, subagent_enabled=True, subagent_agent_name="character_keeper")
     assert wrapped is builder
+
+
+class _FakeEventsForRun:
+    """Minimal stand-in for EventStore.events_for_run — the probe only ever
+    reads event_type off what it gets back."""
+
+    def __init__(self, by_run: dict) -> None:
+        self._by_run = by_run
+
+    async def events_for_run(self, run_id: str):
+        return self._by_run.get(run_id, [])
+
+
+class _Ev:
+    def __init__(self, event_type: str) -> None:
+        self.event_type = event_type
+
+
+async def test_progress_probe_counts_real_canon_commits():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({"r1": [_Ev(EventType.CHAPTER_CREATED)]}))
+    assert await probe("r1") is True
+
+
+async def test_progress_probe_ignores_a_run_that_only_chattered():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({"r1": [_Ev(EventType.AGENT_REMARKED)]}))
+    assert await probe("r1") is False
+
+
+async def test_progress_probe_ignores_a_run_that_only_closed_out_signals():
+    """An agent that read the director's signals, declined to act, and marked
+    them consumed has done bookkeeping, not work. Counting it as progress
+    keeps a converged agent at full cadence for as long as a director keeps
+    trickling signals in — see world_architect's deliberate skip of
+    note_pass() when signals are pending but the draft is no_action."""
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({
+        "r1": [_Ev(EventType.DIRECTOR_SIGNAL_CONSUMED), _Ev(EventType.AGENT_REMARKED)],
+    }))
+    assert await probe("r1") is False
+
+
+async def test_progress_probe_counts_work_done_alongside_bookkeeping():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({
+        "r1": [_Ev(EventType.DIRECTOR_SIGNAL_CONSUMED), _Ev(EventType.WORLD_ENTRY_CREATED)],
+    }))
+    assert await probe("r1") is True
+
+
+async def test_progress_probe_reports_a_silent_run_as_no_progress():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({}))
+    assert await probe("nothing-committed") is False
