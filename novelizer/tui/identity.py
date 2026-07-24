@@ -3,12 +3,24 @@
 The spec's identity table (docs/superpowers/specs/
 2026-07-18-mission-control-design-pass-design.md) rendered as data. Every
 place an agent appears — feed speaker column, and (Phase 3) roster and room
-view — reads from here. Spec color names map to Rich styles that read well on
-both dark and light terminals:
+view — reads from here. Spec color names map to colors that read well on both
+dark and light terminals:
 
-    amber -> gold3, violet -> medium_purple, teal -> dark_cyan,
-    rose -> hot_pink3, steel blue -> steel_blue, orange -> dark_orange,
-    green -> green3, white/bold -> bold, dim -> dim
+    amber -> gold3 #d7af00, violet -> medium_purple #8787d7,
+    teal -> dark_cyan #00af87, rose -> hot_pink3 #d75f87,
+    steel blue -> steel_blue #5f87af, orange -> dark_orange #ff8700,
+    green -> green3 #00d700, sky -> sky_blue3 #5fafd7,
+    turquoise -> turquoise2 #00d7ff, orchid -> orchid #d75fd7,
+    white/bold -> bold, dim -> dim
+
+Colors are spelled as hex, not as the Rich 256-color names they came from,
+because these strings are parsed by *two* renderers: Rich (feed, proposals,
+roster, vitals) and Textual (engine-room tab titles, via Content.styled).
+Textual's parser only knows CSS color names, so a Rich name like "gold3"
+raises there and the style is dropped silently — which left every engine-room
+tab uncolored except the Muse's, whose "orchid" happens to also be CSS. Hex
+parses identically in both. Keep it that way; tests/tui/test_identity.py
+asserts every style parses under both parsers.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -20,20 +32,21 @@ class AgentIdentity:
     label: str      # short feed label, e.g. "Keeper"
     glyph: str      # single-cell glyph from the spec table
     fallback: str   # single ASCII letter if the terminal lacks the glyph
-    style: str      # Rich style string — defined once, here only
+    style: str      # style string — defined once, here only; Rich- and
+    # Textual-parseable, so colors are hex (see the module docstring)
 
 
 IDENTITIES: dict[str, AgentIdentity] = {
-    "author": AgentIdentity("author", "Author", "✎", "A", "gold3"),
-    "editor": AgentIdentity("editor", "Editor", "§", "E", "medium_purple"),
-    "world_architect": AgentIdentity("world_architect", "Architect", "⌂", "W", "dark_cyan"),
-    "character_keeper": AgentIdentity("character_keeper", "Keeper", "♥", "K", "hot_pink3"),
-    "continuity_checker": AgentIdentity("continuity_checker", "Continuity", "⚖", "C", "steel_blue"),
-    "retconner": AgentIdentity("retconner", "Retconner", "↺", "R", "dark_orange"),
-    "structure_analyst": AgentIdentity("structure_analyst", "Analyst", "∿", "S", "green3"),
-    "summarizer": AgentIdentity("summarizer", "Summary", "≡", "Z", "sky_blue3"),
-    "plotter": AgentIdentity("plotter", "Plotter", "⌖", "P", "turquoise2"),
-    "muse": AgentIdentity("muse", "Muse", "✦", "M", "orchid"),
+    "author": AgentIdentity("author", "Author", "✎", "A", "#d7af00"),
+    "editor": AgentIdentity("editor", "Editor", "§", "E", "#8787d7"),
+    "world_architect": AgentIdentity("world_architect", "Architect", "⌂", "W", "#00af87"),
+    "character_keeper": AgentIdentity("character_keeper", "Keeper", "♥", "K", "#d75f87"),
+    "continuity_checker": AgentIdentity("continuity_checker", "Continuity", "⚖", "C", "#5f87af"),
+    "retconner": AgentIdentity("retconner", "Retconner", "↺", "R", "#ff8700"),
+    "structure_analyst": AgentIdentity("structure_analyst", "Analyst", "∿", "S", "#00d700"),
+    "summarizer": AgentIdentity("summarizer", "Summary", "≡", "Z", "#5fafd7"),
+    "plotter": AgentIdentity("plotter", "Plotter", "⌖", "P", "#00d7ff"),
+    "muse": AgentIdentity("muse", "Muse", "✦", "M", "#d75fd7"),
     "director": AgentIdentity("director", "Director", "★", "D", "bold"),
     "system": AgentIdentity("system", "System", "·", "-", "dim"),
 }

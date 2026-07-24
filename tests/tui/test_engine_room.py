@@ -257,6 +257,38 @@ async def test_agent_tab_titles_carry_glyph_and_color():
         assert any(span.style == ident.style for span in author_tab.spans)
 
 
+async def test_every_agent_tab_title_resolves_to_a_distinct_color():
+    """Carrying the style *string* is not enough -- Textual parses it lazily at
+    render time and drops it silently if it fails, so a Rich-only color name
+    like "gold3" leaves the tab colorless while the test above still passes.
+    Resolve every title through Textual's parser and require a real, distinct
+    foreground per agent."""
+    from tui_kit.widgets.engine_room import EngineRoom
+    from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
+    from textual.style import Style
+    from textual.widgets import TabbedContent
+    from textual.app import App
+
+    class _Harness(App):
+        def compose(self):
+            yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
+                              id="engine_room")
+
+    app = _Harness()
+    async with app.run_test() as pilot:
+        tabs = app.query_one("#er_tabs", TabbedContent)
+        colors = {}
+        for name in AGENT_NAMES:
+            title = tabs.query_one(f"#er_tab_{name}")._title
+            styles = [Style.parse(span.style) if isinstance(span.style, str) else span.style
+                      for span in title.spans]
+            foregrounds = [s.foreground for s in styles if s.foreground is not None]
+            assert foregrounds, f"{name} tab title carries no resolvable color"
+            colors[name] = foregrounds[0]
+        assert len(set(colors.values())) == len(AGENT_NAMES), (
+            f"agent tab colors are not distinct: {colors}")
+
+
 async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt):
     from textual.widgets import Static
     app = NovelizerApp(rt)
