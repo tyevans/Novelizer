@@ -1,3 +1,7 @@
+import time
+
+import pytest
+
 from novelizer.runtime import Runtime
 from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
 
@@ -273,6 +277,55 @@ async def test_rebuild_keeps_plotter_tooled_when_flags_on(tmp_path, monkeypatch)
     assert len(seen_kwargs) == 1
     assert seen_kwargs[0]["backend"] is rt._canon_backend
     assert seen_kwargs[0]["tools"] is rt._canon_tools
+    await rt.close()
+
+
+# --- Phase 6: interval deprecation (accepted-and-inert, never removed) -------
+#
+# Phase 2 deleted the clock gate, so the seven agent *_interval keys no longer
+# govern dispatch. They stay accepted for back-compat (an existing story.toml
+# carrying one must still load and apply). apply_settings must classify an
+# interval change as a recorded no-op: it lands in `applied`, never in
+# `restart_required`, and never raises -- and it must NOT change whether any
+# agent is dispatchable, because dispatch is the ladders' job now.
+
+_INTERVAL_KEY_TO_AGENT = [
+    ("author_interval", "author"),
+    ("continuity_interval", "continuity_checker"),
+    ("structure_analyst_interval", "structure_analyst"),
+    ("plotter_interval", "plotter"),
+    ("summarizer_interval", "summarizer"),
+]
+
+
+@pytest.mark.parametrize("key,_agent", _INTERVAL_KEY_TO_AGENT)
+async def test_interval_change_is_accepted_as_an_inert_noop(tmp_path, key, _agent):
+    """Each inert interval key must be ACCEPTED by apply_settings: recorded in
+    `applied`, never in `restart_required`, never raising, and reflected in
+    runtime.settings so a reload of the same file is a clean no-op next time."""
+    rt = await _started_runtime(tmp_path)
+    result = rt.apply_settings(rt.settings.model_copy(update={key: 7}))
+    assert key in result["applied"]
+    assert key not in result["restart_required"]
+    assert result["errors"] == []
+    assert getattr(rt.settings, key) == 7
+    await rt.close()
+
+
+async def test_changing_an_interval_does_not_change_dispatch_readiness(tmp_path):
+    """The heart of the deprecation: an interval change must NOT alter whether
+    an agent is dispatchable. ready() = now >= max(_fail_until, _idle_until) --
+    interval is not in that expression. Pushing author_interval to a huge value
+    must leave a fresh, non-backed-off author just as ready as before. If this
+    regresses, intervals have crept back into the dispatch path (the exact bug
+    Phase 2 removed)."""
+    rt = await _started_runtime(tmp_path, author_interval=1)
+    now = time.monotonic()
+    before = rt.author.ready(now)
+    rt.apply_settings(rt.settings.model_copy(update={"author_interval": 10_000_000}))
+    assert rt.author.ready(now) == before
+    # A fresh agent with no backoff is dispatchable regardless of interval.
+    assert rt.author.ready(now) is True
     await rt.close()
 
 

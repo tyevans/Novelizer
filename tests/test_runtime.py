@@ -966,3 +966,152 @@ async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(set
     finally:
         await rt.scheduler.drain_in_flight()
         await rt.close()
+
+
+# --- Phase 6: background-progress readout (legibility of the strict gate) ----
+#
+# The strict background gate (Phase 4) freezes EVERY agent while EITHER indexer
+# lags. The user accepted that a down embed endpoint can freeze the whole room
+# ON THE CONDITION that the operator can SEE the backlog draining -- otherwise a
+# freeze is indistinguishable from a hang. So the runtime must expose a single
+# queryable progress signal spanning BOTH the CanonIndexer AND the KGProjector.
+# Today _brain_loop reads only indexer.lag(), missing KG entirely.
+#
+# Pinned shape: Runtime.background_progress() (async) returns a BackgroundProgress
+# with named `index_lag` / `kg_lag` ints, a `total` (their sum) and a
+# `caught_up` flag (total == 0). Named fields over a bare tuple because the
+# status bar reads them by name and a swapped (index, kg) pair would be a silent
+# bug. It must:
+#   - be zero / caught_up when both indexers are drained,
+#   - reflect pending work on EITHER side,
+#   - NEVER raise -- a lag probe that hits "database is locked" must not crash
+#     the status loop; that side reads as unknown == 0 (mirrors the never-raise
+#     contract of index_catch_up / kg_catch_up),
+#   - treat a None indexer / projector as 0 (the runtime can run without them,
+#     exactly as _make_gate_provider already does).
+#
+# These start RED: Runtime has no background_progress() method and there is no
+# BackgroundProgress type (ImportError / AttributeError).
+
+
+class _RaisingLagger:
+    """A lag() that raises the way a real indexer does under DB contention
+    ("database is locked"). background_progress() must swallow this and report
+    that side as unknown == 0 rather than letting it escape into the status
+    loop -- the same never-raise contract index_catch_up / kg_catch_up hold."""
+
+    async def lag(self) -> int:
+        raise RuntimeError("database is locked")
+
+
+async def test_background_progress_type_shape_is_index_kg_total_caught_up():
+    """Pin the exact returned shape as a named type, not a bare (index, kg)
+    tuple: the status bar reads these by name and a swapped pair would be a
+    silent bug. total is the sum; caught_up is total == 0."""
+    from novelizer.runtime import BackgroundProgress
+    p = BackgroundProgress(index_lag=4, kg_lag=2)
+    assert p.index_lag == 4
+    assert p.kg_lag == 2
+    assert p.total == 6
+    assert p.caught_up is False
+    assert BackgroundProgress(index_lag=0, kg_lag=0).caught_up is True
+
+
+async def test_background_progress_is_zero_when_both_indexers_are_caught_up(settings):
+    rt = Runtime(settings)
+    rt.indexer = _FakeLagger(0)
+    rt.kg_projector = _FakeLagger(0)
+    p = await rt.background_progress()
+    assert p.index_lag == 0
+    assert p.kg_lag == 0
+    assert p.total == 0
+    assert p.caught_up is True
+
+
+async def test_background_progress_reflects_pending_work_on_either_indexer(settings):
+    """Either side lagging must surface: the two lags count different event
+    sets (24 canon event types vs the projector's 6) and are not
+    interchangeable, so a readout that watched only one would miss a freeze
+    caused by the other."""
+    rt = Runtime(settings)
+
+    rt.indexer, rt.kg_projector = _FakeLagger(5), _FakeLagger(0)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (5, 0, 5)
+    assert p.caught_up is False
+
+    rt.indexer, rt.kg_projector = _FakeLagger(0), _FakeLagger(3)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (0, 3, 3)
+    assert p.caught_up is False
+
+    rt.indexer, rt.kg_projector = _FakeLagger(4), _FakeLagger(2)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (4, 2, 6)
+    assert p.caught_up is False
+
+
+async def test_background_progress_never_raises_when_a_lag_probe_fails(settings):
+    """A "database is locked" on one probe must not crash the status loop. The
+    failing side reads as unknown == 0; the healthy side is still reported, so
+    the operator keeps seeing real progress from whichever indexer is up."""
+    rt = Runtime(settings)
+    rt.indexer = _RaisingLagger()
+    rt.kg_projector = _FakeLagger(7)
+    p = await rt.background_progress()  # must not raise
+    assert p.index_lag == 0  # failing side treated as unknown/zero
+    assert p.kg_lag == 7
+    assert p.total == 7
+    assert p.caught_up is False
+
+
+async def test_background_progress_handles_missing_indexers(settings):
+    """The runtime can run without an indexer / projector (both default to
+    None). A None side contributes 0, mirroring _make_gate_provider's None
+    handling -- nothing to wait on, so nothing to report."""
+    rt = Runtime(settings)  # __init__ leaves indexer and kg_projector None
+    p = await rt.background_progress()
+    assert p.index_lag == 0
+    assert p.kg_lag == 0
+    assert p.caught_up is True
+
+    rt.kg_projector = _FakeLagger(9)
+    p = await rt.background_progress()
+    assert p.index_lag == 0  # indexer still None
+    assert p.kg_lag == 9
+    assert p.total == 9
+
+
+async def test_background_progress_spans_both_real_indexers_end_to_end(settings):
+    """End to end against the REAL wired indexers, mirroring
+    test_pending_index_lag_holds_every_agent_then_releases_on_catch_up. A
+    THREAD_PLANTED event is indexable by the CanonIndexer but NOT by the
+    KGProjector, so it raises canon index lag alone -- no KG LLM call is ever
+    provoked, keeping the test hermetic. background_progress() must see that
+    canon lag (and only it), then read zero again once the drain catches up."""
+    from novelizer.canon.events import ThreadPlanted
+
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        # Fresh, fully-drained room: nothing pending on either side.
+        p = await rt.background_progress()
+        assert p.total == 0
+        assert p.caught_up is True
+
+        # Raise canon index lag without touching the KG projector or its LLM.
+        await rt.events.append(EventType.THREAD_PLANTED, "t1",
+                               ThreadPlanted(id="t1", name="The Ledger"))
+        p = await rt.background_progress()
+        assert p.index_lag > 0
+        assert p.kg_lag == 0, "THREAD_PLANTED is not a KG-indexed event; kg lag stays 0"
+        assert p.total == p.index_lag
+        assert p.caught_up is False
+
+        # Drain the embedding backlog; the readout returns to caught-up.
+        await rt.index_catch_up()
+        p = await rt.background_progress()
+        assert p.total == 0
+        assert p.caught_up is True
+    finally:
+        await rt.close()

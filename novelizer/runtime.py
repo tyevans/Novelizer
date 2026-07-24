@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
@@ -39,6 +41,8 @@ from novelizer.store.embeddings import EmbeddingStore
 from novelizer.store.indexer import CanonIndexer
 from novelizer.store.kg_store import KGStore
 from novelizer.store.kg_projector import KGProjector
+
+logger = logging.getLogger(__name__)
 
 # Agents pinned into Runtime._tooling_pinned. author and continuity_checker are
 # deliberately excluded here even though their SPECs carry a tool_grant (needed
@@ -114,6 +118,52 @@ def _make_progress_probe(events):
         committed = await events.events_for_run(run_id)
         return any(e.event_type not in NON_PROGRESS_EVENT_TYPES for e in committed)
     return probe
+
+
+@dataclass
+class BackgroundProgress:
+    """A single queryable snapshot of how far behind the two background drains
+    are: the CanonIndexer's embedding lag and the KGProjector's extraction lag.
+
+    A named type rather than a bare (index, kg) tuple because the status bar
+    reads these BY NAME -- a swapped pair would be a silent bug -- and because
+    the strict background gate (see _make_gate_provider) freezes EVERY agent
+    while either side lags. The user accepted that a down embed/KG endpoint can
+    stall the whole room ONLY on the condition that the freeze stays legible:
+    the operator must be able to watch the backlog drain, otherwise a freeze is
+    indistinguishable from a hang. This type is that visible signal, spanning
+    BOTH indexers (the two lags count different event sets -- 24 canon event
+    types vs the projector's 6 -- so watching only one would miss a freeze
+    caused by the other)."""
+
+    index_lag: int
+    kg_lag: int
+
+    @property
+    def total(self) -> int:
+        return self.index_lag + self.kg_lag
+
+    @property
+    def caught_up(self) -> bool:
+        return self.total == 0
+
+
+async def _safe_lag(indexer) -> int:
+    """Read one drain's lag() without ever letting it escape into the status
+    loop. A None indexer means the runtime is running without it -- nothing to
+    wait on -- so it contributes 0, mirroring _make_gate_provider's None
+    handling. A lag() that raises (a real "database is locked" under DB
+    contention) is swallowed and read as unknown == 0, mirroring the never-raise
+    contract of index_catch_up / kg_catch_up: one probe failing must not blank
+    the readout for the healthy side."""
+    if indexer is None:
+        return 0
+    try:
+        return await indexer.lag()
+    except Exception as e:
+        logger.warning("background lag probe failed (%s: %s); reporting that side as 0",
+                       type(e).__name__, e)
+        return 0
 
 
 class Runtime:
@@ -368,6 +418,18 @@ class Runtime:
         changed = [k for k in EffectiveSettings.model_fields if getattr(old, k) != getattr(new, k)]
         applied: list[str] = []
         restart: list[str] = []
+        # DEPRECATED (Phase 2, event-driven scheduling): these seven agent
+        # *_interval keys no longer gate dispatch. ready() = now >=
+        # max(_fail_until, _idle_until) -- interval is not in that expression;
+        # the fail/idle backoff ladders govern cadence now. The keys are kept
+        # accepted-and-inert purely for config back-compat: removing them would
+        # hard-error on load for every existing story.toml / config.toml that
+        # still carries one. The agent.interval writes below are a harmless
+        # inert no-op (the value is stored but never read for dispatch), kept so
+        # an interval change is still recorded in `applied` (never a restart)
+        # and a reload of the same file stays a clean no-op. NOTE:
+        # projector_interval is NOT here and is NOT deprecated -- it still paces
+        # the TUI projector/scheduler/status loops.
         interval_map = {
             "author_interval": [self.author],
             "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
@@ -488,6 +550,26 @@ class Runtime:
         if self.kg_projector is None:
             return
         await self.kg_projector.catch_up()
+
+    async def background_progress(self) -> BackgroundProgress:
+        """Single queryable snapshot of both background drains' lag, for the
+        legibility half of the strict background gate: while either indexer
+        lags, the gate freezes every agent (see _make_gate_provider), so the
+        operator must be able to SEE the backlog draining or a freeze looks like
+        a hang. Reads the CanonIndexer's embedding lag and the KGProjector's
+        extraction lag -- they count DIFFERENT event sets and are not
+        interchangeable, so both are surfaced.
+
+        Never raises and never blocks on a missing drain: each side is read
+        through _safe_lag, so a None indexer contributes 0 and a lag() that hits
+        "database is locked" reads as unknown == 0 while the healthy side is
+        still reported -- the same never-raise contract index_catch_up /
+        kg_catch_up hold, because this drives a status loop that must not
+        crash."""
+        return BackgroundProgress(
+            index_lag=await _safe_lag(self.indexer),
+            kg_lag=await _safe_lag(self.kg_projector),
+        )
 
     async def close(self) -> None:
         await self.read.close()

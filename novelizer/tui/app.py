@@ -254,14 +254,18 @@ class NovelizerApp(App):
     async def _brain_loop(self) -> None:
         while True:
             try:
-                lag = 0
-                if self.runtime.indexer is not None:
-                    lag = await self.runtime.indexer.lag()
+                # Combined background lag across BOTH drains (embedding indexer
+                # AND KG projector), not just the indexer. The strict background
+                # gate freezes every agent while EITHER side lags, so a readout
+                # that watched only indexer.lag() would show "caught up" through
+                # a KG-endpoint stall -- an unexplained freeze. background_progress()
+                # sums both and never raises (see Runtime.background_progress).
+                progress = await self.runtime.background_progress()
                 await self.query_one("#brain", BrainPanel).refresh_from(
                     self.runtime.read,
                     threshold=self.runtime.settings.staleness_threshold_chapters,
                     delta=self.runtime.settings.sag_spike_delta,
-                    lag=lag,
+                    lag=progress.total,
                 )
             except Exception as e:
                 self._report_worker_error("brain", e)

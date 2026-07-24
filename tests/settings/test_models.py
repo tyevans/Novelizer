@@ -145,3 +145,32 @@ def test_context_assembly_settings_defaults():
 def test_context_assembly_settings_story_overridable():
     assert {"extractor_token_budget", "advisory_token_budget",
             "summarizer_interval"} <= STORY_OVERRIDABLE_KEYS
+
+
+# The seven agent-cadence *_interval keys. Phase 2 of the event-driven
+# scheduling redesign deleted the clock gate, so these no longer govern
+# dispatch -- ready() consults only the fail/idle ladders now. They stay in the
+# model and in STORY_OVERRIDABLE_KEYS on purpose: removing them would hard-error
+# on load for every existing story.toml / config.toml that still carries one.
+# "Accepted and inert", never "gone".
+_DEPRECATED_INTERVAL_KEYS = [
+    "author_interval", "default_agent_interval", "continuity_interval",
+    "structure_analyst_interval", "plotter_interval", "muse_interval",
+    "summarizer_interval",
+]
+
+
+@pytest.mark.parametrize("key", _DEPRECATED_INTERVAL_KEYS)
+def test_deprecated_interval_key_still_loads_and_round_trips(key):
+    """Back-compat guard: each inert *_interval key must remain a valid
+    EffectiveSettings field that round-trips a supplied value. If any is
+    dropped from the model, an existing story that sets it will fail to load."""
+    s = EffectiveSettings(**{key: 999})
+    assert getattr(s, key) == 999
+
+
+@pytest.mark.parametrize("key", _DEPRECATED_INTERVAL_KEYS)
+def test_deprecated_interval_key_stays_story_overridable(key):
+    """The keys must stay in STORY_OVERRIDABLE_KEYS: a story.toml that carries
+    one must be accepted, not rejected as an unknown/forbidden override."""
+    assert key in STORY_OVERRIDABLE_KEYS

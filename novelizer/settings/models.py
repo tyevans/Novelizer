@@ -88,6 +88,13 @@ class EffectiveSettings(BaseModel):
     background_drain_concurrency: int = 4
 
     # Cadence (seconds)
+    # DEPRECATED (Phase 2, event-driven scheduling): these seven agent
+    # *_interval keys are accepted-and-inert. Dispatch no longer consults an
+    # interval -- ready() = now >= max(_fail_until, _idle_until), governed by
+    # the fail/idle backoff ladders (agent_kit BaseAgent). The fields are kept
+    # in the model and in STORY_OVERRIDABLE_KEYS ONLY for config back-compat:
+    # removing them would hard-error on load for every existing story.toml /
+    # config.toml that still sets one. See Runtime.apply_settings' interval_map.
     author_interval: int = 300
     default_agent_interval: int = 120
     continuity_interval: int = 900
@@ -95,6 +102,8 @@ class EffectiveSettings(BaseModel):
     plotter_interval: int = 240
     muse_interval: int = 60
     triage_interval: int = 120
+    # NOT deprecated: projector_interval still paces the TUI projector,
+    # scheduler, and status-bar loops -- it is not an agent-cadence key.
     projector_interval: float = 0.5
     summarizer_interval: int = 300
 
