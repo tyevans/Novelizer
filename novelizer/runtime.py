@@ -268,9 +268,17 @@ class Runtime:
                 base_url=self.settings.llm_base_url,
                 api_key=self.settings.llm_api_key,
             )
+        # One shared LLM concurrency ceiling for the whole fleet, built BEFORE
+        # the projectors so both the scheduler and the two background drains draw
+        # permits from this single object -- the shared endpoint ceiling that does
+        # not hold today (two independent LLM consumers, the 429-pileup source).
+        # Created here (not after the agents) because the backfill catch_up calls
+        # below already drain through it.
+        self.pool = AdaptivePool(self.settings.llm_pool_size)
         self.indexer = CanonIndexer(
             self.events, self.read, self.embeddings,
             str(Path(self.settings.db_path).with_name("embed_cursor.json")),
+            pool=self.pool, drain_concurrency=self.settings.background_drain_concurrency,
         )
         await self.index_catch_up()  # backfill; failure-tolerant by contract
         self.kg_store = KGStore(self.settings.db_path)
@@ -280,6 +288,7 @@ class Runtime:
         self.kg_projector = KGProjector(
             self.events, self.read, self.kg_store, self.embeddings, kg_runner,
             str(Path(self.settings.db_path).with_name("kg_cursor.json")),
+            pool=self.pool, drain_concurrency=self.settings.background_drain_concurrency,
         )
         await self.kg_catch_up()  # backfill; failure-tolerant by contract
         self.policy = AutonomyPolicy(self.read)
@@ -328,11 +337,10 @@ class Runtime:
             # BaseAgent subclass does not thread kit kwargs through, and
             # eleven agent constructors should not have to grow one.
             agent.progress_probe = progress_probe
-        # One shared LLM concurrency ceiling for the whole fleet. Today the
-        # scheduler and background KG extraction hit one vLLM endpoint with no
-        # common limit -- the 429-pileup source. AIMD on this single pool is that
-        # shared ceiling; the KG drain draws permits from the same object.
-        self.pool = AdaptivePool(s.llm_pool_size)
+        # self.pool (the one shared LLM concurrency ceiling) was built above,
+        # before the projectors, so the scheduler and both background drains draw
+        # permits from the same object -- one fleet-wide ceiling on a single
+        # endpoint, the 429-pileup fix.
         self.scheduler = Scheduler(
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
@@ -386,6 +394,13 @@ class Runtime:
                 # no restart. AIMD keeps managing _limit under the new size from
                 # here, exactly like max_concurrent_agents applies live.
                 self.pool.size = new.llm_pool_size
+                applied.append(key)
+            elif key == "background_drain_concurrency":
+                # Push the new fan-out cap onto both projectors live -- read on
+                # the next catch_up pass, no reconstruction, mirroring
+                # llm_pool_size. Both drains share this global-only knob.
+                self.indexer._drain_concurrency = new.background_drain_concurrency
+                self.kg_projector._drain_concurrency = new.background_drain_concurrency
                 applied.append(key)
             elif key == "muse_era":
                 self.muse._era = new.muse_era

@@ -68,6 +68,20 @@ def test_llm_pool_size_round_trips_through_effective_settings():
     assert EffectiveSettings(llm_pool_size=8).llm_pool_size == 8
 
 
+def test_background_drain_concurrency_default_is_4():
+    """Phase 5: caps how many aggregate partitions the background drain fans out
+    into concurrently -- a task-count bound (1000 pending aggregates must not
+    spawn 1000 tasks), independent of the shared LLM pool's endpoint ceiling.
+    Global-only, like llm_pool_size and max_concurrent_agents: it bounds a
+    process-wide resource, not a per-story creative knob."""
+    assert EffectiveSettings().background_drain_concurrency == 4
+    assert "background_drain_concurrency" not in STORY_OVERRIDABLE_KEYS
+
+
+def test_background_drain_concurrency_round_trips_through_effective_settings():
+    assert EffectiveSettings(background_drain_concurrency=8).background_drain_concurrency == 8
+
+
 def test_prior_chapter_summary_chars_default_is_200():
     assert EffectiveSettings().prior_chapter_summary_chars == 200
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS

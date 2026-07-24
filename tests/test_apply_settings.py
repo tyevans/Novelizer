@@ -100,6 +100,27 @@ def test_llm_pool_size_is_not_restart_required():
     assert "llm_pool_size" not in RESTART_REQUIRED_KEYS
 
 
+async def test_background_drain_concurrency_applies_live(tmp_path):
+    """Phase 5: the drain fan-out cap applies live, mirroring llm_pool_size's
+    treatment -- apply_settings pushes the new value onto BOTH running projectors
+    (they are long-lived, not rebuilt), no restart. The projectors store it as
+    `_drain_concurrency`; that is the seam this pins."""
+    rt = await _started_runtime(tmp_path, background_drain_concurrency=4)
+    assert rt.indexer._drain_concurrency == 4
+    assert rt.kg_projector._drain_concurrency == 4
+    result = rt.apply_settings(rt.settings.model_copy(update={"background_drain_concurrency": 8}))
+    assert "background_drain_concurrency" in result["applied"]
+    assert result["restart_required"] == []
+    assert rt.settings.background_drain_concurrency == 8
+    assert rt.indexer._drain_concurrency == 8
+    assert rt.kg_projector._drain_concurrency == 8
+    await rt.close()
+
+
+def test_background_drain_concurrency_is_not_restart_required():
+    assert "background_drain_concurrency" not in RESTART_REQUIRED_KEYS
+
+
 async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_live_change(tmp_path, monkeypatch):
     """Fix 1: a temperature change arriving alongside a restart-required change
     (e.g. author_model) must rebuild runners from the REVERTED settings, not

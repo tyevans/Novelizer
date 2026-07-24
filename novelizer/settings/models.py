@@ -78,6 +78,14 @@ class EffectiveSettings(BaseModel):
     # knob, so it is deliberately NOT in STORY_OVERRIDABLE_KEYS. Both the
     # scheduler and background KG extraction draw permits from this one pool.
     llm_pool_size: int = 6
+    # Fan-out cap for the background drain (Phase 5): how many aggregate
+    # partitions the embedding indexer / KG projector may drain concurrently in
+    # one catch_up pass. A task-count bound -- 1000 pending aggregates must not
+    # spawn 1000 tasks -- independent of llm_pool_size, which is the endpoint's
+    # LLM-concurrency ceiling. Global-only for the same reason as llm_pool_size
+    # and max_concurrent_agents: it bounds a process-wide resource, not a
+    # per-story creative knob, so it is deliberately NOT story-overridable.
+    background_drain_concurrency: int = 4
 
     # Cadence (seconds)
     author_interval: int = 300

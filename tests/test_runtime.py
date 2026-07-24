@@ -76,6 +76,34 @@ async def test_start_wires_a_shared_llm_pool_into_the_scheduler(settings):
         await rt.close()
 
 
+async def test_start_shares_the_llm_pool_with_both_background_drains(settings):
+    """Phase 5: the SAME AdaptivePool handed to the scheduler is handed to both
+    projectors, so agents and the two drains share ONE endpoint ceiling and one
+    AIMD controller -- the property that does not hold today (independent LLM
+    consumers, no shared limit, the 429-pileup source). Duck-typed on the `_pool`
+    attribute so a missing wiring reds only this test, not the file's collection."""
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.indexer._pool is rt.pool
+        assert rt.kg_projector._pool is rt.pool
+    finally:
+        await rt.close()
+
+
+async def test_start_wires_background_drain_concurrency_from_settings(settings):
+    """Phase 5: start() passes background_drain_concurrency through to both
+    projectors as their fan-out cap (`_drain_concurrency`)."""
+    rt = Runtime(settings.model_copy(update={"background_drain_concurrency": 3}),
+                 runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.indexer._drain_concurrency == 3
+        assert rt.kg_projector._drain_concurrency == 3
+    finally:
+        await rt.close()
+
+
 async def test_runtime_wires_gating_committer_and_policy(settings):
     rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
     try:
