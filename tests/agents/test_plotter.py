@@ -675,7 +675,8 @@ def test_build_plotter_runner_tooled_branch_passes_plotter_skills(monkeypatch):
 
     backend = CanonBackend(read_store=None)
     plotter_mod.build_plotter_runner(_FakeSettings(), backend=backend, tools=[])
-    assert captured["skills"] == plotter_mod.PLOTTER_SKILLS
+    from novelizer.canon_fs.skills_route import CRAFT_SKILLS
+    assert captured["skills"] == CRAFT_SKILLS
     assert captured["skills"] == ["/skills"]
 
 

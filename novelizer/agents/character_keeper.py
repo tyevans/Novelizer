@@ -82,11 +82,6 @@ KEEPER_PULL_NOTE = (
     "shown in frontmatter or search results."
 )
 
-# See CRAFT_SKILLS docstring (novelizer.canon_fs.skills_route): the
-# middleware's container source contract makes per-agent pack selectivity
-# unavailable, so every tooled agent shares the same source list.
-KEEPER_SKILLS = CRAFT_SKILLS
-
 UNREAD_CHAPTERS_HEADING = "Unread chapters (full prose — mine these now):"
 
 
@@ -386,7 +381,7 @@ def build_character_keeper_runner(settings, callbacks=None, backend=None, tools=
         system_prompt = SYSTEM_PROMPT + KEEPER_PULL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=KeeperOutput,
-            backend=backend, tools=tools, skills=KEEPER_SKILLS, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

@@ -3,6 +3,7 @@ from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import WorldEntriesDraft
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
@@ -173,7 +174,7 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=WorldEntriesDraft,
-            backend=backend, tools=tools, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

@@ -458,7 +458,8 @@ def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkey
 
     backend = CanonBackend(read_store=None)
     keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
-    assert captured["skills"] == keeper_mod.KEEPER_SKILLS
+    from novelizer.canon_fs.skills_route import CRAFT_SKILLS
+    assert captured["skills"] == CRAFT_SKILLS
     assert captured["skills"] == ["/skills"]
 
 
