@@ -58,11 +58,31 @@ as the source of truth for glyph/label/style, keyed by the same
 
 ```python
 IDENTITIES: dict[str, AgentIdentity] = {
-    "author": AgentIdentity("author", "Author", "✎", "A", "gold3"),
-    "editor": AgentIdentity("editor", "Editor", "§", "E", "medium_purple"),
+    "author": AgentIdentity("author", "Author", "✎", "A", "#d7af00"),
+    "editor": AgentIdentity("editor", "Editor", "§", "E", "#8787d7"),
     ...
 }
 ```
+
+**Spell colors as hex, not as Rich color names.** `style()` is consumed by two
+different renderers: Rich (`rich.Text` — vitals, roster, feed) *and* Textual
+(`Content.styled` — the engine room's per-agent tab titles). Textual's parser
+only knows CSS color names, so a Rich 256-color name like `gold3` or
+`dark_cyan` raises there and the style is dropped **silently** — the tab
+renders colorless while everything Rich draws looks right. Hex parses
+identically in both. Assert it in your tests:
+
+```python
+def test_styles_parse_under_both_renderers():
+    import rich.style, textual.style
+    for ident in IDENTITIES.values():
+        rich.style.Style.parse(ident.style)
+        textual.style.Style.parse(ident.style)
+```
+
+This constraint applies only to `AgentTheme.style()`. Styles you render
+exclusively through `rich.Text` yourself (status bars, banners) can keep using
+Rich color names.
 
 `NovelizerAgentTheme` is a thin adapter over that registry plus a separate
 `_VERBS` dict (verb isn't part of `AgentIdentity` because it's a run-state
