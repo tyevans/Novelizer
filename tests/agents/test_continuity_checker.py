@@ -992,7 +992,9 @@ async def test_continuity_pass_skips_llm_retcons_but_still_mines(stack):
     mined = await events.events_since(0, event_types=[EventType.CHAPTER_MINED])
     assert [e.payload["chapter_id"] for e in mined] == ["ch1"]
     # Mining WAS deterministic work, so no backoff this run.
-    assert agent._backoff_until == 0.0
+    import time
+    assert agent._idle_streak == 0
+    assert agent.ready(time.monotonic())
 
 
 async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
@@ -1009,7 +1011,8 @@ async def test_continuity_pass_backs_off_when_no_deterministic_work(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert remarks[-1].payload["note"] == "All threads hold."
     import time
-    assert passing.seconds_until_ready(time.monotonic()) > passing.interval
+    assert passing._idle_streak == 1
+    assert not passing.ready(time.monotonic())
 
 
 class NoneMiningRunner:

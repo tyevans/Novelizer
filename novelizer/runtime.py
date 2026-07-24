@@ -1,4 +1,6 @@
 from __future__ import annotations
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from novelizer.settings import EffectiveSettings, RESTART_REQUIRED_KEYS
@@ -8,7 +10,8 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
-from agent_kit import Scheduler
+from novelizer.canon.events import EventType
+from agent_kit import AdaptivePool, Scheduler
 from novelizer.store.models import SignalKind
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
@@ -39,6 +42,8 @@ from novelizer.store.indexer import CanonIndexer
 from novelizer.store.kg_store import KGStore
 from novelizer.store.kg_projector import KGProjector
 
+logger = logging.getLogger(__name__)
+
 # Agents pinned into Runtime._tooling_pinned. author and continuity_checker are
 # deliberately excluded here even though their SPECs carry a tool_grant (needed
 # internally by their own _construct(ctx) functions) -- those two track their
@@ -63,6 +68,102 @@ def _make_override_provider(read_store):
             None,
         )
     return provider
+
+
+def _make_gate_provider(indexer, kg_projector):
+    """agent_kit.Scheduler's strict background-first gate seam, carrying
+    novelizer's policy: agents dispatch only when BOTH the embedding indexer and
+    the KG projector are fully caught up. The two lags count different event sets
+    and are not interchangeable, so both must reach zero before agents may act.
+
+    A None indexer means the runtime is running without it -- index_catch_up /
+    kg_catch_up are themselves no-op-guarded on None -- so there is nothing to
+    wait on: treat that side's lag as 0 (open)."""
+    async def provider() -> bool:
+        index_lag = 0 if indexer is None else await indexer.lag()
+        kg_lag = 0 if kg_projector is None else await kg_projector.lag()
+        return index_lag == 0 and kg_lag == 0
+    return provider
+
+
+# Canon events that do not count as an agent having made progress. A remark is
+# an agent talking about its work, not doing it -- and BaseAgent._remark()
+# commits one as a real canon event (novelizer/agents/base.py), so without this
+# exclusion every agent that chatters "nothing to add this pass" would read as
+# productive and the idle ladder would never engage for anyone.
+#
+# Signal consumption is bookkeeping for the same reason. An agent with pending
+# director signals deliberately skips note_pass() even when it has decided to
+# do nothing (so input is never silently stranded), then marks the signals
+# consumed -- leaving a run whose only commit says "I read this and declined".
+# Counting that as work keeps a converged agent at full cadence for as long as
+# a director keeps trickling signals in. Excluding it costs nothing: a run that
+# also did something real commits something else too, and still reads as
+# progress.
+NON_PROGRESS_EVENT_TYPES = frozenset({
+    EventType.AGENT_REMARKED,
+    EventType.DIRECTOR_SIGNAL_CONSUMED,
+})
+
+
+def _make_progress_probe(events):
+    """agent_kit.BaseAgent's progress seam, answered from the event log rather
+    than declared by the agent: GatingCommitter stamps every commit with the
+    ambient run id, so "did this run make progress?" is exactly "did it commit
+    anything to canon that wasn't just chatter?".
+
+    Measured rather than self-reported, so it holds for agents added later
+    without each one growing a bespoke fingerprint method."""
+    async def probe(run_id: str) -> bool:
+        committed = await events.events_for_run(run_id)
+        return any(e.event_type not in NON_PROGRESS_EVENT_TYPES for e in committed)
+    return probe
+
+
+@dataclass
+class BackgroundProgress:
+    """A single queryable snapshot of how far behind the two background drains
+    are: the CanonIndexer's embedding lag and the KGProjector's extraction lag.
+
+    A named type rather than a bare (index, kg) tuple because the status bar
+    reads these BY NAME -- a swapped pair would be a silent bug -- and because
+    the strict background gate (see _make_gate_provider) freezes EVERY agent
+    while either side lags. The user accepted that a down embed/KG endpoint can
+    stall the whole room ONLY on the condition that the freeze stays legible:
+    the operator must be able to watch the backlog drain, otherwise a freeze is
+    indistinguishable from a hang. This type is that visible signal, spanning
+    BOTH indexers (the two lags count different event sets -- 24 canon event
+    types vs the projector's 6 -- so watching only one would miss a freeze
+    caused by the other)."""
+
+    index_lag: int
+    kg_lag: int
+
+    @property
+    def total(self) -> int:
+        return self.index_lag + self.kg_lag
+
+    @property
+    def caught_up(self) -> bool:
+        return self.total == 0
+
+
+async def _safe_lag(indexer) -> int:
+    """Read one drain's lag() without ever letting it escape into the status
+    loop. A None indexer means the runtime is running without it -- nothing to
+    wait on -- so it contributes 0, mirroring _make_gate_provider's None
+    handling. A lag() that raises (a real "database is locked" under DB
+    contention) is swallowed and read as unknown == 0, mirroring the never-raise
+    contract of index_catch_up / kg_catch_up: one probe failing must not blank
+    the readout for the healthy side."""
+    if indexer is None:
+        return 0
+    try:
+        return await indexer.lag()
+    except Exception as e:
+        logger.warning("background lag probe failed (%s: %s); reporting that side as 0",
+                       type(e).__name__, e)
+        return 0
 
 
 class Runtime:
@@ -217,9 +318,17 @@ class Runtime:
                 base_url=self.settings.llm_base_url,
                 api_key=self.settings.llm_api_key,
             )
+        # One shared LLM concurrency ceiling for the whole fleet, built BEFORE
+        # the projectors so both the scheduler and the two background drains draw
+        # permits from this single object -- the shared endpoint ceiling that does
+        # not hold today (two independent LLM consumers, the 429-pileup source).
+        # Created here (not after the agents) because the backfill catch_up calls
+        # below already drain through it.
+        self.pool = AdaptivePool(self.settings.llm_pool_size)
         self.indexer = CanonIndexer(
             self.events, self.read, self.embeddings,
             str(Path(self.settings.db_path).with_name("embed_cursor.json")),
+            pool=self.pool, drain_concurrency=self.settings.background_drain_concurrency,
         )
         await self.index_catch_up()  # backfill; failure-tolerant by contract
         self.kg_store = KGStore(self.settings.db_path)
@@ -229,6 +338,7 @@ class Runtime:
         self.kg_projector = KGProjector(
             self.events, self.read, self.kg_store, self.embeddings, kg_runner,
             str(Path(self.settings.db_path).with_name("kg_cursor.json")),
+            pool=self.pool, drain_concurrency=self.settings.background_drain_concurrency,
         )
         await self.kg_catch_up()  # backfill; failure-tolerant by contract
         self.policy = AutonomyPolicy(self.read)
@@ -270,12 +380,23 @@ class Runtime:
         # the planner ticks before the writer in a fresh room -- AGENT_REGISTRY
         # order encodes scheduling order, same as this list did before.
         self.agents = [self.agents_by_name[spec.name] for spec in AGENT_REGISTRY]
+        progress_probe = _make_progress_probe(self.events)
         for agent in self.agents:
             agent.telemetry = self.telemetry
+            # Injected post-construction alongside telemetry: novelizer's
+            # BaseAgent subclass does not thread kit kwargs through, and
+            # eleven agent constructors should not have to grow one.
+            agent.progress_probe = progress_probe
+        # self.pool (the one shared LLM concurrency ceiling) was built above,
+        # before the projectors, so the scheduler and both background drains draw
+        # permits from the same object -- one fleet-wide ceiling on a single
+        # endpoint, the 429-pileup fix.
         self.scheduler = Scheduler(
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
             override_provider=_make_override_provider(self.read),
+            gate_provider=_make_gate_provider(self.indexer, self.kg_projector),
+            pool=self.pool,
         )
         self.chat = ChatService(
             self.events, self.read, self.committer, self._chat_runner_for,
@@ -297,6 +418,18 @@ class Runtime:
         changed = [k for k in EffectiveSettings.model_fields if getattr(old, k) != getattr(new, k)]
         applied: list[str] = []
         restart: list[str] = []
+        # DEPRECATED (Phase 2, event-driven scheduling): these seven agent
+        # *_interval keys no longer gate dispatch. ready() = now >=
+        # max(_fail_until, _idle_until) -- interval is not in that expression;
+        # the fail/idle backoff ladders govern cadence now. The keys are kept
+        # accepted-and-inert purely for config back-compat: removing them would
+        # hard-error on load for every existing story.toml / config.toml that
+        # still carries one. The agent.interval writes below are a harmless
+        # inert no-op (the value is stored but never read for dispatch), kept so
+        # an interval change is still recorded in `applied` (never a restart)
+        # and a reload of the same file stays a clean no-op. NOTE:
+        # projector_interval is NOT here and is NOT deprecated -- it still paces
+        # the TUI projector/scheduler/status loops.
         interval_map = {
             "author_interval": [self.author],
             "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
@@ -317,6 +450,19 @@ class Runtime:
                 # Read fresh per-tick, no cached construction to rebuild --
                 # applies live, same as cadence settings.
                 self.scheduler._max_concurrent = new.max_concurrent_agents
+                applied.append(key)
+            elif key == "llm_pool_size":
+                # Poke the running pool's ceiling in place -- no reconstruction,
+                # no restart. AIMD keeps managing _limit under the new size from
+                # here, exactly like max_concurrent_agents applies live.
+                self.pool.size = new.llm_pool_size
+                applied.append(key)
+            elif key == "background_drain_concurrency":
+                # Push the new fan-out cap onto both projectors live -- read on
+                # the next catch_up pass, no reconstruction, mirroring
+                # llm_pool_size. Both drains share this global-only knob.
+                self.indexer._drain_concurrency = new.background_drain_concurrency
+                self.kg_projector._drain_concurrency = new.background_drain_concurrency
                 applied.append(key)
             elif key == "muse_era":
                 self.muse._era = new.muse_era
@@ -404,6 +550,26 @@ class Runtime:
         if self.kg_projector is None:
             return
         await self.kg_projector.catch_up()
+
+    async def background_progress(self) -> BackgroundProgress:
+        """Single queryable snapshot of both background drains' lag, for the
+        legibility half of the strict background gate: while either indexer
+        lags, the gate freezes every agent (see _make_gate_provider), so the
+        operator must be able to SEE the backlog draining or a freeze looks like
+        a hang. Reads the CanonIndexer's embedding lag and the KGProjector's
+        extraction lag -- they count DIFFERENT event sets and are not
+        interchangeable, so both are surfaced.
+
+        Never raises and never blocks on a missing drain: each side is read
+        through _safe_lag, so a None indexer contributes 0 and a lag() that hits
+        "database is locked" reads as unknown == 0 while the healthy side is
+        still reported -- the same never-raise contract index_catch_up /
+        kg_catch_up hold, because this drives a status loop that must not
+        crash."""
+        return BackgroundProgress(
+            index_lag=await _safe_lag(self.indexer),
+            kg_lag=await _safe_lag(self.kg_projector),
+        )
 
     async def close(self) -> None:
         await self.read.close()

@@ -21,13 +21,18 @@ async def stack():
     await read.close(); await proj.close(); await events.close(); os.unlink(path)
 
 
-def test_interval_and_pause():
+def test_readiness_gate_and_pause():
+    """The interval is accepted and stored -- every agent and the settings
+    still pass one -- but it no longer gates anything: a novelizer agent is
+    dispatchable until one of its backoff ladders says otherwise."""
     a = BaseAgent(runner=None, read_store=None, committer=None, interval=10, name="x")
     assert a.name == "x"
-    assert a.ready_for_interval(now=100) is True
-    a.mark_ran(now=100)
-    assert a.ready_for_interval(now=105) is False
-    assert a.ready_for_interval(now=110) is True
+    assert a.interval == 10
+    assert a.ready(now=100) is True
+    assert a.ready(now=105) is True
+    a._idle_until = 120.0
+    assert a.ready(now=105) is False
+    assert a.ready(now=120) is True
     a.pause(); assert a.paused is True
     a.resume(); assert a.paused is False
 
@@ -458,7 +463,7 @@ async def test_run_once_without_telemetry_is_silent_and_still_runs():
 
 def test_seconds_until_ready_counts_down_and_floors_at_zero():
     a = BaseAgent(runner=None, read_store=None, committer=None, interval=10, name="x")
-    a.mark_ran(now=100)
+    a._idle_until = 110.0
     assert a.seconds_until_ready(now=104) == 6
     assert a.seconds_until_ready(now=115) == 0
 
@@ -649,35 +654,39 @@ def test_guarded_line_returns_empty_when_value_falsy():
     assert BaseAgent._guarded_line("In character", "") == ""
 
 
-from novelizer.agents.base import PASS_BACKOFF_MULTIPLIER
+from agent_kit.base import IDLE_BACKOFF_BASE_S
 from novelizer.agents.prompts import DEFAULT_PASS_REMARK
 
 
-def test_note_pass_extends_backoff_beyond_interval():
+def test_note_pass_backs_the_agent_off_the_idle_ladder():
     agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
-    agent.mark_ran(1000.0)
     agent.note_pass(now=1000.0)
-    # Normal interval has elapsed at t=1100, but the pass backoff (3x) has not.
-    assert not agent.ready_for_interval(1100.0)
-    assert agent.seconds_until_ready(1100.0) == 200.0
-    assert agent.ready_for_interval(1300.0)
+    assert not agent.ready(1000.0 + IDLE_BACKOFF_BASE_S - 0.001)
+    assert agent.seconds_until_ready(1000.0) == IDLE_BACKOFF_BASE_S
+    assert agent.ready(1000.0 + IDLE_BACKOFF_BASE_S)
 
 
 def test_note_pass_defaults_to_monotonic_clock():
     agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
     agent.note_pass()
     import time
-    assert agent._backoff_until > time.monotonic()
+    assert agent._idle_until > time.monotonic()
 
 
-def test_no_pass_means_plain_interval_gate():
+def test_no_pass_means_the_agent_is_dispatchable():
     agent = BaseAgent(runner=None, read_store=None, committer=None, interval=100)
-    agent.mark_ran(1000.0)
-    assert agent.ready_for_interval(1100.0)
+    assert agent.ready(1000.0)
 
 
-def test_pass_constants():
-    assert PASS_BACKOFF_MULTIPLIER == 3
+def test_backoff_does_not_scale_with_the_interval():
+    """The interval-multiplier scheme is gone: a pass costs the same seconds
+    whatever the operator configured, so a fifteen-minute agent and a
+    two-minute one rejoin together."""
+    brief = BaseAgent(runner=None, read_store=None, committer=None, interval=10)
+    patient = BaseAgent(runner=None, read_store=None, committer=None, interval=900)
+    brief.note_pass(now=1000.0)
+    patient.note_pass(now=1000.0)
+    assert brief._idle_until == patient._idle_until == 1000.0 + IDLE_BACKOFF_BASE_S
 
 
 # --- rate-limit backoff ---------------------------------------------------
@@ -700,45 +709,46 @@ class _FailingAgent(BaseAgent):
         raise self._fail
 
 
-async def test_run_once_rate_limit_failure_backs_off_extra_intervals():
-    """A run killed by a rate limit means the endpoint is saturated; the agent
-    must step back RATE_LIMIT_BACKOFF_MULTIPLIER intervals instead of rejoining
-    the pile-up at full cadence next interval."""
+async def test_run_once_rate_limit_failure_backs_off_on_the_fail_ladder():
+    """A run killed by a rate limit means the endpoint is saturated, so the
+    agent steps back rather than rejoining the pile-up. The step is now
+    measured in absolute seconds and bounded by the ladder cap -- a 100s
+    interval no longer buys a 300s silence."""
     import time
     import openai
-    from novelizer.agents.base import RATE_LIMIT_BACKOFF_MULTIPLIER
+    from agent_kit.base import FAIL_BACKOFF_CAP_S
     agent = _FailingAgent(_rate_limit_error())
     with pytest.raises(openai.RateLimitError):
         await agent.run_once()
     now = time.monotonic()
-    agent.mark_ran(now)  # the scheduler's finally-block does this
-    assert not agent.ready_for_interval(now + agent.interval)
-    # backoff extends well past a single interval (allow generous clock slack)
-    assert agent.seconds_until_ready(now) > agent.interval * (RATE_LIMIT_BACKOFF_MULTIPLIER - 1)
+    assert not agent.ready(now)
+    assert 0.0 < agent.seconds_until_ready(now) <= FAIL_BACKOFF_CAP_S
 
 
-async def test_run_once_wrapped_rate_limit_failure_still_backs_off():
+async def test_run_once_wrapped_rate_limit_failure_is_still_recognized():
     """Frameworks re-raise provider errors with the original as __cause__ or
-    __context__; the backoff must see through one such wrapper chain."""
-    import time
+    __context__; detection must see through one such wrapper chain."""
+    from agent_kit.base import _is_rate_limit_error
     wrapper = RuntimeError("graph step failed")
     wrapper.__cause__ = _rate_limit_error()
+    assert _is_rate_limit_error(wrapper) is True
     agent = _FailingAgent(wrapper)
     with pytest.raises(RuntimeError):
         await agent.run_once()
-    now = time.monotonic()
-    agent.mark_ran(now)
-    assert not agent.ready_for_interval(now + agent.interval)
+    import time
+    assert not agent.ready(time.monotonic())
 
 
-async def test_run_once_generic_failure_does_not_back_off():
+async def test_run_once_generic_failure_also_backs_off():
+    """Every raise moves the fail ladder now, not just a rate limit. The clock
+    gate used to absorb a crash loop; with it gone, a generic failure that left
+    the agent instantly dispatchable would hot-loop the room."""
     import time
     agent = _FailingAgent(ValueError("boom"))
     with pytest.raises(ValueError):
         await agent.run_once()
-    now = time.monotonic()
-    agent.mark_ran(now)
-    assert agent.ready_for_interval(now + agent.interval)
+    assert agent._fail_streak == 1
+    assert not agent.ready(time.monotonic())
     assert DEFAULT_PASS_REMARK == "Nothing needs my attention — carry on with the story."
 
 

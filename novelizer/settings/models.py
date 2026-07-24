@@ -72,8 +72,29 @@ class EffectiveSettings(BaseModel):
     muse_exclusion_hands: int = 3
     # Scheduler dispatch pool size: how many agents may run concurrently.
     max_concurrent_agents: int = 2
+    # Shared LLM concurrency ceiling (the AdaptivePool target). Global-only,
+    # like max_concurrent_agents: it sizes the vLLM endpoint's real capacity (an
+    # installation/hardware fact, stated as 4-8 usable), not a per-story creative
+    # knob, so it is deliberately NOT in STORY_OVERRIDABLE_KEYS. Both the
+    # scheduler and background KG extraction draw permits from this one pool.
+    llm_pool_size: int = 6
+    # Fan-out cap for the background drain (Phase 5): how many aggregate
+    # partitions the embedding indexer / KG projector may drain concurrently in
+    # one catch_up pass. A task-count bound -- 1000 pending aggregates must not
+    # spawn 1000 tasks -- independent of llm_pool_size, which is the endpoint's
+    # LLM-concurrency ceiling. Global-only for the same reason as llm_pool_size
+    # and max_concurrent_agents: it bounds a process-wide resource, not a
+    # per-story creative knob, so it is deliberately NOT story-overridable.
+    background_drain_concurrency: int = 4
 
     # Cadence (seconds)
+    # DEPRECATED (Phase 2, event-driven scheduling): these seven agent
+    # *_interval keys are accepted-and-inert. Dispatch no longer consults an
+    # interval -- ready() = now >= max(_fail_until, _idle_until), governed by
+    # the fail/idle backoff ladders (agent_kit BaseAgent). The fields are kept
+    # in the model and in STORY_OVERRIDABLE_KEYS ONLY for config back-compat:
+    # removing them would hard-error on load for every existing story.toml /
+    # config.toml that still sets one. See Runtime.apply_settings' interval_map.
     author_interval: int = 300
     default_agent_interval: int = 120
     continuity_interval: int = 900
@@ -81,6 +102,8 @@ class EffectiveSettings(BaseModel):
     plotter_interval: int = 240
     muse_interval: int = 60
     triage_interval: int = 120
+    # NOT deprecated: projector_interval still paces the TUI projector,
+    # scheduler, and status-bar loops -- it is not an agent-cadence key.
     projector_interval: float = 0.5
     summarizer_interval: int = 300
 

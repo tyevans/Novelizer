@@ -120,6 +120,25 @@ class EventStore:
         rows = await cur.fetchall()
         return [_row_to_event(r) for r in rows]
 
+    async def count_since(self, sequence: int, event_types: Optional[list[str]] = None) -> int:
+        """How many events events_since would return, without hydrating them.
+        The filter is read with the same truthiness as events_since, so None
+        and [] both mean "every type" -- lag() callers build the list from a
+        module constant and must not get "count nothing" from an empty one."""
+        if event_types:
+            placeholders = ",".join("?" for _ in event_types)
+            cur = await self._conn.execute(
+                f"SELECT COUNT(*) FROM events WHERE sequence > ? AND event_type IN ({placeholders})",
+                (sequence, *event_types),
+            )
+        else:
+            cur = await self._conn.execute(
+                "SELECT COUNT(*) FROM events WHERE sequence > ?",
+                (sequence,),
+            )
+        row = await cur.fetchone()
+        return row[0]
+
     async def events_for_aggregate(self, aggregate_id: str) -> list[StoredEvent]:
         cur = await self._conn.execute(
             f"SELECT {_COLS} FROM events WHERE aggregate_id=? ORDER BY sequence",
