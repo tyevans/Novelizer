@@ -32,7 +32,7 @@ def _runners():
 @pytest.mark.asyncio
 async def test_mission_control_panes_present_and_populate():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    settings = Settings(db_path=path, author_interval=1, projector_interval=0.1, default_agent_interval=1, continuity_interval=1)
+    settings = Settings(db_path=path, author_interval=1, projector_interval=0.1, default_agent_interval=1, continuity_interval=1, outline_gate_enabled=False)  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
     rt = Runtime(settings, runners=_runners())
     await rt.start()
     app = NovelizerApp(rt)
