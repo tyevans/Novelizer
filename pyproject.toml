@@ -91,4 +91,5 @@ forbidden_modules = [
     "agent_kit.run_context",
     "agent_kit.llm",
     "agent_kit.middleware",
+    "agent_kit.pool",
 ]

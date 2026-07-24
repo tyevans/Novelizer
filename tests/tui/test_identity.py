@@ -42,6 +42,15 @@ def test_styles_are_valid_rich_styles():
         Style.parse(ident.style)  # raises on an invalid style string
 
 
+def test_styles_are_valid_textual_styles():
+    """Identity styles reach Textual's parser too (engine-room tab titles are
+    Content.styled), and Textual rejects Rich's 256-color names -- 'gold3' et
+    al parse fine in Rich but silently render uncolored in Textual."""
+    from textual.style import Style
+    for ident in IDENTITIES.values():
+        Style.parse(ident.style)  # raises on an invalid style string
+
+
 def test_identity_for_known_agent_returns_registry_entry():
     assert identity_for("author") is IDENTITIES["author"]
 
@@ -86,7 +95,7 @@ def test_novelizer_agent_theme_satisfies_the_agent_theme_protocol():
     theme: AgentTheme = NOVELIZER_AGENT_THEME
     assert theme.glyph("author") == "✎"
     assert theme.label("author") == "Author"
-    assert theme.style("author") == "gold3"
+    assert theme.style("author") == "#d7af00"
 
 
 def test_novelizer_agent_theme_verb_uses_the_verb_table_with_a_fallback():

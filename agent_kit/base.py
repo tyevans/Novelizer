@@ -1,6 +1,9 @@
 from __future__ import annotations
+import logging
+import math
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from agent_kit.run_context import current_agent_name, current_run_id
@@ -11,14 +14,50 @@ from agent_kit.telemetry import (
     TelemetryEventType,
 )
 
-# An agent that ran on fresh material but explicitly chose not to act steps
-# back for this many intervals instead of one, freeing dispatch slots.
-PASS_BACKOFF_MULTIPLIER = 3
+logger = logging.getLogger(__name__)
 
-# A run killed by a rate limit means the endpoint is saturated — usually by
-# this very fleet. Rejoining at full cadence next interval feeds the pile-up,
-# so the agent steps back this many intervals instead.
-RATE_LIMIT_BACKOFF_MULTIPLIER = 3
+# --- backoff ladders, in absolute seconds ---------------------------------
+#
+# Their unit is seconds rather than a multiple of an operator-configured
+# interval, because dispatch no longer waits on a clock: there is no interval
+# left to multiply. These are the only backpressure the chassis applies.
+
+# A crashed run says nothing about how long the cause will last, so the first
+# retry is nearly immediate — most agent failures are transient (a malformed
+# LLM response, a lost connection) and a long first backoff would idle a
+# working agent for a fault it would have shrugged off on the next attempt.
+FAIL_BACKOFF_BASE_S = 2.0
+
+# A genuinely broken agent doubles its way here in five failures and then stops
+# growing. Kept well under the idle cap: a crash loop should still be re-probed
+# often enough that the room recovers promptly once the cause clears, and its
+# telemetry keeps flowing so the failure stays visible instead of going silent.
+FAIL_BACKOFF_CAP_S = 60.0
+
+# A run that completed but committed nothing has proven only that there was no
+# work *at that instant*. The first step back is short so an agent that was one
+# beat ahead of its input rejoins almost immediately.
+IDLE_BACKOFF_BASE_S = 5.0
+
+# Ceiling on the idle ladder: a converged agent still re-checks every five
+# minutes, so a room left running overnight wakes up within five minutes of a
+# human adding material rather than hours later.
+IDLE_BACKOFF_CAP_S = 300.0
+
+
+def _ladder_delay(base: float, cap: float, streak: int) -> float:
+    """Backoff after `streak` consecutive same-kind events: base, 2×base,
+    4×base … clamped at `cap`.
+
+    The exponent is clamped BEFORE it is used, not the result afterwards. A
+    converged agent left running accumulates thousands of no-progress runs, and
+    a plain `base * 2 ** streak` would build a multi-thousand-bit integer and
+    then raise OverflowError converting it to a float — the agent's own quiet
+    would be what crashed it."""
+    if streak <= 0:
+        return 0.0
+    doublings_to_cap = math.ceil(math.log2(cap / base)) if cap > base else 0
+    return min(base * 2.0 ** min(streak - 1, doublings_to_cap), cap)
 
 
 def _is_rate_limit_error(exc: BaseException | None) -> bool:
@@ -54,6 +93,7 @@ class BaseAgent:
         name: str | None = None,
         personality: str = "",
         clock=time.monotonic,
+        progress_probe: Callable[[str], Awaitable[bool]] | None = None,
     ) -> None:
         self._runner = runner
         self.interval = interval
@@ -61,11 +101,24 @@ class BaseAgent:
             self.name = name
         self.personality = personality
         self.paused = False
-        self._last_run = 0.0
-        self._backoff_until = 0.0
         self._last_fingerprint: tuple | None = None
         self.telemetry = None  # TelemetryEmitter; injected post-construction
+        # "Did run <id> actually produce anything?" — public and injectable
+        # post-construction like telemetry, so a consumer can wire it without
+        # every subclass in its tree having to thread the kwarg through.
+        self.progress_probe = progress_probe
         self._clock = clock
+        # Two independent ladders, each an absolute deadline against `clock`.
+        # Independent because "the agent is broken" and "the agent is
+        # converged" are different questions: a crash is no evidence that the
+        # agent has run out of work, and a quiet agent is not a broken one.
+        self._fail_until = 0.0
+        self._fail_streak = 0
+        self._idle_until = 0.0
+        self._idle_streak = 0
+        # Run id of the run whose body called note_pass(), if any. A declared
+        # pass is authoritative, so the probe is not consulted for that run.
+        self._pass_declared_run: str | None = None
 
     @staticmethod
     def _guarded_line(label: str, value: str) -> str:
@@ -78,32 +131,82 @@ class BaseAgent:
     def resume(self) -> None:
         self.paused = False
 
-    def ready_for_interval(self, now: float) -> bool:
-        return (now - self._last_run) >= self.interval and now >= self._backoff_until
-
-    def mark_ran(self, now: float) -> None:
-        self._last_run = now
+    def ready(self, now: float) -> bool:
+        """Dispatchable on the progress ladders alone: no interval, no clock.
+        An agent that has never run is ready now, however large its configured
+        interval is — waiting on a clock while a dispatch slot sits free is the
+        whole bug this replaces."""
+        return now >= max(self._fail_until, self._idle_until)
 
     def seconds_until_ready(self, now: float) -> float:
-        return max(0.0, self.interval - (now - self._last_run), self._backoff_until - now)
+        """Countdown over the two ladders, and nothing else — dispatch consults
+        exactly these, so the status bar reads the same deadlines the scheduler
+        does and can never disagree with it. Clamped at zero: this renders
+        directly, and a past deadline must not show as a negative wait."""
+        return max(0.0, self._fail_until - now, self._idle_until - now)
 
     def note_pass(self, now: float | None = None) -> None:
-        """Record an explicit "nothing to do" verdict: back off for
-        PASS_BACKOFF_MULTIPLIER intervals instead of one. Same clock family
-        as the scheduler's default (time.monotonic); inject `clock` at
-        construction to keep agent backoff and a scheduler's injected clock
-        in the same timeline."""
-        if now is None:
-            now = self._clock()
-        self._backoff_until = now + self.interval * PASS_BACKOFF_MULTIPLIER
+        """Record an explicit "nothing to do" verdict by engaging the idle
+        ladder. Same clock family as the scheduler's default (time.monotonic);
+        inject `clock` at construction to keep agent backoff and a scheduler's
+        injected clock in the same timeline.
 
-    def note_rate_limited(self, now: float | None = None) -> None:
-        """Record a run killed by endpoint saturation: back off for
-        RATE_LIMIT_BACKOFF_MULTIPLIER intervals so the fleet drains instead
-        of hammering a limit that just proved itself exhausted."""
+        This is the early exit for an agent that has already established it has
+        nothing to do: it need not wait for a probe to reach the same verdict,
+        and it works for consumers that wired no probe at all."""
         if now is None:
             now = self._clock()
-        self._backoff_until = now + self.interval * RATE_LIMIT_BACKOFF_MULTIPLIER
+        self._pass_declared_run = current_run_id.get()
+        self._advance_idle(now)
+
+    def _advance_idle(self, now: float) -> None:
+        self._idle_streak += 1
+        self._idle_until = now + _ladder_delay(
+            IDLE_BACKOFF_BASE_S, IDLE_BACKOFF_CAP_S, self._idle_streak)
+
+    def _reset_idle(self) -> None:
+        self._idle_streak = 0
+        self._idle_until = 0.0
+
+    def _advance_fail(self, now: float) -> None:
+        self._fail_streak += 1
+        self._fail_until = now + _ladder_delay(
+            FAIL_BACKOFF_BASE_S, FAIL_BACKOFF_CAP_S, self._fail_streak)
+
+    def _reset_fail(self) -> None:
+        self._fail_streak = 0
+        self._fail_until = 0.0
+
+    async def _note_progress(self, run_id: str) -> None:
+        """Move the idle ladder for a run that completed, using the probe's
+        verdict on whether that run actually committed anything.
+
+        Fails open in three ways, all of them the same judgment: an agent must
+        never be quieted by an absence of evidence. No probe wired, a probe
+        that raised (it reads a store, which can be down), and a probe that
+        said yes all reset the ladder. Only a probe that positively answered
+        "this run produced nothing" advances it."""
+        if self._pass_declared_run == run_id:
+            return  # the body already declared a pass; that verdict wins
+        if self.progress_probe is None:
+            self._reset_idle()
+            return
+        try:
+            made_progress = await self.progress_probe(run_id)
+        except Exception:
+            # A broken probe must not turn a successful run into a failed one,
+            # and must not be the reason an agent goes silent. Logged rather
+            # than swallowed outright: failing open is indistinguishable from a
+            # healthy busy room, so a permanently broken probe would otherwise
+            # never surface.
+            logger.warning("progress probe failed for %s run %s; assuming progress",
+                           self.name, run_id, exc_info=True)
+            self._reset_idle()
+            return
+        if made_progress:
+            self._reset_idle()
+        else:
+            self._advance_idle(self._clock())
 
     async def _fingerprint(self) -> tuple | None:
         """External state this agent's work depends on. None (default)
@@ -149,8 +252,13 @@ class BaseAgent:
                                error_type=type(e).__name__, error_message=str(e),
                                phase=phase, duration_s=time.monotonic() - started),
             )
-            if _is_rate_limit_error(e):
-                self.note_rate_limited()
+            # The fail ladder takes every raise, rate limit included: dispatch
+            # gates on it alone, so a 429 needs no separate backoff — it backs
+            # the agent off through this same path, and Phase 3's shared pool
+            # reabsorbs rate-limit backpressure fleet-wide. The idle ladder is
+            # untouched: a run that crashed committed nothing by definition, and
+            # charging both ladders for one event would double-penalize it.
+            self._advance_fail(self._clock())
             raise
         else:
             await self._emit_telemetry(
@@ -158,6 +266,10 @@ class BaseAgent:
                 AgentRunFinished(run_id=run_id, agent_name=self.name,
                                  duration_s=time.monotonic() - started),
             )
+            # Any run that completed has answered "is this agent broken?" —
+            # no, whatever it did or did not produce.
+            self._reset_fail()
+            await self._note_progress(run_id)
         finally:
             current_run_id.reset(rid_token)
             current_agent_name.reset(name_token)

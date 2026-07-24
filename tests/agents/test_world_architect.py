@@ -112,7 +112,8 @@ async def test_architect_no_action_pass_commits_nothing_and_backs_off(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert [e.payload["note"] for e in remarks] == ["The world is rich enough — let the story breathe."]
     import time
-    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+    assert agent._idle_streak == 1
+    assert not agent.ready(time.monotonic())
 
 
 async def test_architect_pass_ignored_when_director_seed_pending(stack):
@@ -128,7 +129,9 @@ async def test_architect_pass_ignored_when_director_seed_pending(stack):
     # The seed must not be silently dropped by a pass: normal path runs,
     # the signal is consumed, and no backoff is taken.
     assert await read.list_unconsumed_signals(target_agent="world_architect") == []
-    assert agent._backoff_until == 0.0
+    import time
+    assert agent._idle_streak == 0
+    assert agent.ready(time.monotonic())
 
 
 async def test_architect_readiness_ignores_watermark_when_seed_pending(stack):

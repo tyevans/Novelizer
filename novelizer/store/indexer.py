@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 
 from novelizer.canon.events import EventType
+from novelizer.store.drain import drain_pending
+from novelizer.store.poison_ladder import PoisonLadder
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +46,24 @@ class CanonIndexer:
     but hydrating CURRENT records from ReadStore so create/revise/update
     share one path). Failure-tolerant by contract: an embed-endpoint outage
     logs a warning and leaves the cursor at the last indexed event, so the
-    next catch_up retries. Never writes to world.db.
+    next catch_up retries -- up to poison_skip_after consecutive attempts on
+    the same event, after which it is abandoned. Never writes to world.db.
     """
 
-    def __init__(self, events, read_store, embedding_store, cursor_path: str) -> None:
+    def __init__(self, events, read_store, embedding_store, cursor_path: str,
+                 poison_skip_after: int = 3, pool=None, drain_concurrency: int = 4) -> None:
         self._events = events
         self._read = read_store
         self._emb = embedding_store
         self._cursor_path = Path(cursor_path)
+        self._poison = PoisonLadder(poison_skip_after)
+        # Shared LLM/endpoint ceiling (duck-typed AdaptivePool) and the fan-out
+        # cap for the parallel drain. None pool => no permit gating, still
+        # parallel. See store/drain.py for the drain algorithm both projectors
+        # share -- this indexer's embed-only writes vs KGProjector's world.db
+        # writes are their one real difference.
+        self._pool = pool
+        self._drain_concurrency = drain_concurrency
 
     def _load_cursor(self) -> int:
         try:
@@ -68,35 +80,43 @@ class CanonIndexer:
 
     async def lag(self) -> int:
         """Read-only: how many indexable events haven't been embedded yet.
-        Reuses _load_cursor and the same events_since query catch_up makes,
-        never mutates the cursor and never calls _index_one."""
+        Reuses _load_cursor and the same filter catch_up applies, but counts
+        in SQL -- a 10k-event backlog is a COUNT, not 10k hydrated rows.
+        Never mutates the cursor and never calls _index_one."""
         last = self._load_cursor()
-        stored = await self._events.events_since(last, event_types=list(INDEXED_EVENT_TYPES))
-        return len(stored)
+        return await self._events.count_since(last, event_types=list(INDEXED_EVENT_TYPES))
 
     async def catch_up(self) -> int:
-        processed = 0
         try:
             last = self._load_cursor()
             stored = await self._events.events_since(
                 last, event_types=list(INDEXED_EVENT_TYPES)
             )
-            for ev in stored:
-                try:
-                    await self._index_one(ev.event_type, ev.aggregate_id)
-                except Exception as e:  # endpoint down, malformed record, ...
-                    logger.warning("canon indexing stopped at seq %s (%s: %s); will retry",
-                                   ev.sequence, type(e).__name__, e)
-                    break
-                self._save_cursor(ev.sequence)
-                processed += 1
+            # Parallel drain (Phase 5): under the strict background gate the
+            # drain is the room's critical path, so it partitions the window by
+            # aggregate and drains partitions concurrently rather than looping.
+            # Embed-only writes to distinct aggregate ids need no projector-level
+            # commit lock -- EmbeddingStore already serializes its own writes
+            # (store/embeddings.py _write_lock) -- so this drain is fully
+            # parallel, unlike KGProjector's which serializes its world.db
+            # read-modify-writes.
+            return await drain_pending(
+                stored,
+                poison=self._poison,
+                pool=self._pool,
+                drain_concurrency=self._drain_concurrency,
+                run_one=lambda ev: self._index_one(ev.event_type, ev.aggregate_id),
+                save_cursor=self._save_cursor,
+                logger=logger,
+                label="canon indexing",
+            )
         except Exception as e:
             # events_since (e.g. "database is locked") or _save_cursor
             # (OSError) escaping here would violate the never-raise contract
-            # Runtime.start() relies on -- log and return what was processed.
+            # Runtime.start() relies on -- log and return nothing processed.
             logger.warning("canon indexing catch_up failed (%s: %s); will retry next tick",
                             type(e).__name__, e)
-        return processed
+            return 0
 
     async def _index_one(self, event_type: str, aggregate_id: str) -> None:
         kind = _PREFIX_TO_KIND[event_type.split(".")[0]]

@@ -9,10 +9,13 @@ Import from this top level only; submodule imports are forbidden by an
 import-linter contract (see pyproject.toml).
 """
 from agent_kit.base import (
-    PASS_BACKOFF_MULTIPLIER,
-    RATE_LIMIT_BACKOFF_MULTIPLIER,
     BaseAgent,
     Runner,
+    # Re-exported at the package root (not in __all__ -- it stays a kit
+    # internal) so a domain consumer feeding the pool's AIMD from its own drain
+    # loop can reach it without importing agent_kit.base directly, which the
+    # package-boundary contract forbids.
+    _is_rate_limit_error,
 )
 from agent_kit.llm import (
     CONTEXT_WINDOW_TOKENS,
@@ -22,6 +25,7 @@ from agent_kit.llm import (
     build_chat_model,
 )
 from agent_kit.middleware import ExcludeToolsMiddleware
+from agent_kit.pool import AdaptivePool
 from agent_kit.run_context import current_agent_name, current_run_id
 from agent_kit.scheduler import Scheduler
 from agent_kit.telemetry import (
@@ -35,10 +39,9 @@ from agent_kit.telemetry import (
 )
 
 __all__ = [
+    "AdaptivePool",
     "BaseAgent",
     "Runner",
-    "PASS_BACKOFF_MULTIPLIER",
-    "RATE_LIMIT_BACKOFF_MULTIPLIER",
     "Scheduler",
     "TelemetryEventType",
     "TelemetryEmitter",

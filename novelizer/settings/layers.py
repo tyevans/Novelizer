@@ -47,6 +47,11 @@ class GlobalConfig(BaseModel):
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
+    # Global-only, like max_concurrent_agents: sizes a shared resource ceiling.
+    llm_pool_size: int | None = None
+    # Global-only (Phase 5): fan-out cap for the background drain, a
+    # process-wide task-count bound like llm_pool_size.
+    background_drain_concurrency: int | None = None
     extractor_token_budget: int | None = None
     advisory_token_budget: int | None = None
     summarizer_interval: int | None = None

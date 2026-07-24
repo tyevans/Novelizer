@@ -1,9 +1,12 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import os
 from pathlib import Path
 from novelizer.canon.events import EventType
+from novelizer.store.drain import drain_pending
+from novelizer.store.poison_ladder import PoisonLadder
 from novelizer.text_chunk import chunk_prose
 
 logger = logging.getLogger(__name__)
@@ -37,13 +40,26 @@ class KGProjector:
     need (e.g. a Director-facing entity browser) shows up.
     """
 
-    def __init__(self, events, read_store, kg_store, embedding_store, extraction_runner, cursor_path: str) -> None:
+    def __init__(self, events, read_store, kg_store, embedding_store, extraction_runner,
+                 cursor_path: str, poison_skip_after: int = 3, pool=None,
+                 drain_concurrency: int = 4) -> None:
         self._events = events
         self._read = read_store
         self._kg = kg_store
         self._emb = embedding_store
         self._runner = extraction_runner
         self._cursor_path = Path(cursor_path)
+        self._poison = PoisonLadder(poison_skip_after)
+        # Shared LLM/endpoint ceiling (duck-typed AdaptivePool) and the parallel
+        # drain's fan-out cap, same as CanonIndexer (see store/drain.py).
+        self._pool = pool
+        self._drain_concurrency = drain_concurrency
+        # Serializes the world.db read-modify-writes across concurrently draining
+        # partitions -- the one thing that makes this drain differ from the canon
+        # indexer's embed-only one (see _index_chapter). Built lazily so the
+        # projector can be constructed outside a running loop, mirroring
+        # AdaptivePool's Condition.
+        self._commit_lock: asyncio.Lock | None = None
 
     def _load_cursor(self) -> int:
         try:
@@ -56,24 +72,46 @@ class KGProjector:
         tmp_path.write_text(json.dumps({"last_sequence": seq}))
         os.replace(tmp_path, self._cursor_path)
 
+    def _lock(self) -> asyncio.Lock:
+        # Bind the commit lock to whatever loop first drains, exactly like
+        # AdaptivePool binds its Condition -- the projector may be built before
+        # the loop that runs it exists.
+        if self._commit_lock is None:
+            self._commit_lock = asyncio.Lock()
+        return self._commit_lock
+
+    async def lag(self) -> int:
+        """Read-only: how many KG-relevant events haven't been extracted yet.
+        Counts against this projector's own 6 event types, not the canon
+        indexer's 24, so the two lags are not interchangeable. Never mutates
+        the cursor and never calls _index_one."""
+        last = self._load_cursor()
+        return await self._events.count_since(last, event_types=list(INDEXED_EVENT_TYPES))
+
     async def catch_up(self) -> int:
-        processed = 0
         try:
             last = self._load_cursor()
             stored = await self._events.events_since(last, event_types=list(INDEXED_EVENT_TYPES))
-            for ev in stored:
-                try:
-                    await self._index_one(ev.event_type, ev.aggregate_id, ev.sequence)
-                except Exception as e:
-                    logger.warning("kg indexing stopped at seq %s (%s: %s); will retry",
-                                    ev.sequence, type(e).__name__, e)
-                    break
-                self._save_cursor(ev.sequence)
-                processed += 1
+            # Parallel drain (Phase 5), structurally identical to CanonIndexer's:
+            # dedupe by aggregate, partition, drain concurrently under shared-pool
+            # permits, advance the cursor over the longest contiguous success
+            # prefix. The one difference lives in _index_chapter, where the
+            # world.db write phase is serialized behind self._lock() while the LLM
+            # extraction fans out -- see store/drain.py for the shared algorithm.
+            return await drain_pending(
+                stored,
+                poison=self._poison,
+                pool=self._pool,
+                drain_concurrency=self._drain_concurrency,
+                run_one=lambda ev: self._index_one(ev.event_type, ev.aggregate_id, ev.sequence),
+                save_cursor=self._save_cursor,
+                logger=logger,
+                label="kg indexing",
+            )
         except Exception as e:
             logger.warning("kg indexing catch_up failed (%s: %s); will retry next tick",
                             type(e).__name__, e)
-        return processed
+            return 0
 
     async def _index_one(self, event_type: str, aggregate_id: str, seq: int) -> None:
         if event_type in (EventType.CHARACTER_CREATED, EventType.CHARACTER_UPDATED):
@@ -90,7 +128,11 @@ class KGProjector:
             return
         names = {c.id: c.name for c in await self._read.list_characters()}
         entities, relations = facts_from_character(char, character_names=names)
-        await self._commit_facts(entities, relations, fingerprint=f"character:{character_id}", seq=seq)
+        # No LLM work to fan out here, but the world.db write still serializes
+        # behind the commit lock so a concurrent chapter partition can't
+        # interleave with this upsert_entity find-then-insert.
+        async with self._lock():
+            await self._commit_facts(entities, relations, fingerprint=f"character:{character_id}", seq=seq)
 
     async def _index_world_entry(self, entry_id: str, seq: int) -> None:
         from novelizer.store.kg_structured import facts_from_world_entry
@@ -99,59 +141,72 @@ class KGProjector:
         if entry is None:
             return
         entities, relations = facts_from_world_entry(entry)
-        await self._commit_facts(entities, relations, fingerprint=f"world_entry:{entry_id}", seq=seq)
+        async with self._lock():
+            await self._commit_facts(entities, relations, fingerprint=f"world_entry:{entry_id}", seq=seq)
 
     async def _index_chapter(self, chapter_id: str, seq: int) -> None:
         chapter = await self._read.get_chapter(chapter_id)
         if chapter is None:
             return
         fingerprint = f"chapter:{chapter_id}"
-        # Reflow: clear this chapter's prior prose-extracted mentions before
-        # re-extracting, so a revision that drops a detail also drops its
-        # entity's searchability (see class docstring on orphan rows).
-        cleared_relation_ids = await self._kg.clear_relation_mentions_for_fingerprint(fingerprint)
-        for relation_id in cleared_relation_ids:
-            if not await self._kg.relation_has_mentions(relation_id):
-                await self._kg.delete_relation(relation_id)
-
-        cleared_entity_ids = await self._kg.clear_mentions_for_fingerprint(fingerprint)
-        for entity_id in cleared_entity_ids:
-            remaining = await self._kg.entity_relations(entity_id)
-            still_mentioned = await self._kg.has_mentions(entity_id)
-            if not remaining and not still_mentioned:
-                await self._emb.delete_entity(str(entity_id))
-
+        # Extraction is the expensive LLM call and the whole reason the drain
+        # goes parallel, so it runs OUTSIDE the commit lock: concurrent chapter
+        # partitions extract at the same time under their shared pool permits.
         entities, relations = await self._extract_chapter_facts(chapter)
-        if not entities and not relations:
-            return
 
-        canon_ids_by_name = {
-            c.name.lower(): c.id for c in await self._read.list_characters()
-        }
-        canon_ids_by_name.update({
-            e.title.lower(): e.id for e in await self._read.list_world_entries()
-        })
+        # Everything below writes to world.db / chroma and runs UNDER the lock.
+        # The hazard is upsert_entity's read-modify-write (find_entity_by_name
+        # then INSERT): two chapters mentioning the same entity name would both
+        # find it absent and double-insert, or lose an update, interleaving at
+        # their await points even though aiosqlite serializes single statements.
+        # Serializing the commit phase -- fast next to the LLM call -- closes
+        # that race while extraction still fans out.
+        async with self._lock():
+            # Reflow: clear this chapter's prior prose-extracted mentions before
+            # re-extracting, so a revision that drops a detail also drops its
+            # entity's searchability (see class docstring on orphan rows).
+            cleared_relation_ids = await self._kg.clear_relation_mentions_for_fingerprint(fingerprint)
+            for relation_id in cleared_relation_ids:
+                if not await self._kg.relation_has_mentions(relation_id):
+                    await self._kg.delete_relation(relation_id)
 
-        name_to_id: dict[str, int] = {}
-        for entity in entities:
-            entity_id = await self._kg.upsert_entity(
-                entity.name, entity.entity_type, entity.description,
-                canon_id=canon_ids_by_name.get(entity.name.lower()), seq=seq,
-            )
-            name_to_id[entity.name] = entity_id
-            await self._kg.link_mention(entity_id, fingerprint)
-            detail = self._format_entity_detail(entity.name, entity.entity_type, entity.description, [])
-            await self._emb.upsert_entity(str(entity_id), entity.name, detail)
+            cleared_entity_ids = await self._kg.clear_mentions_for_fingerprint(fingerprint)
+            for entity_id in cleared_entity_ids:
+                remaining = await self._kg.entity_relations(entity_id)
+                still_mentioned = await self._kg.has_mentions(entity_id)
+                if not remaining and not still_mentioned:
+                    await self._emb.delete_entity(str(entity_id))
 
-        for relation in relations:
-            source_id = name_to_id.get(relation.source)
-            target_id = name_to_id.get(relation.target)
-            if source_id is None or target_id is None:
-                continue
-            relation_id = await self._kg.upsert_relation(
-                source_id, target_id, relation.relation_type, seq=seq
-            )
-            await self._kg.link_relation_mention(relation_id, fingerprint)
+            if not entities and not relations:
+                return
+
+            canon_ids_by_name = {
+                c.name.lower(): c.id for c in await self._read.list_characters()
+            }
+            canon_ids_by_name.update({
+                e.title.lower(): e.id for e in await self._read.list_world_entries()
+            })
+
+            name_to_id: dict[str, int] = {}
+            for entity in entities:
+                entity_id = await self._kg.upsert_entity(
+                    entity.name, entity.entity_type, entity.description,
+                    canon_id=canon_ids_by_name.get(entity.name.lower()), seq=seq,
+                )
+                name_to_id[entity.name] = entity_id
+                await self._kg.link_mention(entity_id, fingerprint)
+                detail = self._format_entity_detail(entity.name, entity.entity_type, entity.description, [])
+                await self._emb.upsert_entity(str(entity_id), entity.name, detail)
+
+            for relation in relations:
+                source_id = name_to_id.get(relation.source)
+                target_id = name_to_id.get(relation.target)
+                if source_id is None or target_id is None:
+                    continue
+                relation_id = await self._kg.upsert_relation(
+                    source_id, target_id, relation.relation_type, seq=seq
+                )
+                await self._kg.link_relation_mention(relation_id, fingerprint)
 
     async def _extract_chapter_facts(self, chapter):
         # Whole-chapter prose in one extraction call risks the structured

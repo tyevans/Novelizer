@@ -87,7 +87,8 @@ def test_build_chat_runner_with_backend_passes_all_five_skills(monkeypatch):
 
     backend = CanonBackend(read_store=None)
     runners_mod.build_chat_runner(FakeSettings(), "author", backend=backend, tools=[])
-    assert captured["skills"] == runners_mod.CHAT_SKILLS
+    from novelizer.canon_fs.skills_route import CRAFT_SKILLS
+    assert captured["skills"] == CRAFT_SKILLS
     assert captured["skills"] == ["/skills"]
 
 

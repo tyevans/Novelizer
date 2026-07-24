@@ -3,7 +3,7 @@
 Home for the text every agent inherits, so no agent is a prompt hub for the
 others (the retrieval note used to live in author.py and be imported by six
 siblings). Machinery constants that are behaviour rather than text --
-GRAPH_RECURSION_LIMIT, PASS_BACKOFF_MULTIPLIER -- stay in base.py.
+GRAPH_RECURSION_LIMIT -- stay in base.py.
 
 Design rationale is in docs/agent-prompting/proposal-fleet-shared.md §2.1-§2.2.
 Two failure modes drive this text: agents working from the pushed summary

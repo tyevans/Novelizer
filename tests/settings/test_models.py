@@ -55,6 +55,33 @@ def test_max_concurrent_agents_default_is_2():
     assert "max_concurrent_agents" not in STORY_OVERRIDABLE_KEYS
 
 
+def test_llm_pool_size_default_is_6():
+    """Phase 3: the shared AIMD pool's target ceiling. 6 is the middle of the
+    stated 4-8 usable vLLM concurrency. Global-only, not story-overridable --
+    it describes the endpoint's real capacity, an installation/hardware fact,
+    not a per-story creative choice, exactly like max_concurrent_agents."""
+    assert EffectiveSettings().llm_pool_size == 6
+    assert "llm_pool_size" not in STORY_OVERRIDABLE_KEYS
+
+
+def test_llm_pool_size_round_trips_through_effective_settings():
+    assert EffectiveSettings(llm_pool_size=8).llm_pool_size == 8
+
+
+def test_background_drain_concurrency_default_is_4():
+    """Phase 5: caps how many aggregate partitions the background drain fans out
+    into concurrently -- a task-count bound (1000 pending aggregates must not
+    spawn 1000 tasks), independent of the shared LLM pool's endpoint ceiling.
+    Global-only, like llm_pool_size and max_concurrent_agents: it bounds a
+    process-wide resource, not a per-story creative knob."""
+    assert EffectiveSettings().background_drain_concurrency == 4
+    assert "background_drain_concurrency" not in STORY_OVERRIDABLE_KEYS
+
+
+def test_background_drain_concurrency_round_trips_through_effective_settings():
+    assert EffectiveSettings(background_drain_concurrency=8).background_drain_concurrency == 8
+
+
 def test_prior_chapter_summary_chars_default_is_200():
     assert EffectiveSettings().prior_chapter_summary_chars == 200
     assert "prior_chapter_summary_chars" in STORY_OVERRIDABLE_KEYS
@@ -118,3 +145,32 @@ def test_context_assembly_settings_defaults():
 def test_context_assembly_settings_story_overridable():
     assert {"extractor_token_budget", "advisory_token_budget",
             "summarizer_interval"} <= STORY_OVERRIDABLE_KEYS
+
+
+# The seven agent-cadence *_interval keys. Phase 2 of the event-driven
+# scheduling redesign deleted the clock gate, so these no longer govern
+# dispatch -- ready() consults only the fail/idle ladders now. They stay in the
+# model and in STORY_OVERRIDABLE_KEYS on purpose: removing them would hard-error
+# on load for every existing story.toml / config.toml that still carries one.
+# "Accepted and inert", never "gone".
+_DEPRECATED_INTERVAL_KEYS = [
+    "author_interval", "default_agent_interval", "continuity_interval",
+    "structure_analyst_interval", "plotter_interval", "muse_interval",
+    "summarizer_interval",
+]
+
+
+@pytest.mark.parametrize("key", _DEPRECATED_INTERVAL_KEYS)
+def test_deprecated_interval_key_still_loads_and_round_trips(key):
+    """Back-compat guard: each inert *_interval key must remain a valid
+    EffectiveSettings field that round-trips a supplied value. If any is
+    dropped from the model, an existing story that sets it will fail to load."""
+    s = EffectiveSettings(**{key: 999})
+    assert getattr(s, key) == 999
+
+
+@pytest.mark.parametrize("key", _DEPRECATED_INTERVAL_KEYS)
+def test_deprecated_interval_key_stays_story_overridable(key):
+    """The keys must stay in STORY_OVERRIDABLE_KEYS: a story.toml that carries
+    one must be accepted, not rejected as an unknown/forbidden override."""
+    assert key in STORY_OVERRIDABLE_KEYS

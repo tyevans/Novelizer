@@ -28,7 +28,7 @@ class SchedulerEligibilityChanged(BaseModel):
 
     agent_name: str
     eligible: bool
-    reason: str  # "paused" | "running" | "interval not elapsed" | "readiness 0" | "ready"
+    reason: str  # "paused" | "running" | "backing off" | "readiness 0" | "ready"
 
 
 class AgentRunStarted(BaseModel):

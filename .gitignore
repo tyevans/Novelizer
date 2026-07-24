@@ -21,3 +21,6 @@ memory/
 
 # Runtime story data / generated stores
 stories/
+
+# hypothesis property-test database
+.hypothesis/

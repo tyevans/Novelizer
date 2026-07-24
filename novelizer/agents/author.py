@@ -143,14 +143,6 @@ one short line in your own voice reacting to the chapter you just made.
 RETRIEVAL_NOTE_BASE = prompts.RETRIEVAL_NOTE_BASE
 RETRIEVAL_NOTE = prompts.RETRIEVAL_NOTE
 
-# SkillsMiddleware treats each source as a container directory listing skill
-# subdirectories; the container is /skills, not an individual pack (see
-# novelizer.canon_fs.skills_route.CRAFT_SKILLS docstring). Per-agent pack
-# selectivity is unavailable under that contract, so every tooled agent
-# shares the same source list -- progressive disclosure keeps the cost to
-# each pack's name + description line.
-AUTHOR_SKILLS = CRAFT_SKILLS
-
 
 def _summarize(
     ctx: dict,
@@ -374,7 +366,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None, suba
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
-            backend=backend, tools=tools, skills=AUTHOR_SKILLS, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[TodoContextMiddleware()],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

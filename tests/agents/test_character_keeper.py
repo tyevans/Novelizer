@@ -362,7 +362,8 @@ async def test_keeper_no_action_pass_commits_nothing_and_backs_off(stack):
     remarks = [e for e in log if e.event_type == EventType.AGENT_REMARKED]
     assert [e.payload["note"] for e in remarks] == ["All quiet on the cast front — write on."]
     import time
-    assert agent.seconds_until_ready(time.monotonic()) > agent.interval
+    assert agent._idle_streak == 1
+    assert not agent.ready(time.monotonic())
 
 
 async def test_keeper_pass_uses_default_remark_when_feed_note_empty(stack):
@@ -458,7 +459,8 @@ def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkey
 
     backend = CanonBackend(read_store=None)
     keeper_mod.build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
-    assert captured["skills"] == keeper_mod.KEEPER_SKILLS
+    from novelizer.canon_fs.skills_route import CRAFT_SKILLS
+    assert captured["skills"] == CRAFT_SKILLS
     assert captured["skills"] == ["/skills"]
 
 

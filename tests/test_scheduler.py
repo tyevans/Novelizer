@@ -4,13 +4,17 @@ from agent_kit import Scheduler
 
 
 class StubAgent:
+    """The surface the scheduler touches. `interval` is still accepted -- the
+    constructor parameter survives everywhere -- but nothing here consults it:
+    dispatch reads the two backoff ladders through `ready()` alone."""
     def __init__(self, name, score, interval=0):
         self.name = name; self._score = score; self.interval = interval
-        self.paused = False; self._last = -999; self.ran = 0
+        self.paused = False; self.ran = 0
+        self._fail_until = 0.0; self._idle_until = 0.0
     async def readiness(self): return self._score
-    def ready_for_interval(self, now): return (now - self._last) >= self.interval
-    def mark_ran(self, now): self._last = now; self.ran += 1
-    async def run_once(self): pass
+    def ready(self, now): return now >= max(self._fail_until, self._idle_until)
+    def back_off_until(self, deadline): self._idle_until = deadline
+    async def run_once(self): self.ran += 1
     def pause(self): self.paused = True
     def resume(self): self.paused = False
 
@@ -23,6 +27,7 @@ class SlowAgent(StubAgent):
         self._delay = delay
         self._log = log if log is not None else []
     async def run_once(self):
+        self.ran += 1
         loop = asyncio.get_event_loop()
         start = loop.time()
         await asyncio.sleep(self._delay)
@@ -69,14 +74,30 @@ async def test_override_signal_forces_agent():
     await _drain(sched)
 
 
-async def test_respects_interval():
-    a = StubAgent("a", 0.9, interval=10)
+async def test_a_just_run_agent_with_a_long_interval_runs_again_at_once():
+    """The bug this phase removes. An agent that finished a run a moment ago
+    and still has work is dispatched on the next tick -- the interval never
+    enters the decision, however long it is."""
+    a = StubAgent("a", 0.9, interval=900)
     sched = Scheduler([a], clock=lambda: 1000.0)
     assert await sched.tick() == ["a"]
     await _drain(sched)
-    # same clock -> not interval-ready now
-    sched2 = Scheduler([a], clock=lambda: 1005.0)
-    assert await sched2.tick() == []
+    assert await sched.tick() == ["a"]
+    await _drain(sched)
+    assert a.ran == 2
+
+
+async def test_a_backed_off_agent_is_held_until_its_deadline():
+    """The replacement gate: a ladder deadline, in absolute seconds, and
+    nothing else."""
+    now = [1000.0]
+    a = StubAgent("a", 0.9, interval=900)
+    a.back_off_until(1030.0)
+    sched = Scheduler([a], clock=lambda: now[0])
+    assert await sched.tick() == []
+    now[0] = 1030.0
+    assert await sched.tick() == ["a"]
+    await _drain(sched)
 
 
 async def test_status_reports_paused_and_currently_in_flight():
@@ -170,23 +191,45 @@ async def test_run_survives_a_ticking_agents_exception_and_keeps_selecting_other
         await _drain(sched)
 
 
-async def test_crashing_agent_consumes_its_interval_so_others_can_run():
-    """A crash must still mark_ran (on task completion): otherwise the crasher
-    stays eligible and, outscoring everyone, hot-loops forever while the rest
-    of the roster starves (observed live: author 502-looping while nothing
-    else ran)."""
-    class BoomAgent(StubAgent):
-        async def run_once(self):
-            raise ValueError("boom")
+async def test_crashing_agent_backs_off_so_others_can_run():
+    """Observed live: the author 502-looped while nothing else in the room ran.
+    The interval used to absorb that (the scheduler charged a crash via
+    mark_ran); with the clock gate gone, the fail ladder is the only thing
+    between a crashing agent that outscores everyone and every dispatch slot.
 
-    boom = BoomAgent("boom", 0.9, interval=10)
-    healthy = StubAgent("healthy", 0.1)
-    sched = Scheduler([boom, healthy], clock=lambda: 1000.0, max_concurrent_agents=1)
-    await sched.tick()
+    Written against the real novelizer chassis rather than a stub: the ladder
+    advances inside BaseAgent.run_once, so a stub would only be testing
+    itself."""
+    from novelizer.agents.base import BaseAgent
+
+    class _Scored(BaseAgent):
+        def __init__(self, name, score, clock, fail=None):
+            super().__init__(runner=None, read_store=None, committer=None,
+                             interval=0, name=name)
+            self._clock = clock
+            self._score = score
+            self._fail = fail
+            self.runs = 0
+        async def readiness(self): return self._score
+        async def _run(self):
+            self.runs += 1
+            if self._fail is not None:
+                raise self._fail
+
+    clock = lambda: 1000.0
+    boom = _Scored("boom", 0.9, clock, fail=ValueError("boom"))
+    healthy = _Scored("healthy", 0.1, clock)
+    sched = Scheduler([boom, healthy], clock=clock, max_concurrent_agents=1)
+
+    assert await sched.tick() == ["boom"]
     await _drain(sched)
-    assert boom.ran == 1  # mark_ran despite the crash -> interval backoff
-    assert await sched.tick() == ["healthy"]
-    await _drain(sched)
+    assert boom._fail_streak == 1
+
+    for _ in range(10):
+        await sched.tick()
+        await _drain(sched)
+    assert boom.runs == 1, "the crasher retook the slot while inside its fail backoff"
+    assert healthy.runs == 10, "the healthy agent was starved by the crasher"
 
 
 async def test_status_reports_run_count_incrementing_on_every_completion():
@@ -206,7 +249,7 @@ async def test_status_reports_run_count_incrementing_on_every_completion():
     await sched.tick()
     await _drain(sched)
     st = {s["name"]: s for s in sched.status()}
-    assert st["a"]["run_count"] == 1, "interval not yet elapsed on fixed clock -- no re-dispatch"
+    assert st["a"]["run_count"] == 2, "a stub that never backs off is re-dispatched"
 
 
 async def test_status_reports_last_error_and_clears_on_success():
@@ -219,15 +262,13 @@ async def test_status_reports_last_error_and_clears_on_success():
                 self.fail_next = False
                 raise ValueError("kaboom")
 
-    now = [1000.0]
     flaky = FlakyAgent("flaky", 0.9, interval=10)
-    sched = Scheduler([flaky], clock=lambda: now[0], max_concurrent_agents=1)
+    sched = Scheduler([flaky], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()
     await _drain(sched)
     st = {s["name"]: s for s in sched.status()}
     assert "kaboom" in st["flaky"]["last_error"]
-    now[0] = 1020.0  # past interval -> eligible again, succeeds this time
-    assert await sched.tick() == ["flaky"]
+    assert await sched.tick() == ["flaky"]   # no clock to wait on; it retries at once
     await _drain(sched)
     st = {s["name"]: s for s in sched.status()}
     assert st["flaky"]["last_error"] is None
@@ -300,12 +341,13 @@ async def test_two_slow_agents_do_not_overlap_at_pool_size_1():
     possible until the first completes and a second tick dispatches the
     next."""
     log = []
-    a = SlowAgent("a", 0.9, delay=0.05, log=log, interval=1)
-    b = SlowAgent("b", 0.8, delay=0.05, log=log, interval=1)
+    a = SlowAgent("a", 0.9, delay=0.05, log=log)
+    b = SlowAgent("b", 0.8, delay=0.05, log=log)
     sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=1)
     await sched.tick()  # dispatches only a
     await _drain(sched)
-    await sched.tick()  # a is now interval-backed-off (fixed clock); b, never dispatched, still eligible
+    a.back_off_until(2000.0)  # a yields the slot the only way it now can
+    await sched.tick()
     await _drain(sched)
     by_name = {name: (start, end) for name, start, end in log}
     assert "a" in by_name and "b" in by_name
@@ -332,20 +374,26 @@ async def test_pool_size_1_reproduces_todays_serial_ordering_exactly():
     """Given three eligible agents with distinct readiness scores and pool
     size 1: tick() dispatches only the highest-scored one, and it must
     complete (leave _in_flight) before the next tick() dispatches another --
-    no overlap, proving pool size 1 is a true serial fallback."""
+    no overlap, proving pool size 1 is a true serial fallback.
+
+    Each agent backs off after its run, which is what makes the next one the
+    top scorer. That used to be the interval's doing; it is the idle ladder's
+    now, and it is the only thing that ever hands the slot on."""
     log = []
-    a = SlowAgent("a", 0.9, delay=0.02, log=log, interval=1)
-    b = SlowAgent("b", 0.5, delay=0.02, log=log, interval=1)
-    c = SlowAgent("c", 0.1, delay=0.02, log=log, interval=1)
+    a = SlowAgent("a", 0.9, delay=0.02, log=log)
+    b = SlowAgent("b", 0.5, delay=0.02, log=log)
+    c = SlowAgent("c", 0.1, delay=0.02, log=log)
     sched = Scheduler([a, b, c], clock=lambda: 1000.0, max_concurrent_agents=1)
 
     first = await sched.tick()
     assert first == ["a"]
     await _drain(sched)
+    a.back_off_until(2000.0)
 
     second = await sched.tick()
     assert second == ["b"]
     await _drain(sched)
+    b.back_off_until(2000.0)
 
     third = await sched.tick()
     assert third == ["c"]
@@ -388,21 +436,22 @@ async def test_eligibility_changes_emit_once_not_per_tick():
     now = [1000.0]
     sched = Scheduler([a], clock=lambda: now[0], telemetry=rec)
     await sched.tick()             # a ready -> dispatched
-    await sched.drain_in_flight()  # run completes -> mark_ran consumes interval
+    await sched.drain_in_flight()
+    a.back_off_until(1100.0)
     now[0] = 1001.0
-    await sched.tick()   # a ineligible: "interval not elapsed"
+    await sched.tick()   # a ineligible: "backing off"
     now[0] = 1002.0
     await sched.tick()   # still ineligible: same state -> NO new event
     elig = [p for t, p in rec.emitted if t == TelemetryEventType.SCHEDULER_ELIGIBILITY_CHANGED]
     assert [(p.agent_name, p.eligible, p.reason) for p in elig] == [
         ("a", True, "ready"),
-        ("a", False, "interval not elapsed"),
+        ("a", False, "backing off"),
     ]
 
 
 async def test_paused_and_readiness_zero_reasons_are_reported():
     from novelizer.telemetry.events import TelemetryEventType
-    a = StubAgent("a", 0.0)   # eligible by interval but readiness 0
+    a = StubAgent("a", 0.0)   # off both ladders but readiness 0
     b = StubAgent("b", 0.5)
     b.pause()
     rec = CapturingRecorder()

@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Awaitable, Callable, Sequence
 
+from agent_kit.base import _is_rate_limit_error
 from agent_kit.telemetry import (
     SchedulerEligibilityChanged,
     SchedulerPicked,
@@ -27,12 +28,25 @@ class Scheduler:
         max_concurrent_agents: int = 2,
         telemetry=None,
         override_provider: Callable[[], Awaitable[str | None]] | None = None,
+        gate_provider: Callable[[], Awaitable[bool]] | None = None,
+        pool=None,
     ) -> None:
         self._agents = list(agents)
         self._tick_sleep = tick_sleep
         self._clock = clock
         self._telemetry = telemetry
         self._override_provider = override_provider
+        # Optional strict background-first gate (async () -> True == OPEN). None =>
+        # today's always-open behavior, mirroring the override_provider seam. When
+        # present and CLOSED, tick() dispatches nothing at all -- background
+        # catch-up (embedding/KG) outranks every agent run. The seam stays generic:
+        # it knows nothing about lag or canon; only novelizer's factory does.
+        self._gate_provider = gate_provider
+        # Optional shared LLM concurrency ceiling (AdaptivePool). None => today's
+        # unlimited behavior, mirroring the override_provider seam. When present,
+        # a permit gates each whole run inside _run, and the same pool object is
+        # shared with the KG drain -- one fleet-wide ceiling on a single endpoint.
+        self._pool = pool
         self._running = False
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
@@ -95,10 +109,34 @@ class Scheduler:
         if free_slots <= 0:
             await self._emit_eligibility(now, scores={})
             return []
+        # Strict background-first gate, consulted ONCE per tick (lag() hits the DB)
+        # and BEFORE the override lookup and scoring: while embedding/KG catch-up
+        # lags, hold every agent. Background work outranks even a Director
+        # override, so a closed gate must suppress the override too -- hence this
+        # precedes the override lookup rather than following it.
+        #
+        # Fail OPEN on a raise: novelizer's gate calls indexer.lag(), which can
+        # surface a transient "database is locked" and has no never-raise wrapper
+        # of its own (see kg_catch_up's failure-tolerance). A momentary DB lock
+        # must not freeze the whole room, so a raising probe is treated as OPEN and
+        # the exception is swallowed here rather than escaping tick().
+        gate_open = True
+        if self._gate_provider is not None:
+            try:
+                gate_open = await self._gate_provider()
+            except Exception:
+                logger.warning("scheduler: gate probe raised; failing open", exc_info=True)
+                gate_open = True
+        if not gate_open:
+            # Emit eligibility so held agents show WHY ("background catch-up"),
+            # then dispatch nothing. _in_flight is deliberately untouched: the gate
+            # blocks NEW dispatch only and never cancels a run already in flight.
+            await self._emit_eligibility(now, scores={}, gate_open=False)
+            return []
         override = await self._override_provider() if self._override_provider else None
         eligible = [
             a for a in self._agents
-            if not a.paused and a.name not in self._in_flight and a.ready_for_interval(now)
+            if not a.paused and a.name not in self._in_flight and a.ready(now)
         ]
         if not eligible:
             await self._emit_eligibility(now, scores={})
@@ -131,7 +169,7 @@ class Scheduler:
                     TelemetryEventType.SCHEDULER_PICKED, a.name,
                     SchedulerPicked(agent_name=a.name),
                 )
-            task = asyncio.create_task(self._run(a, now))
+            task = asyncio.create_task(self._run(a))
             # Retrieve (and discard) the exception so fire-and-forget crashes
             # don't log "Task exception was never retrieved"; failures are
             # recorded via _last_error inside _run and re-raised within the
@@ -141,9 +179,17 @@ class Scheduler:
             dispatched.append(a.name)
         return dispatched
 
-    async def _emit_eligibility(self, now: float, scores: dict[str, float]) -> None:
+    async def _emit_eligibility(self, now: float, scores: dict[str, float],
+                                gate_open: bool = True) -> None:
         """One eligibility_changed per agent per state *change* — quiet log,
-        not a per-tick heartbeat."""
+        not a per-tick heartbeat.
+
+        gate_open threads the strict background-first gate through: when it is
+        closed, an agent whose ONLY obstacle is the gate -- would-be-ready, not
+        paused, not in-flight, not backing off, not scored-zero -- reports
+        "background catch-up" instead of "ready". The gate reason replaces the
+        "ready" reason only; paused / running / backing off / readiness 0 keep
+        their own, truer reasons (the gate is not why THOSE are held)."""
         if self._telemetry is None:
             return
         for a in self._agents:
@@ -151,10 +197,12 @@ class Scheduler:
                 state = (False, "paused")
             elif a.name in self._in_flight:
                 state = (False, "running")
-            elif not a.ready_for_interval(now):
-                state = (False, "interval not elapsed")
+            elif not a.ready(now):
+                state = (False, "backing off")
             elif a.name in scores and scores[a.name] <= 0.0:
                 state = (False, "readiness 0")
+            elif not gate_open:
+                state = (False, "background catch-up")
             else:
                 state = (True, "ready")
             if self._eligibility.get(a.name) != state:
@@ -172,20 +220,36 @@ class Scheduler:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _run(self, agent, now: float) -> None:
+    async def _run(self, agent) -> None:
         logger.info("scheduler: running %s", agent.name)
         try:
-            await agent.run_once()
+            if self._pool is None:
+                await agent.run_once()
+            else:
+                # A permit covers the whole run. On the way out, feed the pool
+                # exactly one AIMD signal: congestion on a real 429, success on a
+                # clean run, and nothing at all on a plain crash -- a malformed
+                # response or a bug is not congestion, and must not shrink the
+                # fleet-wide ceiling every other consumer draws from. The permit
+                # is released by slot()'s own finally whichever way the body exits.
+                async with self._pool.slot():
+                    try:
+                        await agent.run_once()
+                    except Exception as e:
+                        if _is_rate_limit_error(e):
+                            self._pool.note_rate_limited()
+                        raise
+                    else:
+                        self._pool.note_success()
         except Exception as e:
             self._last_error[agent.name] = f"{type(e).__name__}: {e}"
             raise
         else:
             self._last_error.pop(agent.name, None)
         finally:
-            # mark_ran even on failure: a crashing agent must consume its
-            # interval (backoff) instead of staying eligible and hot-looping,
-            # which starves every other agent of scheduler slots.
-            agent.mark_ran(now)
+            # A crashing agent no longer hot-loops the pool: run_once advances
+            # the fail ladder on every raise, so ready() holds it out on its
+            # own. Backing off is the ladder's job now, not the scheduler's.
             self._in_flight.pop(agent.name, None)
             self._run_count[agent.name] = self._run_count.get(agent.name, 0) + 1
             # Sticky display marker, distinct from the honest in-flight

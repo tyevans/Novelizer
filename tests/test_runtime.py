@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 import pytest
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
@@ -24,10 +25,16 @@ class FakeRunner:
 
 
 @pytest.fixture
-def settings():
-    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    yield Settings(db_path=path)
-    os.unlink(path)
+def settings(tmp_path):
+    # Per-test temp DIRECTORY, not a bare mkstemp file in shared /tmp. The
+    # runtime derives sibling paths from db_path -- embed_cursor.json,
+    # kg_cursor.json, the embeddings store -- via Path.with_name(), so a db at
+    # /tmp/tmpXXXX.db puts every cursor at the FIXED /tmp/embed_cursor.json,
+    # shared across every test and every parallel run. A stale cursor left at
+    # seq N then makes a fresh room's lag() read 0, which the background-gate
+    # tests assert against directly. An isolated dir gives each test its own
+    # cursor namespace. (Production is unaffected: each story owns its dir.)
+    return Settings(db_path=str(tmp_path / "world.db"))
 
 
 @pytest.fixture
@@ -47,6 +54,52 @@ async def test_start_wires_a_working_slice(settings):
         await rt.author.run_once()
         await rt.projector.catch_up()
         assert "Chapter One" in [c.title for c in await rt.read.list_chapters()]
+    finally:
+        await rt.close()
+
+
+async def test_start_wires_a_shared_llm_pool_into_the_scheduler(settings):
+    """Phase 3: Runtime.start() constructs one AdaptivePool sized from
+    llm_pool_size and hands the SAME object to the scheduler. That single shared
+    ceiling is the whole point -- the scheduler and (later) the KG drain must
+    draw permits from one pool, not two independent budgets on one vLLM
+    endpoint. Duck-typed on purpose: no import of agent_kit.pool here, so its
+    absence reds only this test (AttributeError: no attribute 'pool'), never the
+    whole file's collection."""
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.pool is not None
+        assert rt.pool.size == settings.llm_pool_size
+        assert rt.scheduler._pool is rt.pool
+    finally:
+        await rt.close()
+
+
+async def test_start_shares_the_llm_pool_with_both_background_drains(settings):
+    """Phase 5: the SAME AdaptivePool handed to the scheduler is handed to both
+    projectors, so agents and the two drains share ONE endpoint ceiling and one
+    AIMD controller -- the property that does not hold today (independent LLM
+    consumers, no shared limit, the 429-pileup source). Duck-typed on the `_pool`
+    attribute so a missing wiring reds only this test, not the file's collection."""
+    rt = Runtime(settings, runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.indexer._pool is rt.pool
+        assert rt.kg_projector._pool is rt.pool
+    finally:
+        await rt.close()
+
+
+async def test_start_wires_background_drain_concurrency_from_settings(settings):
+    """Phase 5: start() passes background_drain_concurrency through to both
+    projectors as their fan-out cap (`_drain_concurrency`)."""
+    rt = Runtime(settings.model_copy(update={"background_drain_concurrency": 3}),
+                 runner=FakeRunner(ChapterDraft(title="Chapter One", prose="It began.")))
+    try:
+        await rt.start()
+        assert rt.indexer._drain_concurrency == 3
+        assert rt.kg_projector._drain_concurrency == 3
     finally:
         await rt.close()
 
@@ -171,11 +224,17 @@ class ScriptedContinuityRunner:
 
 
 class AdvancingClock:
-    """A fake monotonic clock that jumps well past every agent interval on each
-    call, so interval-gating never blocks agent eligibility across ticks."""
+    """A fake monotonic clock that jumps well past any backoff ladder deadline
+    on each call, so an agent that took a no-progress step back is eligible
+    again by the next tick and the loop below cannot stall on it.
+
+    Seeded from time.monotonic() rather than zero: the agents' own ladders are
+    stamped with the real monotonic clock (novelizer's BaseAgent takes no clock
+    injection), and a scheduler clock starting behind those deadlines would
+    read every backed-off agent as still backed off."""
 
     def __init__(self, step: float = 10_000.0) -> None:
-        self._t = 0.0
+        self._t = time.monotonic()
         self._step = step
 
     def __call__(self) -> float:
@@ -224,9 +283,18 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
         await rt.projector.catch_up()
         assert known_world_entry_id in {e.id for e in await rt.read.list_world_entries()}
 
-        # Give the scheduler an advancing clock so interval-gating never blocks
+        # Give the scheduler an advancing clock so backoff deadlines never block
         # agent eligibility across many ticks.
         rt.scheduler._clock = AdvancingClock()
+
+        # Neutralize the strict background gate: this test's subject is the
+        # Scheduler driving the retcon loop, not background catch-up (which has
+        # its own dedicated tests). The gate closes on any index/KG lag, and the
+        # pre-seeded WORLD_ENTRY_CREATED raises it -- but there is no embed
+        # endpoint here to drain it back to zero, so an active gate would freeze
+        # the room forever. Disabling it isolates the behavior under test, the
+        # same way the AdvancingClock above neutralizes backoff.
+        rt.scheduler._gate_provider = None
 
         # Phase 1: only ContinuityChecker is eligible -- this forces the scheduler
         # to select it (deterministically) to file the retcon.
@@ -755,3 +823,295 @@ def test_tooled_bare_builder_unchanged_when_tools_disabled(runtime):
 
     wrapped = runtime._tooled(builder, enabled=False, subagent_enabled=True, subagent_agent_name="character_keeper")
     assert wrapped is builder
+
+
+class _FakeEventsForRun:
+    """Minimal stand-in for EventStore.events_for_run — the probe only ever
+    reads event_type off what it gets back."""
+
+    def __init__(self, by_run: dict) -> None:
+        self._by_run = by_run
+
+    async def events_for_run(self, run_id: str):
+        return self._by_run.get(run_id, [])
+
+
+class _Ev:
+    def __init__(self, event_type: str) -> None:
+        self.event_type = event_type
+
+
+async def test_progress_probe_counts_real_canon_commits():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({"r1": [_Ev(EventType.CHAPTER_CREATED)]}))
+    assert await probe("r1") is True
+
+
+async def test_progress_probe_ignores_a_run_that_only_chattered():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({"r1": [_Ev(EventType.AGENT_REMARKED)]}))
+    assert await probe("r1") is False
+
+
+async def test_progress_probe_ignores_a_run_that_only_closed_out_signals():
+    """An agent that read the director's signals, declined to act, and marked
+    them consumed has done bookkeeping, not work. Counting it as progress
+    keeps a converged agent at full cadence for as long as a director keeps
+    trickling signals in — see world_architect's deliberate skip of
+    note_pass() when signals are pending but the draft is no_action."""
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({
+        "r1": [_Ev(EventType.DIRECTOR_SIGNAL_CONSUMED), _Ev(EventType.AGENT_REMARKED)],
+    }))
+    assert await probe("r1") is False
+
+
+async def test_progress_probe_counts_work_done_alongside_bookkeeping():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({
+        "r1": [_Ev(EventType.DIRECTOR_SIGNAL_CONSUMED), _Ev(EventType.WORLD_ENTRY_CREATED)],
+    }))
+    assert await probe("r1") is True
+
+
+async def test_progress_probe_reports_a_silent_run_as_no_progress():
+    from novelizer.runtime import _make_progress_probe
+    probe = _make_progress_probe(_FakeEventsForRun({}))
+    assert await probe("nothing-committed") is False
+
+
+# --- Phase 4: the strict background catch-up gate ---------------------------
+#
+# Background work (embedding indexing + KG extraction) is HIGHER priority than
+# agent runs, and blocking is STRICT: while EITHER indexer lags, no agent is
+# dispatched at all. Novelizer wires this into agent_kit.Scheduler's generic
+# gate_provider seam via a _make_gate_provider(indexer, kg_projector) factory
+# that mirrors _make_override_provider: an async predicate, OPEN (True) iff both
+# lags are zero.
+#
+# These start RED: _make_gate_provider does not exist (ImportError), and start()
+# does not pass gate_provider= to the Scheduler yet, so rt.scheduler has no
+# _gate_provider wired.
+
+
+class _FakeLagger:
+    """The only surface _make_gate_provider touches on either indexer: an async
+    lag() returning an int. Real CanonIndexer/KGProjector both expose exactly
+    this."""
+
+    def __init__(self, lag: int) -> None:
+        self._lag = lag
+
+    async def lag(self) -> int:
+        return self._lag
+
+
+async def test_gate_provider_is_open_only_when_both_indexers_are_caught_up():
+    """The pinned predicate: OPEN iff indexer.lag() == 0 AND
+    kg_projector.lag() == 0. Any lag on either side closes the gate -- the two
+    lags count different event sets and are not interchangeable, so both must be
+    drained before agents may act."""
+    from novelizer.runtime import _make_gate_provider
+    assert await _make_gate_provider(_FakeLagger(0), _FakeLagger(0))() is True
+    assert await _make_gate_provider(_FakeLagger(1), _FakeLagger(0))() is False
+    assert await _make_gate_provider(_FakeLagger(0), _FakeLagger(3))() is False
+    assert await _make_gate_provider(_FakeLagger(4), _FakeLagger(2))() is False
+
+
+async def test_start_wires_the_background_gate_into_the_scheduler(settings):
+    """start() must hand the Scheduler a gate_provider built over the runtime's
+    OWN indexer and kg_projector. On a fresh, fully-drained room both lags are
+    zero, so the wired gate reads open."""
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        assert rt.scheduler._gate_provider is not None
+        assert await rt.scheduler._gate_provider() is True
+    finally:
+        await rt.close()
+
+
+async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(settings):
+    """End to end at the runtime level. A THREAD_PLANTED event is indexable by
+    the CanonIndexer but NOT by the KGProjector, so it raises indexer lag alone
+    -- no KG LLM call is ever provoked, keeping the test hermetic. With that lag
+    pending, the real wired gate is closed and the scheduler dispatches NOTHING,
+    even though the Author is ready and scores 1.0. Once index_catch_up drains
+    the cursor (lag -> 0), the gate reopens and agents dispatch again."""
+    from novelizer.canon.events import ThreadPlanted
+
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        # Sanity: a fresh room is caught up, so the gate starts open.
+        assert await rt.scheduler._gate_provider() is True
+
+        # Create indexer lag without touching the KG projector or its LLM.
+        await rt.events.append(EventType.THREAD_PLANTED, "t1",
+                               ThreadPlanted(id="t1", name="The Ledger"))
+        assert await rt.indexer.lag() > 0
+        assert await rt.kg_projector.lag() == 0
+        assert await rt.scheduler._gate_provider() is False, "pending index lag must close the gate"
+
+        # Strict gate: no agent runs while the backlog is pending.
+        assert await rt.scheduler.tick() == []
+        assert len(rt.scheduler._in_flight) == 0
+
+        # Drain the backlog; the gate reopens and the room dispatches again.
+        await rt.index_catch_up()
+        assert await rt.indexer.lag() == 0
+        assert await rt.scheduler._gate_provider() is True
+        dispatched = await rt.scheduler.tick()
+        assert dispatched, "agents must dispatch again once the indexers have caught up"
+    finally:
+        await rt.scheduler.drain_in_flight()
+        await rt.close()
+
+
+# --- Phase 6: background-progress readout (legibility of the strict gate) ----
+#
+# The strict background gate (Phase 4) freezes EVERY agent while EITHER indexer
+# lags. The user accepted that a down embed endpoint can freeze the whole room
+# ON THE CONDITION that the operator can SEE the backlog draining -- otherwise a
+# freeze is indistinguishable from a hang. So the runtime must expose a single
+# queryable progress signal spanning BOTH the CanonIndexer AND the KGProjector.
+# Today _brain_loop reads only indexer.lag(), missing KG entirely.
+#
+# Pinned shape: Runtime.background_progress() (async) returns a BackgroundProgress
+# with named `index_lag` / `kg_lag` ints, a `total` (their sum) and a
+# `caught_up` flag (total == 0). Named fields over a bare tuple because the
+# status bar reads them by name and a swapped (index, kg) pair would be a silent
+# bug. It must:
+#   - be zero / caught_up when both indexers are drained,
+#   - reflect pending work on EITHER side,
+#   - NEVER raise -- a lag probe that hits "database is locked" must not crash
+#     the status loop; that side reads as unknown == 0 (mirrors the never-raise
+#     contract of index_catch_up / kg_catch_up),
+#   - treat a None indexer / projector as 0 (the runtime can run without them,
+#     exactly as _make_gate_provider already does).
+#
+# These start RED: Runtime has no background_progress() method and there is no
+# BackgroundProgress type (ImportError / AttributeError).
+
+
+class _RaisingLagger:
+    """A lag() that raises the way a real indexer does under DB contention
+    ("database is locked"). background_progress() must swallow this and report
+    that side as unknown == 0 rather than letting it escape into the status
+    loop -- the same never-raise contract index_catch_up / kg_catch_up hold."""
+
+    async def lag(self) -> int:
+        raise RuntimeError("database is locked")
+
+
+async def test_background_progress_type_shape_is_index_kg_total_caught_up():
+    """Pin the exact returned shape as a named type, not a bare (index, kg)
+    tuple: the status bar reads these by name and a swapped pair would be a
+    silent bug. total is the sum; caught_up is total == 0."""
+    from novelizer.runtime import BackgroundProgress
+    p = BackgroundProgress(index_lag=4, kg_lag=2)
+    assert p.index_lag == 4
+    assert p.kg_lag == 2
+    assert p.total == 6
+    assert p.caught_up is False
+    assert BackgroundProgress(index_lag=0, kg_lag=0).caught_up is True
+
+
+async def test_background_progress_is_zero_when_both_indexers_are_caught_up(settings):
+    rt = Runtime(settings)
+    rt.indexer = _FakeLagger(0)
+    rt.kg_projector = _FakeLagger(0)
+    p = await rt.background_progress()
+    assert p.index_lag == 0
+    assert p.kg_lag == 0
+    assert p.total == 0
+    assert p.caught_up is True
+
+
+async def test_background_progress_reflects_pending_work_on_either_indexer(settings):
+    """Either side lagging must surface: the two lags count different event
+    sets (24 canon event types vs the projector's 6) and are not
+    interchangeable, so a readout that watched only one would miss a freeze
+    caused by the other."""
+    rt = Runtime(settings)
+
+    rt.indexer, rt.kg_projector = _FakeLagger(5), _FakeLagger(0)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (5, 0, 5)
+    assert p.caught_up is False
+
+    rt.indexer, rt.kg_projector = _FakeLagger(0), _FakeLagger(3)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (0, 3, 3)
+    assert p.caught_up is False
+
+    rt.indexer, rt.kg_projector = _FakeLagger(4), _FakeLagger(2)
+    p = await rt.background_progress()
+    assert (p.index_lag, p.kg_lag, p.total) == (4, 2, 6)
+    assert p.caught_up is False
+
+
+async def test_background_progress_never_raises_when_a_lag_probe_fails(settings):
+    """A "database is locked" on one probe must not crash the status loop. The
+    failing side reads as unknown == 0; the healthy side is still reported, so
+    the operator keeps seeing real progress from whichever indexer is up."""
+    rt = Runtime(settings)
+    rt.indexer = _RaisingLagger()
+    rt.kg_projector = _FakeLagger(7)
+    p = await rt.background_progress()  # must not raise
+    assert p.index_lag == 0  # failing side treated as unknown/zero
+    assert p.kg_lag == 7
+    assert p.total == 7
+    assert p.caught_up is False
+
+
+async def test_background_progress_handles_missing_indexers(settings):
+    """The runtime can run without an indexer / projector (both default to
+    None). A None side contributes 0, mirroring _make_gate_provider's None
+    handling -- nothing to wait on, so nothing to report."""
+    rt = Runtime(settings)  # __init__ leaves indexer and kg_projector None
+    p = await rt.background_progress()
+    assert p.index_lag == 0
+    assert p.kg_lag == 0
+    assert p.caught_up is True
+
+    rt.kg_projector = _FakeLagger(9)
+    p = await rt.background_progress()
+    assert p.index_lag == 0  # indexer still None
+    assert p.kg_lag == 9
+    assert p.total == 9
+
+
+async def test_background_progress_spans_both_real_indexers_end_to_end(settings):
+    """End to end against the REAL wired indexers, mirroring
+    test_pending_index_lag_holds_every_agent_then_releases_on_catch_up. A
+    THREAD_PLANTED event is indexable by the CanonIndexer but NOT by the
+    KGProjector, so it raises canon index lag alone -- no KG LLM call is ever
+    provoked, keeping the test hermetic. background_progress() must see that
+    canon lag (and only it), then read zero again once the drain catches up."""
+    from novelizer.canon.events import ThreadPlanted
+
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        # Fresh, fully-drained room: nothing pending on either side.
+        p = await rt.background_progress()
+        assert p.total == 0
+        assert p.caught_up is True
+
+        # Raise canon index lag without touching the KG projector or its LLM.
+        await rt.events.append(EventType.THREAD_PLANTED, "t1",
+                               ThreadPlanted(id="t1", name="The Ledger"))
+        p = await rt.background_progress()
+        assert p.index_lag > 0
+        assert p.kg_lag == 0, "THREAD_PLANTED is not a KG-indexed event; kg lag stays 0"
+        assert p.total == p.index_lag
+        assert p.caught_up is False
+
+        # Drain the embedding backlog; the readout returns to caught-up.
+        await rt.index_catch_up()
+        p = await rt.background_progress()
+        assert p.total == 0
+        assert p.caught_up is True
+    finally:
+        await rt.close()
