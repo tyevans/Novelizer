@@ -179,13 +179,23 @@ Division of labor:
 
 ## Error handling & edge cases
 
-- **No premise at all** (empty story, no seed): Plotter readiness stays low (nothing to
-  outline from); the fallback eventually un-suppresses the Author so the story is not
-  permanently frozen. Same terminal behavior as today, reached deliberately.
+- **No premise at all** (empty story, no seed): **refined from the original plan
+  above.** As implemented, the genesis fallback (`genesis_fallback_open` in
+  `novelizer/brain/gate.py`) only opens once a blueprint has actually been *proposed*
+  and the World Architect has built world — both require a premise seed to have arrived
+  in the first place. With no seed, neither precondition is ever met, so the fallback
+  never fires: the Plotter has nothing to outline from, no blueprint gets proposed, and
+  the Author stays at readiness `0.0` indefinitely. This is a deliberate behavior change
+  from the outline-optional baseline (which would have auto-drafted from nothing): a
+  premise-less story now **waits** for a director `:seed` rather than drafting on its
+  own. Not a regression — a room with no story idea at all had nothing worth drafting
+  anyway.
 - **Blueprint proposed but never approved** (attended run, human walks away): the
-  fallback fires after N Plotter passes; prose proceeds provisionally. If the human
-  later approves, the gate closes back to the normal path and subsequent chapters draft
-  against the active blueprint.
+  fallback opens once the blueprint proposal exists and world has been built (not a
+  wall-clock or pass-count timer — progress-based, matching the scheduler's
+  event-driven design); prose proceeds provisionally. If the human later approves, the
+  gate closes back to the normal path and subsequent chapters draft against the active
+  blueprint.
 - **Blueprint retargeted/superseded mid-book:** the gate checks *active* blueprint;
   supersession is audit-preserving and always leaves an active row, so the gate does
   not spuriously reopen mid-book.
