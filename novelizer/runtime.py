@@ -66,6 +66,22 @@ def _make_override_provider(read_store):
     return provider
 
 
+def _make_gate_provider(indexer, kg_projector):
+    """agent_kit.Scheduler's strict background-first gate seam, carrying
+    novelizer's policy: agents dispatch only when BOTH the embedding indexer and
+    the KG projector are fully caught up. The two lags count different event sets
+    and are not interchangeable, so both must reach zero before agents may act.
+
+    A None indexer means the runtime is running without it -- index_catch_up /
+    kg_catch_up are themselves no-op-guarded on None -- so there is nothing to
+    wait on: treat that side's lag as 0 (open)."""
+    async def provider() -> bool:
+        index_lag = 0 if indexer is None else await indexer.lag()
+        kg_lag = 0 if kg_projector is None else await kg_projector.lag()
+        return index_lag == 0 and kg_lag == 0
+    return provider
+
+
 # Canon events that do not count as an agent having made progress. A remark is
 # an agent talking about its work, not doing it -- and BaseAgent._remark()
 # commits one as a real canon event (novelizer/agents/base.py), so without this
@@ -321,6 +337,7 @@ class Runtime:
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
             override_provider=_make_override_provider(self.read),
+            gate_provider=_make_gate_provider(self.indexer, self.kg_projector),
             pool=self.pool,
         )
         self.chat = ChatService(

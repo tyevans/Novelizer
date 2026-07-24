@@ -645,3 +645,275 @@ async def test_pool_permit_is_released_when_a_run_crashes():
     await sched2.tick()
     await sched2.drain_in_flight()
     assert b.ran == 1
+
+
+# --- Phase 4: the strict background catch-up gate ---------------------------
+#
+# Background work -- embedding indexing and KG extraction -- outranks agent runs
+# (settled with the user: "background-first", "strict"). While either indexer
+# lags, NO agent is dispatched at all; agents resume only when both are fully
+# caught up. The Scheduler grows a `gate_provider` seam mirroring
+# `override_provider` EXACTLY: an optional async predicate consulted ONCE per
+# tick, BEFORE scoring/dispatch.
+#
+# Pinned polarity: gate_provider() -> True means OPEN (dispatch allowed), False
+# means CLOSED (hold everything). This mirrors override_provider's truthy=act
+# convention and makes novelizer's factory read as plain boolean truth --
+# `indexer.lag() == 0 and kg_projector.lag() == 0` is True exactly when caught
+# up. Default None => gate always OPEN, i.e. today's behavior; kit consumers
+# that wire no gate are unaffected (regression-pinned below).
+#
+# agent_kit stays generic: the seam knows nothing about lag or canon. Only
+# novelizer's _make_gate_provider (tested in tests/test_runtime.py) does.
+#
+# These start RED at construction: Scheduler does not accept `gate_provider=`
+# yet -> TypeError: __init__() got an unexpected keyword argument
+# 'gate_provider' (and the None-default test reds on a missing `_gate_provider`
+# attribute).
+
+
+class BlockingAgent(StubAgent):
+    """run_once parks on an externally-controlled event, so a test can hold a
+    run in flight across a later tick and prove the gate does not claw it back."""
+
+    def __init__(self, name, score, release: asyncio.Event):
+        super().__init__(name, score)
+        self._release = release
+
+    async def run_once(self):
+        self.ran += 1
+        await self._release.wait()
+
+
+class RaisingGate:
+    """A gate_provider that always raises -- models the real observed
+    `sqlite3.OperationalError: database is locked` from an indexer's lag() on
+    the scheduler's hot path (see test_kg_catch_up_never_raises_even_if_event
+    _store_fails). lag() has no never-raise wrapper, so the scheduler itself
+    must absorb this."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def __call__(self) -> bool:
+        self.calls += 1
+        raise RuntimeError("database is locked")
+
+
+async def test_gate_provider_none_means_the_gate_is_always_open():
+    """Regression: the default seam is exactly today's behavior. With no gate
+    wired, a ready agent dispatches, unchanged."""
+    a = StubAgent("a", 0.9)
+    sched = Scheduler([a], clock=lambda: 1000.0)
+    assert sched._gate_provider is None
+    assert await sched.tick() == ["a"]
+    await sched.drain_in_flight()
+    assert a.ran == 1
+
+
+async def test_an_open_gate_dispatches_exactly_as_if_no_gate_were_wired():
+    """The positive control for polarity: gate_provider returning True must not
+    change dispatch at all -- both slots fill, same as Phase 3."""
+    a = StubAgent("a", 0.9); b = StubAgent("b", 0.5)
+    async def gate(): return True
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=2, gate_provider=gate)
+    assert set(await sched.tick()) == {"a", "b"}
+    await sched.drain_in_flight()
+    assert a.ran == 1 and b.ran == 1
+
+
+async def test_a_closed_gate_holds_every_ready_agent_out_of_a_free_slot():
+    """The core of strict background-first: with three ready agents scoring
+    above zero, off both ladders, and two free slots, a CLOSED gate dispatches
+    nothing at all. Nothing about the agents excuses them -- only the gate
+    holds them."""
+    agents = [StubAgent(n, 0.9) for n in "abc"]
+    async def gate(): return False
+    sched = Scheduler(agents, clock=lambda: 1000.0, max_concurrent_agents=2, gate_provider=gate)
+    assert await sched.tick() == []
+    assert len(sched._in_flight) == 0
+    assert sum(a.ran for a in agents) == 0
+
+
+async def test_a_closed_gate_suppresses_even_a_director_override():
+    """Precedence, pinned: strict background-first outranks the Director. An
+    override names an agent to force, but a closed background gate is consulted
+    first and holds everything -- the override does NOT punch through. (The
+    plain reading of "background-first beats everything"; the alternative
+    "override wins" would let a Director signal race ahead of an indexer that
+    must catch up first, which the design rejects.)"""
+    a = StubAgent("a", 0.9); b = StubAgent("b", 0.1)
+    async def override(): return "b"
+    async def gate(): return False
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=2,
+                      override_provider=override, gate_provider=gate)
+    assert await sched.tick() == []
+    assert a.ran == 0 and b.ran == 0
+
+
+async def test_closing_the_gate_never_cancels_an_in_flight_run():
+    """THE critical invariant. The gate blocks NEW dispatch only; it never
+    kills work already running. Two agents dispatched while the gate was open
+    must run to completion even though the gate slams shut under them on the
+    next tick -- background catch-up does not claw back in-flight runs
+    (design: "In-flight runs are never killed when the gate closes"). cap=3
+    leaves a free slot on the second tick, so the gate-closed branch is
+    genuinely exercised while both runs stay in flight."""
+    release = asyncio.Event()
+    a = BlockingAgent("a", 0.9, release); b = BlockingAgent("b", 0.8, release)
+    state = {"open": True}
+    async def gate(): return state["open"]
+    sched = Scheduler([a, b], clock=lambda: 1000.0, max_concurrent_agents=3, gate_provider=gate)
+
+    assert set(await sched.tick()) == {"a", "b"}
+    in_flight_before = dict(sched._in_flight)
+    assert len(in_flight_before) == 2
+
+    state["open"] = False
+    assert await sched.tick() == [], "a closed gate must not dispatch anything new"
+    assert dict(sched._in_flight) == in_flight_before, "the gate reached in and touched in-flight runs"
+    assert not any(t.cancelled() for t in in_flight_before.values()), "the gate cancelled an in-flight run"
+    assert not any(t.done() for t in in_flight_before.values())
+
+    release.set()
+    await sched.drain_in_flight()
+    assert a.ran == 1 and b.ran == 1, "in-flight runs did not complete after the gate closed"
+
+
+async def test_a_raising_gate_fails_open_rather_than_freezing_the_room():
+    """Fail-open on the hot path. lag() can raise a transient "database is
+    locked", and it has no never-raise wrapper of its own. A gate_provider that
+    raises must be treated as OPEN (dispatch allowed) and the exception must not
+    escape tick() -- a momentary DB lock cannot be allowed to freeze every agent
+    in the room."""
+    a = StubAgent("a", 0.9)
+    gate = RaisingGate()
+    sched = Scheduler([a], clock=lambda: 1000.0, gate_provider=gate)
+    dispatched = await sched.tick()  # must NOT raise
+    assert dispatched == ["a"], "a raising gate must fail open, not hold the room"
+    await sched.drain_in_flight()
+    assert a.ran == 1
+    assert gate.calls == 1, "the gate is consulted once per tick"
+
+
+async def test_a_held_agent_reports_the_background_catch_up_reason():
+    """Visible progress is part of the design (section 8): a held agent's
+    eligibility reason must say WHY it is held, so the readout does not look
+    like an unexplained hang. A would-be-ready agent under a closed gate reports
+    (eligible=False, reason="background catch-up")."""
+    a = StubAgent("a", 0.9)
+    async def gate(): return False
+    emitter = FakeEmitter()
+    sched = Scheduler([a], clock=lambda: 1000.0, gate_provider=gate, telemetry=emitter)
+    await sched.tick()
+    elig = _eligibility(emitter)
+    assert [(p.agent_name, p.eligible, p.reason) for p in elig] == [("a", False, "background catch-up")]
+
+
+async def test_the_gate_reason_replaces_only_the_ready_reason_not_the_truer_ones():
+    """Pinned interpretation of "background catch-up for agents that would
+    OTHERWISE be ready": the gate relabels only agents whose sole obstacle is
+    the gate. A paused or backing-off agent keeps its own, truer reason -- the
+    gate is not why THOSE are held, and a readout that blamed the gate for a
+    paused agent would mislead."""
+    ready = StubAgent("ready", 0.9)
+    paused = StubAgent("paused", 0.9); paused.pause()
+    backing = StubAgent("backing", 0.9); backing._idle_until = 1050.0
+    async def gate(): return False
+    emitter = FakeEmitter()
+    sched = Scheduler([ready, paused, backing], clock=lambda: 1000.0,
+                      gate_provider=gate, telemetry=emitter)
+    await sched.tick()
+    by_name = {p.agent_name: (p.eligible, p.reason) for p in _eligibility(emitter)}
+    assert by_name["ready"] == (False, "background catch-up")
+    assert by_name["paused"] == (False, "paused")
+    assert by_name["backing"] == (False, "backing off")
+
+
+async def test_the_gate_reopening_lets_a_held_agent_dispatch_again():
+    """Strict blocking is temporary, not terminal: the instant both indexers
+    catch up (gate flips back to open), the held agent takes its slot. A gate
+    that stayed shut would merely relocate the idleness this project exists to
+    remove."""
+    a = StubAgent("a", 0.9)
+    state = {"open": False}
+    async def gate(): return state["open"]
+    sched = Scheduler([a], clock=lambda: 1000.0, gate_provider=gate)
+    assert await sched.tick() == []
+    assert a.ran == 0
+    state["open"] = True
+    assert await sched.tick() == ["a"]
+    await sched.drain_in_flight()
+    assert a.ran == 1
+
+
+# --- properties: closed => zero dispatch; open == Phase 3 -------------------
+
+
+@settings(deadline=None, max_examples=50)
+@given(
+    specs=st.lists(
+        st.tuples(st.floats(min_value=0.0, max_value=1.0), st.booleans(),
+                  st.floats(min_value=0.0, max_value=60.0)),
+        min_size=1, max_size=6),
+    cap=st.integers(min_value=1, max_value=4),
+    gate_open=st.booleans(),
+)
+async def test_closed_gate_dispatches_nothing_open_gate_matches_no_gate(specs, cap, gate_open):
+    """For ANY gate state and ANY roster: a closed gate dispatches nothing at
+    all, and an open gate dispatches EXACTLY what an unwired (default-open)
+    scheduler would. Two parallel rosters with identical specs make "open ==
+    Phase 3" an equality, not an approximation."""
+    now = 1000.0
+
+    def build():
+        agents = []
+        for i, (score, paused, backoff) in enumerate(specs):
+            a = StubAgent(f"a{i}", score)
+            if paused:
+                a.pause()
+            a._idle_until = now + backoff
+            agents.append(a)
+        return agents
+
+    async def gate(): return gate_open
+    gated = Scheduler(build(), clock=lambda: now, max_concurrent_agents=cap, gate_provider=gate)
+    reference = Scheduler(build(), clock=lambda: now, max_concurrent_agents=cap)  # None => always open
+
+    try:
+        gated_dispatched = set(await gated.tick())
+        reference_dispatched = set(await reference.tick())
+        if gate_open:
+            assert gated_dispatched == reference_dispatched, "an open gate must behave exactly as no gate"
+        else:
+            assert gated_dispatched == set(), "a closed gate must dispatch nothing, ever"
+            assert len(gated._in_flight) == 0
+    finally:
+        await gated.drain_in_flight()
+        await reference.drain_in_flight()
+
+
+@settings(deadline=None, max_examples=25)
+@given(n_in_flight=st.integers(min_value=1, max_value=4))
+async def test_in_flight_count_is_invariant_across_the_gate_closing(n_in_flight):
+    """The other half of "the gate blocks dispatch, never execution": however
+    many runs are in flight when the gate closes, that same set is still in
+    flight after the closing tick -- none cancelled, none added."""
+    now = 1000.0
+    release = asyncio.Event()
+    agents = [BlockingAgent(f"a{i}", 0.9, release) for i in range(n_in_flight)]
+    state = {"open": True}
+    async def gate(): return state["open"]
+    # cap above the roster so a free slot always remains -> the gate-closed
+    # branch runs rather than an early free_slots<=0 return.
+    sched = Scheduler(agents, clock=lambda: now, max_concurrent_agents=n_in_flight + 2, gate_provider=gate)
+    try:
+        assert len(await sched.tick()) == n_in_flight
+        in_flight_before = dict(sched._in_flight)
+        state["open"] = False
+        assert await sched.tick() == []
+        assert dict(sched._in_flight) == in_flight_before
+        assert not any(t.cancelled() for t in in_flight_before.values())
+    finally:
+        release.set()
+        await sched.drain_in_flight()

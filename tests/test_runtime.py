@@ -25,10 +25,16 @@ class FakeRunner:
 
 
 @pytest.fixture
-def settings():
-    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
-    yield Settings(db_path=path)
-    os.unlink(path)
+def settings(tmp_path):
+    # Per-test temp DIRECTORY, not a bare mkstemp file in shared /tmp. The
+    # runtime derives sibling paths from db_path -- embed_cursor.json,
+    # kg_cursor.json, the embeddings store -- via Path.with_name(), so a db at
+    # /tmp/tmpXXXX.db puts every cursor at the FIXED /tmp/embed_cursor.json,
+    # shared across every test and every parallel run. A stale cursor left at
+    # seq N then makes a fresh room's lag() read 0, which the background-gate
+    # tests assert against directly. An isolated dir gives each test its own
+    # cursor namespace. (Production is unaffected: each story owns its dir.)
+    return Settings(db_path=str(tmp_path / "world.db"))
 
 
 @pytest.fixture
@@ -249,9 +255,18 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
         await rt.projector.catch_up()
         assert known_world_entry_id in {e.id for e in await rt.read.list_world_entries()}
 
-        # Give the scheduler an advancing clock so interval-gating never blocks
+        # Give the scheduler an advancing clock so backoff deadlines never block
         # agent eligibility across many ticks.
         rt.scheduler._clock = AdvancingClock()
+
+        # Neutralize the strict background gate: this test's subject is the
+        # Scheduler driving the retcon loop, not background catch-up (which has
+        # its own dedicated tests). The gate closes on any index/KG lag, and the
+        # pre-seeded WORLD_ENTRY_CREATED raises it -- but there is no embed
+        # endpoint here to drain it back to zero, so an active gate would freeze
+        # the room forever. Disabling it isolates the behavior under test, the
+        # same way the AdvancingClock above neutralizes backoff.
+        rt.scheduler._gate_provider = None
 
         # Phase 1: only ContinuityChecker is eligible -- this forces the scheduler
         # to select it (deterministically) to file the retcon.
@@ -835,3 +850,91 @@ async def test_progress_probe_reports_a_silent_run_as_no_progress():
     from novelizer.runtime import _make_progress_probe
     probe = _make_progress_probe(_FakeEventsForRun({}))
     assert await probe("nothing-committed") is False
+
+
+# --- Phase 4: the strict background catch-up gate ---------------------------
+#
+# Background work (embedding indexing + KG extraction) is HIGHER priority than
+# agent runs, and blocking is STRICT: while EITHER indexer lags, no agent is
+# dispatched at all. Novelizer wires this into agent_kit.Scheduler's generic
+# gate_provider seam via a _make_gate_provider(indexer, kg_projector) factory
+# that mirrors _make_override_provider: an async predicate, OPEN (True) iff both
+# lags are zero.
+#
+# These start RED: _make_gate_provider does not exist (ImportError), and start()
+# does not pass gate_provider= to the Scheduler yet, so rt.scheduler has no
+# _gate_provider wired.
+
+
+class _FakeLagger:
+    """The only surface _make_gate_provider touches on either indexer: an async
+    lag() returning an int. Real CanonIndexer/KGProjector both expose exactly
+    this."""
+
+    def __init__(self, lag: int) -> None:
+        self._lag = lag
+
+    async def lag(self) -> int:
+        return self._lag
+
+
+async def test_gate_provider_is_open_only_when_both_indexers_are_caught_up():
+    """The pinned predicate: OPEN iff indexer.lag() == 0 AND
+    kg_projector.lag() == 0. Any lag on either side closes the gate -- the two
+    lags count different event sets and are not interchangeable, so both must be
+    drained before agents may act."""
+    from novelizer.runtime import _make_gate_provider
+    assert await _make_gate_provider(_FakeLagger(0), _FakeLagger(0))() is True
+    assert await _make_gate_provider(_FakeLagger(1), _FakeLagger(0))() is False
+    assert await _make_gate_provider(_FakeLagger(0), _FakeLagger(3))() is False
+    assert await _make_gate_provider(_FakeLagger(4), _FakeLagger(2))() is False
+
+
+async def test_start_wires_the_background_gate_into_the_scheduler(settings):
+    """start() must hand the Scheduler a gate_provider built over the runtime's
+    OWN indexer and kg_projector. On a fresh, fully-drained room both lags are
+    zero, so the wired gate reads open."""
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        assert rt.scheduler._gate_provider is not None
+        assert await rt.scheduler._gate_provider() is True
+    finally:
+        await rt.close()
+
+
+async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(settings):
+    """End to end at the runtime level. A THREAD_PLANTED event is indexable by
+    the CanonIndexer but NOT by the KGProjector, so it raises indexer lag alone
+    -- no KG LLM call is ever provoked, keeping the test hermetic. With that lag
+    pending, the real wired gate is closed and the scheduler dispatches NOTHING,
+    even though the Author is ready and scores 1.0. Once index_catch_up drains
+    the cursor (lag -> 0), the gate reopens and agents dispatch again."""
+    from novelizer.canon.events import ThreadPlanted
+
+    rt = Runtime(settings, runners=_all_fake_runners())
+    await rt.start()
+    try:
+        # Sanity: a fresh room is caught up, so the gate starts open.
+        assert await rt.scheduler._gate_provider() is True
+
+        # Create indexer lag without touching the KG projector or its LLM.
+        await rt.events.append(EventType.THREAD_PLANTED, "t1",
+                               ThreadPlanted(id="t1", name="The Ledger"))
+        assert await rt.indexer.lag() > 0
+        assert await rt.kg_projector.lag() == 0
+        assert await rt.scheduler._gate_provider() is False, "pending index lag must close the gate"
+
+        # Strict gate: no agent runs while the backlog is pending.
+        assert await rt.scheduler.tick() == []
+        assert len(rt.scheduler._in_flight) == 0
+
+        # Drain the backlog; the gate reopens and the room dispatches again.
+        await rt.index_catch_up()
+        assert await rt.indexer.lag() == 0
+        assert await rt.scheduler._gate_provider() is True
+        dispatched = await rt.scheduler.tick()
+        assert dispatched, "agents must dispatch again once the indexers have caught up"
+    finally:
+        await rt.scheduler.drain_in_flight()
+        await rt.close()

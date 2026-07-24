@@ -28,6 +28,7 @@ class Scheduler:
         max_concurrent_agents: int = 2,
         telemetry=None,
         override_provider: Callable[[], Awaitable[str | None]] | None = None,
+        gate_provider: Callable[[], Awaitable[bool]] | None = None,
         pool=None,
     ) -> None:
         self._agents = list(agents)
@@ -35,6 +36,12 @@ class Scheduler:
         self._clock = clock
         self._telemetry = telemetry
         self._override_provider = override_provider
+        # Optional strict background-first gate (async () -> True == OPEN). None =>
+        # today's always-open behavior, mirroring the override_provider seam. When
+        # present and CLOSED, tick() dispatches nothing at all -- background
+        # catch-up (embedding/KG) outranks every agent run. The seam stays generic:
+        # it knows nothing about lag or canon; only novelizer's factory does.
+        self._gate_provider = gate_provider
         # Optional shared LLM concurrency ceiling (AdaptivePool). None => today's
         # unlimited behavior, mirroring the override_provider seam. When present,
         # a permit gates each whole run inside _run, and the same pool object is
@@ -102,6 +109,30 @@ class Scheduler:
         if free_slots <= 0:
             await self._emit_eligibility(now, scores={})
             return []
+        # Strict background-first gate, consulted ONCE per tick (lag() hits the DB)
+        # and BEFORE the override lookup and scoring: while embedding/KG catch-up
+        # lags, hold every agent. Background work outranks even a Director
+        # override, so a closed gate must suppress the override too -- hence this
+        # precedes the override lookup rather than following it.
+        #
+        # Fail OPEN on a raise: novelizer's gate calls indexer.lag(), which can
+        # surface a transient "database is locked" and has no never-raise wrapper
+        # of its own (see kg_catch_up's failure-tolerance). A momentary DB lock
+        # must not freeze the whole room, so a raising probe is treated as OPEN and
+        # the exception is swallowed here rather than escaping tick().
+        gate_open = True
+        if self._gate_provider is not None:
+            try:
+                gate_open = await self._gate_provider()
+            except Exception:
+                logger.warning("scheduler: gate probe raised; failing open", exc_info=True)
+                gate_open = True
+        if not gate_open:
+            # Emit eligibility so held agents show WHY ("background catch-up"),
+            # then dispatch nothing. _in_flight is deliberately untouched: the gate
+            # blocks NEW dispatch only and never cancels a run already in flight.
+            await self._emit_eligibility(now, scores={}, gate_open=False)
+            return []
         override = await self._override_provider() if self._override_provider else None
         eligible = [
             a for a in self._agents
@@ -148,9 +179,17 @@ class Scheduler:
             dispatched.append(a.name)
         return dispatched
 
-    async def _emit_eligibility(self, now: float, scores: dict[str, float]) -> None:
+    async def _emit_eligibility(self, now: float, scores: dict[str, float],
+                                gate_open: bool = True) -> None:
         """One eligibility_changed per agent per state *change* — quiet log,
-        not a per-tick heartbeat."""
+        not a per-tick heartbeat.
+
+        gate_open threads the strict background-first gate through: when it is
+        closed, an agent whose ONLY obstacle is the gate -- would-be-ready, not
+        paused, not in-flight, not backing off, not scored-zero -- reports
+        "background catch-up" instead of "ready". The gate reason replaces the
+        "ready" reason only; paused / running / backing off / readiness 0 keep
+        their own, truer reasons (the gate is not why THOSE are held)."""
         if self._telemetry is None:
             return
         for a in self._agents:
@@ -162,6 +201,8 @@ class Scheduler:
                 state = (False, "backing off")
             elif a.name in scores and scores[a.name] <= 0.0:
                 state = (False, "readiness 0")
+            elif not gate_open:
+                state = (False, "background catch-up")
             else:
                 state = (True, "ready")
             if self._eligibility.get(a.name) != state:
