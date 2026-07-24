@@ -141,3 +141,18 @@ def test_secret_reference_record_defaults_and_roundtrips():
     assert r.note == ""
     again = SecretReferenceRecord.model_validate_json(r.model_dump_json())
     assert again == r
+
+
+def test_world_entry_retired_payload_and_status():
+    from novelizer.canon.events import EventType, WorldEntryRetired
+    from novelizer.store.models import CanonStatus
+
+    assert EventType.WORLD_ENTRY_RETIRED == "world_entry.retired"
+    assert CanonStatus.retired == "retired"
+    p = WorldEntryRetired(entry_id="w1", reason="no longer serves the story", flag_id="f1")
+    assert p.entry_id == "w1"
+    assert p.reason == "no longer serves the story"
+    assert p.flag_id == "f1"
+    # defaults
+    assert WorldEntryRetired(entry_id="w2").reason == ""
+    assert WorldEntryRetired(entry_id="w2").flag_id == ""

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from novelizer.agents import (
     author, world_architect, character_keeper, editor,
-    continuity_checker, retconner, structure_analyst, summarizer, plotter, muse, triage,
+    continuity_checker, retconner, curator, structure_analyst, summarizer, plotter, muse, triage,
     flaglabeler,
 )
 from novelizer.agents.registry_types import AgentSpec
@@ -12,7 +12,7 @@ from novelizer.agents.registry_types import AgentSpec
 AGENT_REGISTRY: list[AgentSpec] = [
     world_architect.SPEC, character_keeper.SPEC, muse.SPEC,
     plotter.SPEC, author.SPEC,
-    editor.SPEC, continuity_checker.SPEC, retconner.SPEC, structure_analyst.SPEC,
+    editor.SPEC, continuity_checker.SPEC, retconner.SPEC, curator.SPEC, structure_analyst.SPEC,
     summarizer.SPEC,
     triage.SPEC,
     flaglabeler.SPEC,

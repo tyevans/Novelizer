@@ -172,3 +172,9 @@ async def test_noop_when_no_open_flags(stack):
 def test_spec_carries_subagent_grant():
     from novelizer.agents.triage import SPEC
     assert SPEC.subagent_grant.enabled_setting == "triage_subagent_enabled"
+
+
+def test_curation_categories_route_to_curator():
+    from novelizer.agents.triage import _CATEGORY_OWNERS
+    for cat in ("world_craft", "world_relevance", "world_redundancy", "worldbuilding"):
+        assert _CATEGORY_OWNERS[cat] == "curator"

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class EventType:
     WORLD_ENTRY_CREATED = "world_entry.created"
     WORLD_ENTRY_SUPERSEDED = "world_entry.superseded"
+    WORLD_ENTRY_RETIRED = "world_entry.retired"
     CHARACTER_CREATED = "character.created"
     CHARACTER_UPDATED = "character.updated"
     CHAPTER_CREATED = "chapter.created"
@@ -296,6 +297,20 @@ class AnnotationStructureScored(BaseModel):
     chapter_id: str
     tension: float = Field(ge=0.0, le=1.0)
     pacing_label: str = ""
+
+
+class WorldEntryRetired(BaseModel):
+    """Payload for world_entry.retired — a tombstone. The entry named by
+    entry_id leaves active canon with no successor (distinct from
+    world_entry.superseded, which always names a replacement). The full body
+    stays in the event log for provenance; the read model flips the row to
+    canon_status='retired' and the indexer drops it from search. `flag_id`
+    cites the curation flag that authorized the retirement.
+    """
+
+    entry_id: str
+    reason: str = ""
+    flag_id: str = ""
 
 
 class ChapterRevised(BaseModel):

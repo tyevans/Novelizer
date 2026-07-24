@@ -358,6 +358,27 @@ class RetconAmendments(BaseModel):
     feed_note: str = ""
 
 
+class CurationDecision(BaseModel):
+    """The Curator's verdict on one curation flag against world entries.
+
+    One action per resolve. `revise`/`reclassify`/`merge` carry the resulting
+    entry in `entry` with `supersedes_id` set to the entry it replaces (the
+    primary, for a merge); the Curator commits it as WORLD_ENTRY_SUPERSEDED.
+    `merge` additionally lists the absorbed sources in `retire_ids` (committed
+    as WORLD_ENTRY_RETIRED). `retire` lists the target(s) in `retire_ids` with
+    no `entry`. `reject` carries only a `reason` and routes to the decline
+    path. Defaults to `reject` so a malformed/empty response is a safe no-op,
+    never an accidental mutation.
+    """
+
+    action: Literal["revise", "reclassify", "merge", "retire", "reject"] = "reject"
+    reason: str = ""
+    entry: Optional[WorldEntryDraft] = None
+    retire_ids: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    feed_note: str = ""
+
+
 class ChapterScore(BaseModel):
     chapter_id: str
     tension: float = Field(ge=0.0, le=1.0)

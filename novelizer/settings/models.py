@@ -17,10 +17,10 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "muse_era", "muse_exclusion_hands",
     "author_tools_enabled", "checker_tools_enabled", "chat_tools_enabled",
     "world_architect_tools_enabled", "character_keeper_tools_enabled", "editor_tools_enabled",
-    "retconner_tools_enabled", "structure_analyst_tools_enabled",
+    "retconner_tools_enabled", "curator_tools_enabled", "structure_analyst_tools_enabled",
     "plotter_interval", "plotter_tools_enabled",
     "world_architect_subagent_enabled", "character_keeper_subagent_enabled",
-    "editor_subagent_enabled", "retconner_subagent_enabled", "structure_analyst_subagent_enabled",
+    "editor_subagent_enabled", "retconner_subagent_enabled", "curator_subagent_enabled", "structure_analyst_subagent_enabled",
     "plotter_subagent_enabled", "author_subagent_enabled", "checker_subagent_enabled",
     "extractor_token_budget", "advisory_token_budget", "summarizer_interval",
 })
@@ -130,6 +130,7 @@ class EffectiveSettings(BaseModel):
     character_keeper_tools_enabled: bool = True
     editor_tools_enabled: bool = True
     retconner_tools_enabled: bool = True
+    curator_tools_enabled: bool = True
     structure_analyst_tools_enabled: bool = True
     plotter_tools_enabled: bool = True
     triage_tools_enabled: bool = True
@@ -140,6 +141,7 @@ class EffectiveSettings(BaseModel):
     character_keeper_subagent_enabled: bool = False
     editor_subagent_enabled: bool = False
     retconner_subagent_enabled: bool = False
+    curator_subagent_enabled: bool = False
     structure_analyst_subagent_enabled: bool = False
     plotter_subagent_enabled: bool = False
     author_subagent_enabled: bool = False
