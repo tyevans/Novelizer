@@ -244,6 +244,13 @@ class Projector:
                 "INSERT OR REPLACE INTO world_entries (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",
                 (p["id"], data, p.get("canon_status", "active"), p.get("supersedes_id")),
             )
+        elif t == EventType.WORLD_ENTRY_RETIRED:
+            # Tombstone: the entry leaves active canon with no successor. The
+            # UPDATE is a no-op on an unknown/already-gone id (0 rows), which
+            # is exactly the resilience the Curator's stale-target case wants.
+            await self._conn.execute(
+                "UPDATE world_entries SET canon_status='retired' WHERE id=?", (p["entry_id"],)
+            )
         elif t == EventType.CHARACTER_CREATED or t == EventType.CHARACTER_UPDATED:
             await self._conn.execute(
                 "INSERT OR REPLACE INTO characters (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",

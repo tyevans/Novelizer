@@ -1064,3 +1064,46 @@ async def test_book_completed_adopting_new_blueprint_resets_completed(wired):
     assert active.completed_chapter_id == ""
     assert active.completed_note == ""
     await read.close()
+
+
+async def test_world_entry_retired_drops_from_active(wired):
+    events, proj, path = wired
+    from novelizer.canon.events import WorldEntryRetired
+    from novelizer.canon.read_store import ReadStore
+
+    await events.append(EventType.WORLD_ENTRY_CREATED, "w1",
+                        WorldEntry(id="w1", title="Old Tavern", body="A tavern."))
+    await events.append(EventType.WORLD_ENTRY_RETIRED, "w1",
+                        WorldEntryRetired(entry_id="w1", reason="redundant", flag_id="f1"))
+    await proj.catch_up()
+
+    read = ReadStore(path); await read.init()
+    try:
+        active = await read.list_world_entries()
+        assert "w1" not in {e.id for e in active}
+        cur = await proj._conn.execute("SELECT canon_status FROM world_entries WHERE id='w1'")
+        assert (await cur.fetchone())[0] == "retired"
+    finally:
+        await read.close()
+
+
+@hyp_settings(max_examples=25, deadline=None)
+@given(retired=st.booleans())
+async def test_retired_entry_never_active_regardless_of_history(retired):
+    import os, tempfile
+    from novelizer.canon.events import WorldEntryRetired
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    try:
+        await events.append(EventType.WORLD_ENTRY_CREATED, "w1",
+                            WorldEntry(id="w1", title="T", body="b"))
+        if retired:
+            await events.append(EventType.WORLD_ENTRY_RETIRED, "w1",
+                                WorldEntryRetired(entry_id="w1"))
+        await proj.catch_up()
+        active_ids = {e.id for e in await read.list_world_entries()}
+        assert ("w1" in active_ids) == (not retired)
+    finally:
+        await read.close(); await proj.close(); await events.close(); os.unlink(path)
