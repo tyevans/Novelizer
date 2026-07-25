@@ -3,6 +3,7 @@ from textual.app import App, ComposeResult
 from tui_kit.run_model import ProseBlock, ThinkingBlock, CallBlock, ToolBlock
 from tui_kit.stream_source import InMemoryStreamSource
 from tui_kit.widgets.stream_view import StreamView
+from textual.widgets import Collapsible, Markdown
 
 
 class _Theme:
@@ -63,3 +64,68 @@ async def test_blocks_from_different_agents_interleave_in_arrival_order():
                             ProseBlock(text="c", agent_name="author")))
         await pilot.pause()
         assert len(view.mounted_keys()) == 3
+
+
+class _MDApp(App):
+    def compose(self) -> ComposeResult:
+        source = InMemoryStreamSource([], {42: "# Chapter One\n\n- a\n- b"})
+        yield StreamView(theme=_Theme(), source=source, id="stream")
+
+
+@pytest.mark.asyncio
+async def test_tool_blocks_mount_collapsed_by_default():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                                      status="done", agent_name="author", sequence=42),))
+        await pilot.pause()
+        assert pilot.app.query_one(Collapsible).collapsed is True
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_calls_auto_expand():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((ToolBlock(tool_name="write_scene", input_summary="ch4",
+                                      status="failed", error="ValidationError",
+                                      agent_name="author", sequence=7),))
+        await pilot.pause()
+        assert pilot.app.query_one(Collapsible).collapsed is False
+
+
+@pytest.mark.asyncio
+async def test_expanding_fetches_the_full_output_and_renders_markdown():
+    async with _MDApp().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                                      status="done", agent_name="author", sequence=42),))
+        await pilot.pause()
+        pilot.app.query_one(Collapsible).collapsed = False
+        await pilot.pause()
+        assert pilot.app.query(Markdown)
+
+
+@pytest.mark.asyncio
+async def test_output_is_fetched_once_not_on_every_toggle():
+    class _CountingSource(InMemoryStreamSource):
+        calls = 0
+
+        async def fetch_output(self, sequence):
+            _CountingSource.calls += 1
+            return await super().fetch_output(sequence)
+
+    class _CountApp(App):
+        def compose(self):
+            yield StreamView(theme=_Theme(),
+                             source=_CountingSource([], {42: "plain output"}), id="stream")
+
+    async with _CountApp().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((ToolBlock(tool_name="t", input_summary="i", status="done",
+                                      agent_name="author", sequence=42),))
+        await pilot.pause()
+        c = pilot.app.query_one(Collapsible)
+        for collapsed in (False, True, False):
+            c.collapsed = collapsed
+            await pilot.pause()
+        assert _CountingSource.calls == 1
