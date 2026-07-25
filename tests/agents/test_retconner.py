@@ -263,7 +263,7 @@ def test_build_retconner_runner_with_backend_bounds_recursion():
 
     backend = CanonBackend(read_store=None)
     runner = build_retconner_runner(_FakeSettings(), backend=backend, tools=[])
-    assert runner.config.get("recursion_limit") == 100
+    assert runner.config.get("recursion_limit") == 200
 
 
 def test_spec_carries_subagent_grant():

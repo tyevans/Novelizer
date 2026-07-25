@@ -306,7 +306,7 @@ read-only canon filesystem (canon entries, `/outline/`, `/skills/`, a scratch
 agents run in **pull mode** — the prompt hands them a compact chapter index and
 trusts them to go read what they need. That division of labor assumes the model can
 actually drive tools. Many local models can't, or can't reliably. The telltale
-symptoms: an agent alarms with `GraphRecursionError: Recursion limit of 100
+symptoms: an agent alarms with `GraphRecursionError: Recursion limit of 200
 reached`, its Engine Room pane shows canon reads looping without ever producing an
 answer, or runs die on malformed-output errors because the model mangled the
 tool-call JSON.
@@ -590,10 +590,10 @@ on the server side: use a server or proxy that tolerates tool definitions in the
 request. It doesn't have to *call* them well — that's what the Step 5 flags are
 for — it just has to accept them.
 
-**An agent alarms with `GraphRecursionError: Recursion limit of 100 reached`, or
+**An agent alarms with `GraphRecursionError: Recursion limit of 200 reached`, or
 keeps making tool calls without ever finishing.** The model is a weak tool-caller:
 it loops on canon reads instead of producing its answer, until the graph's
-100-step recursion limit cuts the run. Disable that agent's `*_tools_enabled` flag
+200-step recursion limit cuts the run. Disable that agent's `*_tools_enabled` flag
 (Step 5) and restart. Since the analytical fleet shares `agent_model`, expect to
 disable the whole group if one of them loops.
 
