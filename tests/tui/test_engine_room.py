@@ -214,83 +214,24 @@ async def test_trace_rows_unique_when_store_fails_and_events_fall_back_to_sequen
         assert not any("telemetry error" in m for m in app.messages)
 
 
-async def test_agent_tabs_carry_glyph_and_color_from_the_identity_registry(rt):
-    from textual.widgets import Static
-    from novelizer.tui.identity import identity_for
+async def test_filter_chips_carry_glyph_and_label_from_the_identity_registry(rt):
+    """The per-agent tabs are gone; the filter chips are what now has to
+    carry each agent's identity."""
+    from textual.widgets import Button
+    from novelizer.tui.identity import AGENT_NAMES, identity_for
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
         await pilot.press("e")
-        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
-                                AgentRunStarted(run_id="r1", agent_name="author"))
-        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author", text="hi"))
-        await pilot.pause(0.8)
-
-        ident = identity_for("author")
-        vitals = app.query_one("#er_vitals_author", Static).renderable
-        assert ident.glyph in str(vitals)
-        assert vitals.style == ident.style
-
-
-async def test_agent_tab_titles_carry_glyph_and_color():
-    """A plain str TabPane title gets markup-parsed (Widget.render_str ->
-    Content.from_markup) and silently loses any style not spelled as markup
-    -- titles must be pre-styled Content, not str, or they render colorless."""
-    from tui_kit.widgets.engine_room import EngineRoom
-    from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME, identity_for
-    from textual.content import Content
-    from textual.widgets import TabbedContent
-    from textual.app import App
-
-    class _Harness(App):
-        def compose(self):
-            yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
-                              id="engine_room")
-
-    app = _Harness()
-    async with app.run_test() as pilot:
-        tabs = app.query_one("#er_tabs", TabbedContent)
-        author_tab = tabs.query_one("#er_tab_author")._title
-        ident = identity_for("author")
-        assert isinstance(author_tab, Content)
-        assert author_tab.plain == f"{ident.glyph} {ident.label}"
-        assert any(span.style == ident.style for span in author_tab.spans)
-
-
-async def test_every_agent_tab_title_resolves_to_a_distinct_color():
-    """Carrying the style *string* is not enough -- Textual parses it lazily at
-    render time and drops it silently if it fails, so a Rich-only color name
-    like "gold3" leaves the tab colorless while the test above still passes.
-    Resolve every title through Textual's parser and require a real, distinct
-    foreground per agent."""
-    from tui_kit.widgets.engine_room import EngineRoom
-    from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
-    from textual.style import Style
-    from textual.widgets import TabbedContent
-    from textual.app import App
-
-    class _Harness(App):
-        def compose(self):
-            yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
-                              id="engine_room")
-
-    app = _Harness()
-    async with app.run_test() as pilot:
-        tabs = app.query_one("#er_tabs", TabbedContent)
-        colors = {}
+        await pilot.pause(0.3)
         for name in AGENT_NAMES:
-            title = tabs.query_one(f"#er_tab_{name}")._title
-            styles = [Style.parse(span.style) if isinstance(span.style, str) else span.style
-                      for span in title.spans]
-            foregrounds = [s.foreground for s in styles if s.foreground is not None]
-            assert foregrounds, f"{name} tab title carries no resolvable color"
-            colors[name] = foregrounds[0]
-        assert len(set(colors.values())) == len(AGENT_NAMES), (
-            f"agent tab colors are not distinct: {colors}")
+            ident = identity_for(name)
+            chip = app.query_one(f"#sv_chip_{name}", Button)
+            assert str(chip.label) == f"{ident.glyph} {ident.label}"
 
 
-async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt):
-    from textual.widgets import Static
+async def test_thinking_and_prose_tokens_both_reach_the_unified_stream(rt):
+    from tui_kit.widgets.engine_room import EngineRoom
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
@@ -302,17 +243,17 @@ async def test_thinking_tokens_render_with_a_visible_marker_in_the_agent_tab(rt)
         rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
                                               text="The lighthouse", kind="text"))
         await pilot.pause(0.8)
-        body = app.query_one("#er_stream_author", Static).renderable
-        assert "💭 pondering the tide" in str(body)
-        assert "The lighthouse" in str(body)
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "pondering the tide" in body
+        assert "The lighthouse" in body
 
 
-async def test_agent_tabs_show_only_their_own_agents_activity(rt):
+async def test_concurrent_agents_interleave_in_one_stream(rt):
     """Two agents running concurrently (scheduler allows max_concurrent_agents
-    > 1) must not clobber each other's tab -- each keeps its own live feed,
-    and the "All" tab still tracks whichever run is most recent (today's
-    single-global-state behavior, unchanged)."""
-    from textual.widgets import Static
+    > 1) both appear in the one stream. The tab-per-agent design structurally
+    hid exactly this -- you could not see that two agents were running at
+    once without clicking between panes."""
+    from tui_kit.widgets.engine_room import EngineRoom
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
@@ -325,15 +266,8 @@ async def test_agent_tabs_show_only_their_own_agents_activity(rt):
         rt.telemetry.publish_token(TokenDelta(run_id="r2", agent_name="editor", text="looks good"))
         await pilot.pause(0.8)
 
-        author_body = app.query_one("#er_stream_author", Static).renderable
-        editor_body = app.query_one("#er_stream_editor", Static).renderable
-        assert "the sea" in str(author_body) and "looks good" not in str(author_body)
-        assert "looks good" in str(editor_body) and "the sea" not in str(editor_body)
-
-        # The "All" tab reflects the most-recently-started run (today's
-        # single-global-state behavior) -- editor started last.
-        all_body = app.query_one("#er_stream", Static).renderable
-        assert "looks good" in str(all_body)
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "the sea" in body and "looks good" in body
         assert not any("telemetry error" in m for m in app.messages)
 
 
@@ -388,10 +322,10 @@ async def test_trace_rows_tolerate_markup_hostile_tool_summaries(rt):
 
 
 async def test_non_autonomous_identities_dont_crash_the_telemetry_loop(rt):
-    """chat:<agent> and research telemetry identities have no Engine Room
-    tab (only the fixed AGENT_NAMES seven do) — the app's global telemetry
-    loop must skip rendering them into Engine Room instead of crashing on
-    a missing #er_vitals_<agent> widget."""
+    """chat:<agent> and research telemetry identities are not in AGENT_NAMES
+    and so have no filter chip. They still stream into the unified view —
+    an unknown agent must render with the fallback identity, not crash the
+    telemetry loop."""
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
@@ -438,12 +372,10 @@ async def test_seeded_live_pane_survives_restart(rt):
         assert "author" in vitals
 
 
-async def test_seeded_per_agent_live_pane_survives_restart(rt):
-    """seed_states() (the per-agent branch) must also be fed adapted
-    contract events on restart, not just seed_state()'s All-pane branch --
-    and a raw StoredEvent type with no to_contract_event mapping mixed into
-    the replay (a scheduler event) must be filtered out rather than
-    breaking the per-agent seeding."""
+async def test_seeding_tolerates_events_with_no_contract_mapping(rt):
+    """Replay is fed through to_contract_event; a raw StoredEvent type with
+    no mapping (a scheduler event) must be filtered out rather than break
+    the seed."""
     from novelizer.telemetry.events import LlmCallStarted, SchedulerPicked
     await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
                             AgentRunStarted(run_id="r1", agent_name="author"))
@@ -456,32 +388,154 @@ async def test_seeded_per_agent_live_pane_survives_restart(rt):
                             SchedulerPicked(agent_name="editor"))
     await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
                             AgentRunStarted(run_id="r2", agent_name="editor"))
-    # A fresh app instance (a "restart") must show each agent's own seeded
-    # live state in its own per-agent vitals pane.
+    # A fresh app instance (a "restart") seeds from the durable log without
+    # choking on the unmapped event, and shows the most recent run's vitals.
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
         await pilot.press("e")
         await pilot.pause(0.8)
-        author_vitals = str(app.query_one("#er_vitals_author").renderable)
-        editor_vitals = str(app.query_one("#er_vitals_editor").renderable)
-        assert "author" in author_vitals
-        assert "editor" in editor_vitals
+        assert not any("telemetry" in m and "error" in m for m in app.messages)
+        assert "editor" in str(app.query_one("#er_vitals").renderable)
 
 
-async def test_agent_panes_say_why_each_agent_is_not_producing(rt):
-    """A spinner-or-"idle" pane made three very different silences look the
-    same. Every agent's pane now carries the scheduler's reason -- including
-    agents that have never run, which are exactly the ones needing explaining."""
-    import time as _time
-    editor = next(a for a in rt.agents if a.name == "editor")
-    editor.resume()
-    editor._fail_until = _time.monotonic() + 300.0
+# -- end to end: real StoredEvents -> adapter -> fold -> widgets ---------------
+#
+# Every widget-level test hand-constructs blocks (ToolBlock(sequence=42) and
+# friends), so the seam between the telemetry adapter and the fold was
+# untested in both directions. These drive the whole path from the bus.
+
+
+async def test_two_agents_streaming_concurrently_both_keep_advancing(rt):
+    """The redesign exists to show that two agents run at once. Folding every
+    agent into ONE LiveRunState discards each event whose run_id is not the
+    most recently started run's -- so the moment the editor starts, the
+    author's prose freezes mid-sentence."""
+    from tui_kit.widgets.engine_room import EngineRoom
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="the sea "))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="editor"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r2", agent_name="editor",
+                                              text="looks good"))
+        # The author is still running: its next token must still land.
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="rose over the wall"))
+        await pilot.pause(0.8)
+
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "the sea rose over the wall" in body
+        assert "looks good" in body
+        assert not any("telemetry error" in m for m in app.messages)
+
+
+async def test_both_concurrent_agents_appear_in_the_vitals_line(rt):
+    from novelizer.telemetry.events import LlmCallStarted
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        for run, agent in (("r1", "author"), ("r2", "editor")):
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, run,
+                                    AgentRunStarted(run_id=run, agent_name=agent))
+            await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, run,
+                                    LlmCallStarted(run_id=run, agent_name=agent,
+                                                   call_index=1, model="qwen", prompt="go"))
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "author" in vitals and "editor" in vitals
+
+
+async def test_a_finished_tool_call_carries_its_store_sequence_to_the_widget(rt):
+    """The lazy full-output fetch keys off the store sequence. It is not in
+    the payload, so it can only reach the widget if the adapter reads it off
+    the StoredEvent."""
+    from textual.widgets import Collapsible
+    from novelizer.telemetry.events import ToolCallStarted, ToolCallFinished
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_STARTED, "r1",
+                                ToolCallStarted(run_id="r1", agent_name="author",
+                                                tool_name="read_file",
+                                                input_summary="/characters/death.md"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_FINISHED, "r1",
+                                ToolCallFinished(run_id="r1", agent_name="author",
+                                                 tool_name="read_file", duration_s=0.4,
+                                                 output_chars=6, output_summary="# Death",
+                                                 input_summary="/characters/death.md"))
+        await pilot.pause(0.8)
+        collapsible = app.query_one(Collapsible)
+        assert collapsible._sv_sequence > 0
+
+
+async def test_a_failed_tool_call_carries_its_store_sequence_to_the_widget(rt):
+    """Failed blocks open on arrival, so a missing sequence means they open
+    into an empty box."""
+    from textual.widgets import Collapsible
+    from novelizer.telemetry.events import ToolCallStarted, ToolCallFailed
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_STARTED, "r1",
+                                ToolCallStarted(run_id="r1", agent_name="author",
+                                                tool_name="read_file",
+                                                input_summary="/world/nope.md"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_FAILED, "r1",
+                                ToolCallFailed(run_id="r1", agent_name="author",
+                                               tool_name="read_file", duration_s=0.2,
+                                               error_type="FileNotFoundError",
+                                               error_message="nope",
+                                               input_summary="/world/nope.md"))
+        await pilot.pause(0.8)
+        collapsible = app.query_one(Collapsible)
+        assert collapsible._sv_sequence > 0
+        assert collapsible.collapsed is False
+
+
+async def test_restart_seeding_restores_every_agent_not_just_the_latest_run(rt):
+    """Seeding folds the replayed log per agent. One shared fold would keep
+    only the last run started."""
+    from tui_kit.widgets.engine_room import EngineRoom
+    from novelizer.telemetry.events import LlmOutputSegment
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_OUTPUT_SEGMENT, "r1",
+                            LlmOutputSegment(run_id="r1", agent_name="author",
+                                             text="the sea rose", kind="text"))
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                            AgentRunStarted(run_id="r2", agent_name="editor"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_OUTPUT_SEGMENT, "r2",
+                            LlmOutputSegment(run_id="r2", agent_name="editor",
+                                             text="looks good", kind="text"))
     app = NovelizerApp(rt)
     async with app.run_test(size=(120, 40)) as pilot:
         app.set_focus(None)
         await pilot.press("e")
         await pilot.pause(0.8)
-        assert "backing off after error" in str(app.query_one("#er_vitals_editor").renderable)
-        # Everyone else in this fixture is paused, and says so.
-        assert "idle — paused" in str(app.query_one("#er_vitals_author").renderable)
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "the sea rose" in body and "looks good" in body
+
+
+async def test_vitals_captions_why_an_idle_fleet_is_not_producing(rt):
+    """Without a hold caption a rate-limited fleet, a crash loop and a
+    converged agent look identical to someone watching an overnight run."""
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "paused" in vitals  # the fixture pauses every agent

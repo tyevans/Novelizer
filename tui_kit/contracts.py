@@ -76,6 +76,7 @@ class ToolCallFinished:
     input_summary: str = ""  # pairs the result with the exact call when
     # several same-named tool calls run in parallel; "" falls back to
     # last-running-same-tool matching
+    sequence: int = 0  # originating event's store sequence, for on-demand full-output lookup
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,7 @@ class ToolCallFailed:
     duration_s: float
     error_type: str
     input_summary: str = ""  # same pairing contract as ToolCallFinished
+    sequence: int = 0
 
 
 @dataclass(frozen=True)

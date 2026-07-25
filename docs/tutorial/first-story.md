@@ -497,9 +497,12 @@ the moment the `drafted` line appears, and that's all Step 6 needs.
   off and retries on its next interval, so fix the server and the feed will pick back
   up on its own.
 - **`✗ author crashed 2m ago (see Engine Room)`** on the activity strip is the same
-  story, told by the strip. Press `e` to toggle the **Engine Room** — a per-agent view
-  of live model calls, token counts, and tool activity, with a trace of recent runs —
-  when you want to see exactly what an agent was doing; press `e` again to come back.
+  story, told by the strip. Press `e` to toggle the **Engine Room** — a single
+  chronological stream of every agent's live model calls, token counts, and tool
+  activity, each block tagged with that agent's glyph and colour so concurrent work
+  stays legible. Click the `author` filter chip to narrow the stream to just that
+  agent when you want to see exactly what it was doing; click `all` to widen it back
+  out. Press `e` again to come back.
 - **Nothing at all for a long time** — check the activity strip. `idle · next: ...`
   with a countdown is normal pacing; no countdown and no activity usually means every
   agent is paused (the roster marks would all show `‖` — press `P`, the pause-all

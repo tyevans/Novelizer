@@ -1,11 +1,13 @@
+from dataclasses import replace
 from tui_kit.contracts import (
     RunStarted, RunFinished, RunFailed, LLMCallStarted, LLMCallFinished,
     ToolCallStarted, ToolCallFinished, ToolCallFailed, TokenDelta, ToolSummaryReady,
 )
 from tui_kit.run_model import (
-    Block, LiveRunState, TEXT_CAP, apply_bus_item, route_agent, seed_state,
-    seed_states, strip_line, stream_line_kind, vitals_line, live_body,
-    normalize_input_summary, styled_vitals, styled_body,
+    ProseBlock, ThinkingBlock, CallBlock, ToolBlock, LiveRunState, TEXT_CAP,
+    apply_bus_item, route_agent, seed_state, seed_states, strip_line,
+    vitals_line, normalize_input_summary,
+    styled_vitals, block_key, block_agent,
 )
 
 
@@ -30,7 +32,7 @@ THEME = _FakeTheme()
 
 
 def test_run_started_resets_state_to_a_fresh_running_run():
-    s = apply_bus_item(LiveRunState(blocks=(Block(kind="prose", text="stale"),), tokens=9),
+    s = apply_bus_item(LiveRunState(blocks=(ProseBlock(text="stale"),), tokens=9),
                         RunStarted(run_id="r1", agent_name="author"), now=100.0)
     assert s.status == "running" and s.agent_name == "author" and s.run_id == "r1"
     assert s.tokens == 0 and s.blocks == () and s.started_at == 100.0
@@ -48,7 +50,7 @@ def test_token_deltas_accumulate_into_a_trailing_prose_block():
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="The "), now=1.0)
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="sea"), now=1.1)
     assert len(s.blocks) == 1
-    assert s.blocks[0].kind == "prose" and s.blocks[0].text == "The sea"
+    assert isinstance(s.blocks[0], ProseBlock) and s.blocks[0].text == "The sea"
     assert s.tokens == 2
 
 
@@ -56,10 +58,10 @@ def test_thinking_and_text_deltas_open_separate_blocks():
     s = LiveRunState(status="running", run_id="r1", agent_name="author")
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
                                      text="let me consider", kind="thinking"), now=1.0)
-    assert s.blocks[0].kind == "thinking"
+    assert isinstance(s.blocks[0], ThinkingBlock)
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author",
                                      text="The lighthouse", kind="text"), now=1.2)
-    assert len(s.blocks) == 2 and s.blocks[1].kind == "prose"
+    assert len(s.blocks) == 2 and isinstance(s.blocks[1], ProseBlock)
 
 
 def test_run_failed_marks_failed_with_error():
@@ -90,7 +92,7 @@ def test_tool_call_opens_and_closes_a_tool_block():
     s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
                                           tool_name="search_web", input_summary="dragons"), now=1.0)
     tool = s.blocks[0]
-    assert tool.kind == "tool" and tool.tool_name == "search_web" and tool.status == "running"
+    assert isinstance(tool, ToolBlock) and tool.tool_name == "search_web" and tool.status == "running"
     s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
                                            tool_name="search_web", duration_s=1.2), now=2.0)
     assert s.blocks[0].status == "done" and s.blocks[0].duration_s == 1.2
@@ -146,7 +148,7 @@ def test_parallel_same_tool_results_attach_to_their_own_call():
                                            input_summary="/characters/death.md",
                                            output_summary="# Death"), now=1.2)
     death, silvanthrine = s.blocks
-    assert death.status == "done" and death.output == "# Death"
+    assert death.status == "done" and death.preview == "# Death"
     assert silvanthrine.status == "running"
 
 
@@ -176,7 +178,7 @@ def test_result_input_summary_is_normalized_before_matching():
     s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
                                            tool_name="read_file", duration_s=0.2,
                                            input_summary=raw, output_summary="long"), now=1.2)
-    assert s.blocks[0].status == "done" and s.blocks[0].output == "long"
+    assert s.blocks[0].status == "done" and s.blocks[0].preview == "long"
     assert s.blocks[1].status == "running"
 
 
@@ -193,7 +195,7 @@ def test_results_without_input_summary_keep_the_last_running_fallback():
 
 def test_tool_summary_ready_patches_the_matching_finished_block():
     s = LiveRunState(status="running", run_id="r1", agent_name="author",
-                     blocks=(Block(kind="tool", tool_name="search_web",
+                     blocks=(ToolBlock(tool_name="search_web",
                                    input_summary="dragons", status="done", duration_s=1.0),))
     s = apply_bus_item(s, ToolSummaryReady(run_id="r1", agent_name="author",
                                            tool_name="search_web", input_summary="dragons",
@@ -217,7 +219,6 @@ def test_seed_state_of_a_finished_run_is_not_stuck_running():
 def test_seed_state_marks_stream_not_attached_when_still_running():
     s = seed_state([RunStarted(run_id="r1", agent_name="author")], now=10.0)
     assert s.status == "running" and s.stream_attached is False
-    assert "stream not attached" in live_body(s)
 
 
 def test_seed_states_keeps_concurrent_agents_isolated():
@@ -265,39 +266,12 @@ def test_vitals_line_running_and_finished_forms():
     assert "author" in fline and "finished" in fline and "42s" in fline and "2.5k tok" in fline
 
 
-def test_live_body_renders_a_tool_block_as_a_grouped_multiline_unit():
-    s = LiveRunState(status="running", run_id="r1", agent_name="author")
-    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
-                                          tool_name="search_web", input_summary="dragons"), now=1.0)
-    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
-                                           tool_name="search_web", duration_s=1.2), now=2.0)
-    body = live_body(s)
-    assert "⚒ search_web(dragons)" in body and "done in 1.2s" in body
-
-
-def test_live_body_indents_delegated_tool_calls():
-    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper",
-                     blocks=(Block(kind="tool", tool_name="read_file",
-                                   input_summary="/chapters/ch-0012.md",
-                                   status="running", delegate="researcher"),))
-    body = live_body(s)
-    assert "    ⚒ ↳ researcher: read_file(/chapters/ch-0012.md)" in body
-
-
 def test_text_is_still_tail_capped_via_prose_blocks():
     long_prose = "x" * TEXT_CAP
-    s = LiveRunState(status="running", run_id="r1", blocks=(Block(kind="prose", text=long_prose),))
+    s = LiveRunState(status="running", run_id="r1", blocks=(ProseBlock(text=long_prose),))
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="END"), now=1.0)
     assert s.blocks[-1].text.endswith("END")
     assert len(s.blocks[-1].text) <= TEXT_CAP + 3
-
-
-def test_stream_line_kind_classifies_marker_lines():
-    assert stream_line_kind("⚒ search_web(dragons)") == "tool"
-    assert stream_line_kind("   ↳ done in 1.2s") == "call"
-    assert stream_line_kind("▸ call 1 (qwen)") == "call"
-    assert stream_line_kind("💭 thinking about it") == "thinking"
-    assert stream_line_kind("Once upon a time") == "prose"
 
 
 def test_normalize_input_summary_replaces_newlines_and_caps_length():
@@ -319,22 +293,11 @@ def test_tool_summary_ready_matches_a_multiline_over_120_char_input_summary():
     assert s.blocks[0].summary == "found three articles"
 
 
-def test_styled_vitals_includes_glyph_from_theme():
+def test_styled_vitals_includes_glyph_and_agent_name():
     state = LiveRunState(status="running", agent_name="author", started_at=0.0,
                          model="m", call_index=1, tokens=5)
     text = styled_vitals(state, now=2.0, theme=THEME)
     assert "author" in text.plain and "@" in text.plain
-
-
-def test_styled_body_applies_tool_style_to_tool_lines():
-    text = styled_body("\n⚒ search_canon(query)\n")
-    styles = [span.style for span in text.spans]
-    assert "bold cyan" in styles
-
-
-def test_styled_body_leaves_prose_unstyled():
-    text = styled_body("plain prose line")
-    assert text.spans == []
 
 
 # --- the idle vitals line says why ------------------------------------------
@@ -364,3 +327,38 @@ def test_a_running_vitals_line_ignores_a_stale_hold_reason():
 def test_styled_vitals_threads_the_hold_reason_through():
     text = styled_vitals(LiveRunState(), now=2.0, theme=THEME, hold="paused")
     assert text.plain == "? idle — paused"
+
+
+# --- Block sum type -----------------------------------------------------
+
+def test_tool_block_keeps_a_preview_and_a_sequence_not_the_whole_output():
+    s = apply_bus_item(LiveRunState(status="running", run_id="r1"),
+                       ToolCallStarted(run_id="r1", agent_name="author",
+                                       tool_name="read_file", input_summary="ch1.md"),
+                       now=1.0)
+    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
+                                           tool_name="read_file", duration_s=1.2,
+                                           input_summary="ch1.md",
+                                           output_summary="x" * 5000, sequence=42),
+                       now=2.2)
+    b = s.blocks[-1]
+    assert isinstance(b, ToolBlock)
+    assert b.sequence == 42
+    assert len(b.preview) <= 200
+    assert not hasattr(b, "output")
+
+
+def test_prose_block_has_no_tool_fields():
+    b = ProseBlock(text="hello", agent_name="author")
+    assert not hasattr(b, "tool_name")
+    assert not hasattr(b, "input_summary")
+
+
+def test_block_key_is_stable_across_reconstruction():
+    b = ProseBlock(text="hi", agent_name="author")
+    assert block_key(b, 3) == block_key(replace(b, text="hi there"), 3)
+
+
+def test_block_agent_reads_the_agent_off_any_kind():
+    assert block_agent(ProseBlock(text="", agent_name="author")) == "author"
+    assert block_agent(ToolBlock(tool_name="t", input_summary="", agent_name="editor")) == "editor"

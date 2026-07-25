@@ -191,3 +191,41 @@ async def test_init_migrates_a_pre_run_id_database():
     finally:
         await s.close()
         os.unlink(path)
+
+
+async def test_events_before_returns_the_window_just_below_a_sequence(tmp_path):
+    store = EventStore(str(tmp_path / "t.db"))
+    await store.init()
+    try:
+        for i in range(10):
+            await store.append_raw("x.happened", "agg", {"i": i})
+        window = await store.events_before(sequence=8, limit=3)
+        assert [e.payload["i"] for e in window] == [4, 5, 6]
+    finally:
+        await store.close()
+
+
+async def test_events_before_is_ascending_and_clamps_at_the_beginning(tmp_path):
+    store = EventStore(str(tmp_path / "t.db"))
+    await store.init()
+    try:
+        for i in range(3):
+            await store.append_raw("x.happened", "agg", {"i": i})
+        window = await store.events_before(sequence=2, limit=50)
+        assert [e.payload["i"] for e in window] == [0]
+        assert await store.events_before(sequence=1, limit=50) == []
+    finally:
+        await store.close()
+
+
+async def test_events_before_filters_by_type(tmp_path):
+    store = EventStore(str(tmp_path / "t.db"))
+    await store.init()
+    try:
+        await store.append_raw("a.happened", "agg", {"i": 0})
+        await store.append_raw("b.happened", "agg", {"i": 1})
+        await store.append_raw("a.happened", "agg", {"i": 2})
+        window = await store.events_before(sequence=99, limit=10, event_types=["a.happened"])
+        assert [e.payload["i"] for e in window] == [0, 2]
+    finally:
+        await store.close()

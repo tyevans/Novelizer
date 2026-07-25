@@ -85,7 +85,7 @@ def test_tool_call_finished_translates():
              "duration_s": 1.2, "output_summary": "found stuff"})
     out = to_contract_event(ev)
     assert out == ToolCallFinished(run_id="r1", agent_name="author", tool_name="search_web",
-                                   duration_s=1.2, output_summary="found stuff")
+                                   duration_s=1.2, output_summary="found stuff", sequence=7)
 
 
 def test_tool_call_failed_translates():
@@ -94,7 +94,7 @@ def test_tool_call_failed_translates():
              "duration_s": 0.3, "error_type": "ValueError"})
     out = to_contract_event(ev)
     assert out == ToolCallFailed(run_id="r1", agent_name="author", tool_name="search_web",
-                                 duration_s=0.3, error_type="ValueError")
+                                 duration_s=0.3, error_type="ValueError", sequence=8)
 
 
 def test_tool_results_carry_input_summary_for_pairing():
@@ -233,6 +233,13 @@ def test_unmapped_stored_events_are_filtered_before_seeding_not_raised():
     assert per_agent["author"] != LiveRunState()
 
 
+def test_output_segment_becomes_a_token_delta_contract_event():
+    ev = _ev(20, TelemetryEventType.LLM_OUTPUT_SEGMENT,
+             {"run_id": "r1", "agent_name": "author", "text": "hello", "kind": "text"})
+    out = to_contract_event(ev)
+    assert out == ContractTokenDelta(run_id="r1", agent_name="author", text="hello", kind="text")
+
+
 def test_trace_detail_shows_prompt_and_produced_domain_events():
     call = _ev(2, TelemetryEventType.LLM_CALL_STARTED,
               {"run_id": "r1", "agent_name": "author", "call_index": 1, "model": "qwen",
@@ -243,3 +250,26 @@ def test_trace_detail_shows_prompt_and_produced_domain_events():
     text = trace_detail(call, produced)
     assert "[system]\nWrite." in text
     assert "produced: chapter.created ch-12" in text
+
+
+# -- the store sequence is the handle for the lazy full-output fetch ----------
+#
+# ToolBlock.sequence is what StreamView._fetch_and_mount passes to
+# StreamSource.fetch_output. It can only come from the StoredEvent's own
+# sequence -- it is nowhere in the payload -- so an adapter that builds the
+# contract event from `item.payload` alone leaves every production tool block
+# at sequence 0, and every expanded tool call renders "(no output recorded)".
+
+
+def test_tool_call_finished_carries_the_store_sequence():
+    ev = _ev(42, TelemetryEventType.TOOL_CALL_FINISHED,
+             {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+              "duration_s": 1.2, "output_summary": "found stuff"})
+    assert to_contract_event(ev).sequence == 42
+
+
+def test_tool_call_failed_carries_the_store_sequence():
+    ev = _ev(43, TelemetryEventType.TOOL_CALL_FAILED,
+             {"run_id": "r1", "agent_name": "author", "tool_name": "read_file",
+              "duration_s": 0.3, "error_type": "ValueError"})
+    assert to_contract_event(ev).sequence == 43

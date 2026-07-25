@@ -24,10 +24,34 @@ def normalize_input_summary(raw) -> str:
     return str(raw).replace("\n", "␤")[:120]
 
 
+PREVIEW_CAP = 200
+
+
 @dataclass(frozen=True)
-class Block:
-    kind: str  # "prose" | "thinking" | "call" | "tool"
+class _BaseBlock:
+    agent_name: str = ""
+
+
+@dataclass(frozen=True)
+class ProseBlock(_BaseBlock):
     text: str = ""
+
+
+@dataclass(frozen=True)
+class ThinkingBlock(_BaseBlock):
+    text: str = ""
+
+
+@dataclass(frozen=True)
+class CallBlock(_BaseBlock):
+    call_index: int = 0
+    model: str = ""
+    status: str = "running"  # running | done
+    duration_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class ToolBlock(_BaseBlock):
     tool_name: str = ""
     input_summary: str = ""
     status: str = "running"  # running | done | failed
@@ -37,7 +61,32 @@ class Block:
     repeat_count: int = 1
     delegate: str = ""  # subagent name when this tool call was dispatched by
     # a subagent rather than the parent agent itself
-    output: str = ""  # full untruncated tool output (ToolCallFinished only)
+    preview: str = ""   # first PREVIEW_CAP chars, for the collapsed line
+    sequence: int = 0   # store sequence; full output is read from there
+
+
+StreamBlock = ProseBlock | ThinkingBlock | CallBlock | ToolBlock
+
+
+def make_preview(raw: str) -> str:
+    return str(raw).replace("\n", " ")[:PREVIEW_CAP]
+
+
+def block_agent(b: StreamBlock) -> str:
+    return b.agent_name
+
+
+def block_key(b: StreamBlock, index: int) -> str:
+    """Stable identity for widget reconciliation.
+
+    `index` MUST be the block's absolute position in the whole stream --
+    never its position in a filtered list, and never its position in a
+    window that drops blocks from the head. Blocks are append-only and
+    never reordered and a block's kind never changes once opened, so an
+    absolute index is a permanent identity; any index that can shift
+    silently aliases one block's key onto another block's widget.
+    """
+    return f"{type(b).__name__}:{index}"
 
 
 @dataclass(frozen=True)
@@ -48,7 +97,7 @@ class LiveRunState:
     started_at: float = 0.0  # monotonic
     ended_at: float = 0.0
     tokens: int = 0
-    blocks: tuple[Block, ...] = ()
+    blocks: tuple[StreamBlock, ...] = ()
     prompt: str = ""
     model: str = ""
     call_index: int = 0
@@ -59,14 +108,15 @@ class LiveRunState:
     # visible marker instead of running together unlabeled.
 
 
-def _append_text_block(state: LiveRunState, kind: str, text: str) -> LiveRunState:
+def _append_text_block(state: LiveRunState, cls: type, text: str,
+                       agent_name: str = "") -> LiveRunState:
     """Append to the trailing block if it's the same kind, else open a new one."""
-    if state.blocks and state.blocks[-1].kind == kind:
+    if state.blocks and isinstance(state.blocks[-1], cls):
         last = state.blocks[-1]
         merged = (last.text + text)[-TEXT_CAP:]
         blocks = state.blocks[:-1] + (replace(last, text=merged),)
     else:
-        blocks = state.blocks + (Block(kind=kind, text=text[-TEXT_CAP:]),)
+        blocks = state.blocks + (cls(text=text[-TEXT_CAP:], agent_name=agent_name),)
     return replace(state, blocks=blocks)
 
 
@@ -75,15 +125,15 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         if state.status != "running" or item.run_id != state.run_id:
             return state
         kind = item.kind or "text"
-        block_kind = "thinking" if kind == "thinking" else "prose"
-        state = _append_text_block(state, block_kind, item.text)
+        block_cls = ThinkingBlock if kind == "thinking" else ProseBlock
+        state = _append_text_block(state, block_cls, item.text, agent_name=item.agent_name)
         return replace(state, tokens=state.tokens + 1, last_kind=kind)
     if isinstance(item, ToolSummaryReady):
         if item.run_id != state.run_id or not state.blocks:
             return state
         for i in range(len(state.blocks) - 1, -1, -1):
             b = state.blocks[i]
-            if (b.kind == "tool" and b.tool_name == item.tool_name
+            if (isinstance(b, ToolBlock) and b.tool_name == item.tool_name
                     and b.input_summary == item.input_summary
                     and b.status != "running" and b.summary is None):
                 blocks = state.blocks[:i] + (replace(b, summary=item.summary),) + state.blocks[i + 1:]
@@ -99,12 +149,12 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         return state
     if isinstance(item, LLMCallStarted):
         state = replace(state, prompt=item.prompt, model=item.model, call_index=item.call_index)
-        blocks = state.blocks + (Block(kind="call", status="running",
-                                       text=f"call {item.call_index} ({item.model})"),)
+        blocks = state.blocks + (CallBlock(call_index=item.call_index, model=item.model,
+                                           agent_name=item.agent_name),)
         return replace(state, blocks=blocks)
     if isinstance(item, LLMCallFinished):
         state = replace(state, tokens=item.output_tokens)
-        if state.blocks and state.blocks[-1].kind == "call":
+        if state.blocks and isinstance(state.blocks[-1], CallBlock):
             last = state.blocks[-1]
             blocks = state.blocks[:-1] + (replace(last, status="done",
                                                   duration_s=item.duration_s),)
@@ -117,7 +167,7 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         return replace(state, status="failed", ended_at=now, error=error)
     if isinstance(item, ToolCallStarted):
         input_summary = normalize_input_summary(item.input_summary)
-        if (state.blocks and state.blocks[-1].kind == "tool"
+        if (state.blocks and isinstance(state.blocks[-1], ToolBlock)
                 and state.blocks[-1].tool_name == item.tool_name
                 and state.blocks[-1].input_summary == input_summary
                 and state.blocks[-1].delegate == item.delegate
@@ -127,9 +177,10 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
                                                   repeat_count=last.repeat_count + 1,
                                                   summary=None),)
         else:
-            blocks = state.blocks + (Block(kind="tool", tool_name=item.tool_name,
-                                           input_summary=input_summary, status="running",
-                                           delegate=item.delegate),)
+            blocks = state.blocks + (ToolBlock(tool_name=item.tool_name,
+                                               input_summary=input_summary, status="running",
+                                               delegate=item.delegate,
+                                               agent_name=item.agent_name),)
         return replace(state, blocks=blocks)
     if isinstance(item, (ToolCallFinished, ToolCallFailed)):
         # Prefer the running block whose input_summary matches the result's,
@@ -138,7 +189,7 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
         wanted = normalize_input_summary(item.input_summary) if item.input_summary else ""
         candidates = [
             i for i in range(len(state.blocks) - 1, -1, -1)
-            if state.blocks[i].kind == "tool"
+            if isinstance(state.blocks[i], ToolBlock)
             and state.blocks[i].tool_name == item.tool_name
             and state.blocks[i].status == "running"
         ]
@@ -147,10 +198,13 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
             b = state.blocks[i]
             if isinstance(item, ToolCallFinished):
                 updated = replace(b, status="done", duration_s=item.duration_s,
-                                  output=item.output_summary)
+                                  preview=make_preview(item.output_summary),
+                                  sequence=item.sequence)
             else:
+                # sequence on the failure too: a failed block opens on arrival,
+                # and without the store handle it opens into an empty box.
                 updated = replace(b, status="failed", duration_s=item.duration_s,
-                                  error=item.error_type)
+                                  error=item.error_type, sequence=item.sequence)
             blocks = state.blocks[:i] + (updated,) + state.blocks[i + 1:]
             return replace(state, blocks=blocks)
         return state
@@ -226,84 +280,8 @@ def vitals_line(state: LiveRunState, now: float, theme: AgentTheme, hold: str = 
     return f"idle — {hold}" if hold else "idle — waiting for the scheduler"
 
 
-def live_body(state: LiveRunState) -> str:
-    if state.status == "running" and not state.stream_attached:
-        return "run in progress (stream not attached — restarted mid-run)"
-    if state.status == "idle":
-        return "no run yet"
-    lines: list[str] = []
-    for b in state.blocks:
-        lines.append(_render_block(b))
-    body = "\n".join(lines).strip("\n")
-    if state.status == "failed" and body:
-        return body + "\n\n✗ crashed"
-    return body or "(waiting for first token…)"
-
-
-def _render_block(b: Block) -> str:
-    if b.kind == "prose":
-        return b.text
-    if b.kind == "thinking":
-        return f"💭 {b.text}"
-    if b.kind == "call":
-        header = f"▸ {b.text}"
-        if b.status == "done":
-            return header + f"\n   ↳ {b.duration_s:.1f}s"
-        return header
-    # kind == "tool"
-    suffix = f" ×{b.repeat_count}" if b.repeat_count > 1 else ""
-    indent = "       " if b.delegate else "   "
-    if b.delegate:
-        lines = [f"    ⚒ ↳ {b.delegate}: {b.tool_name}({b.input_summary}){suffix}"]
-    else:
-        lines = [f"⚒ {b.tool_name}({b.input_summary}){suffix}"]
-    if b.status == "done":
-        lines.append(f"{indent}↳ done in {b.duration_s:.1f}s")
-    elif b.status == "failed":
-        lines.append(f"{indent}↳ ✗ {b.error}")
-    if b.summary:
-        lines.append(f"{indent}↳ {b.summary}")
-    if b.output:
-        for out_line in b.output.split("\n"):
-            lines.append(f"{indent}  {out_line}")
-    return "\n".join(lines)
-
-
-def stream_line_kind(line: str) -> str:
-    """Classify a live_body() line for widget-level styling. Pure/text-only
-    so it stays testable without Rich or Textual."""
-    s = line.strip()
-    if s.startswith("⚒"):
-        return "tool"
-    if s.startswith("▸") or s.startswith("↳"):
-        return "call"
-    if s.startswith("💭"):
-        return "thinking"
-    return "prose"
-
-
-# Rich styles per stream_line_kind(); "" leaves prose in the theme default so
-# the agent's own accent color (applied to the vitals bar) stays the visual
-# anchor rather than competing with a wall of colored prose.
-_LINE_STYLES = {"tool": "bold cyan", "call": "dim", "thinking": "italic dim magenta"}
-
-
 def styled_vitals(state: LiveRunState, now: float, theme: AgentTheme,
                   hold: str = "") -> Text:
     glyph = theme.glyph(state.agent_name)
     style = theme.style(state.agent_name)
     return Text(f"{glyph} {vitals_line(state, now, theme, hold)}", style=style)
-
-
-def styled_body(body: str) -> Text:
-    # Text objects are never markup-parsed regardless of a Static's
-    # markup=False setting, so untrusted stream content (tool summaries,
-    # prompts) stays safe here the same way it does as a plain str.
-    text = Text()
-    lines = body.split("\n")
-    for i, line in enumerate(lines):
-        style = _LINE_STYLES.get(stream_line_kind(line), "")
-        text.append(line, style=style)
-        if i != len(lines) - 1:
-            text.append("\n")
-    return text

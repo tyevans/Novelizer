@@ -120,6 +120,31 @@ class EventStore:
         rows = await cur.fetchall()
         return [_row_to_event(r) for r in rows]
 
+    async def events_before(self, sequence: int, limit: int,
+                            event_types: Optional[list[str]] = None) -> list[StoredEvent]:
+        """The `limit` events immediately below `sequence`, ascending.
+
+        Backward paging for the Engine Room's windowed stream: SELECT
+        DESC to take the *nearest* `limit` rows, then reverse so callers
+        always see ascending sequence like every other reader here.
+        `event_types` is read with the same truthiness as events_since --
+        None and [] both mean "every type".
+        """
+        if event_types:
+            placeholders = ",".join("?" for _ in event_types)
+            cur = await self._conn.execute(
+                f"SELECT {_COLS} FROM events WHERE sequence < ? AND event_type IN ({placeholders}) "
+                "ORDER BY sequence DESC LIMIT ?",
+                (sequence, *event_types, limit),
+            )
+        else:
+            cur = await self._conn.execute(
+                f"SELECT {_COLS} FROM events WHERE sequence < ? ORDER BY sequence DESC LIMIT ?",
+                (sequence, limit),
+            )
+        rows = await cur.fetchall()
+        return [_row_to_event(r) for r in reversed(rows)]
+
     async def count_since(self, sequence: int, event_types: Optional[list[str]] = None) -> int:
         """How many events events_since would return, without hydrating them.
         The filter is read with the same truthiness as events_since, so None
