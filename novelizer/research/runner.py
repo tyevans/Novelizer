@@ -63,6 +63,7 @@ def build_research_runner(settings, callbacks=None, backend=None, tools=None, re
     from deepagents import create_deep_agent
     from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
+    from novelizer.agents.middleware import tool_call_budget
 
     model = build_chat_model(
         settings.agent_model, settings.llm_base_url, settings.llm_api_key,
@@ -74,7 +75,8 @@ def build_research_runner(settings, callbacks=None, backend=None, tools=None, re
         graph = create_deep_agent(
             model=model, system_prompt=RESEARCH_SYSTEM_PROMPT, response_format=ResearchAnswer,
             backend=backend, tools=all_tools,
-            middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
+            middleware=[tool_call_budget(),
+                        ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

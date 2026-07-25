@@ -8,7 +8,7 @@ from hypothesis import given, settings, strategies as st
 
 from agent_kit import base as kit_base
 from agent_kit.base import BaseAgent
-from agent_kit.run_context import current_agent_name, current_run_id
+from agent_kit.run_context import current_agent_name, current_run_budget, current_run_id
 from agent_kit.telemetry import TelemetryEventType
 
 
@@ -196,6 +196,62 @@ async def test_run_once_failure_emits_failed_and_reraises():
     assert failed.error_type == "ValueError"
     assert failed.error_message == "boom"
     assert failed.phase == "agent"
+
+
+class TruncatingAgent(BaseAgent):
+    """A body that trips the tool-call budget the way the middleware does:
+    by mutating the RunBudget run_once installed."""
+
+    def __init__(self, stage: str = "forced", tool_calls: int = 41):
+        super().__init__(NullRunner(), interval=1, name="rec")
+        self._stage = stage
+        self._tool_calls = tool_calls
+
+    async def _run(self):
+        if self._stage:
+            current_run_budget.get().record(self._tool_calls, self._stage)
+
+
+async def test_run_once_emits_truncated_when_the_budget_intervened():
+    """A degraded output nobody can tell apart from a complete one is its own
+    trap, so a truncated run says so on the record. Distinct from run_failed:
+    the run SUCCEEDED, it just answered from less than it wanted."""
+    agent = TruncatingAgent(stage="forced", tool_calls=41)
+    emitter = FakeEmitter()
+    agent.telemetry = emitter
+    await agent.run_once()
+    types = [e[0] for e in emitter.events]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED,
+                     TelemetryEventType.AGENT_RUN_TRUNCATED,
+                     TelemetryEventType.AGENT_RUN_FINISHED]
+    truncated = emitter.events[1][2]
+    assert truncated.run_id == emitter.events[0][2].run_id
+    assert truncated.agent_name == "rec"
+    assert truncated.stage == "forced"
+    assert truncated.tool_calls == 41
+
+
+async def test_run_once_stays_silent_when_the_budget_was_not_reached():
+    agent = TruncatingAgent(stage="")
+    emitter = FakeEmitter()
+    agent.telemetry = emitter
+    await agent.run_once()
+    assert [e[0] for e in emitter.events] == [
+        TelemetryEventType.AGENT_RUN_STARTED, TelemetryEventType.AGENT_RUN_FINISHED]
+
+
+async def test_each_run_gets_a_fresh_budget_holder():
+    """The graph is reused across runs, so a stale holder would report every
+    later run as truncated once any earlier one was."""
+    agent = TruncatingAgent(stage="forced")
+    emitter = FakeEmitter()
+    agent.telemetry = emitter
+    await agent.run_once()
+    agent._stage = ""
+    await agent.run_once()
+    assert [e[0] for e in emitter.events].count(
+        TelemetryEventType.AGENT_RUN_TRUNCATED) == 1
+    assert current_run_budget.get() is None
 
 
 async def test_run_once_cancellation_emits_cancelled_and_reraises():

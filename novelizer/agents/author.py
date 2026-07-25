@@ -406,12 +406,12 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None, suba
         callbacks=None, streaming=callbacks is not None,
     )
     if backend is not None:
-        from novelizer.agents.middleware import TodoContextMiddleware
+        from novelizer.agents.middleware import TodoContextMiddleware, tool_call_budget
         system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
-            middleware=[TodoContextMiddleware()],
+            middleware=[tool_call_budget(), TodoContextMiddleware()],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

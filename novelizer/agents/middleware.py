@@ -5,6 +5,27 @@ from typing import Any
 from langchain_core.messages import SystemMessage
 from langchain.agents.middleware import AgentMiddleware
 
+from agent_kit import (
+    TOOL_CALL_HARD_MARGIN,
+    TOOL_CALL_SOFT_BUDGET,
+    ToolCallBudgetMiddleware,
+)
+
+
+def tool_call_budget() -> ToolCallBudgetMiddleware:
+    """The fleet's soft tool-call budget, at the kit's default thresholds.
+
+    A factory rather than a shared instance so nothing can accidentally couple
+    two agents' graphs, and one function rather than thirteen inline
+    constructors so the fleet's budget policy has a single place to change.
+
+    Install it FIRST in every builder's middleware list: at the hard stop it
+    empties the tool list, and a middleware ordered after it would otherwise be
+    filtering (or re-deriving) tools the budget had already withdrawn.
+    """
+    return ToolCallBudgetMiddleware(
+        soft_budget=TOOL_CALL_SOFT_BUDGET, hard_margin=TOOL_CALL_HARD_MARGIN)
+
 
 def _format_todos(todos: list[dict[str, Any]]) -> str:
     marks = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}

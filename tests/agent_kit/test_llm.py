@@ -74,3 +74,67 @@ def test_reasoning_content_absent_leaves_chunk_unaffected():
     raw_chunk = {"choices": [{"index": 0, "delta": {"content": "hi"}, "finish_reason": None}]}
     gen_chunk = m._convert_chunk_to_generation_chunk(raw_chunk, AIMessageChunk, None)
     assert "reasoning_content" not in gen_chunk.message.additional_kwargs
+
+
+class _FakeGraph:
+    def with_config(self, config):
+        self.config = config
+        return self
+
+
+def _capture_deep_agent(monkeypatch):
+    captured: dict = {}
+
+    def fake(*args, **kwargs):
+        captured.update(kwargs)
+        return _FakeGraph()
+
+    import deepagents
+
+    monkeypatch.setattr(deepagents, "create_deep_agent", fake)
+    return captured
+
+
+def test_build_agent_runner_installs_the_tool_call_budget_first(monkeypatch):
+    """The budget is chassis policy, applied where the recursion limit is
+    applied, so every consumer of the generic builder gets it without opting
+    in -- and ordered first, since it empties the tool list at the hard stop."""
+    from agent_kit import (
+        ExcludeToolsMiddleware, TOOL_CALL_HARD_MARGIN, TOOL_CALL_SOFT_BUDGET,
+        ToolCallBudgetMiddleware, build_agent_runner,
+    )
+
+    captured = _capture_deep_agent(monkeypatch)
+    build_agent_runner(
+        model=object(), system_prompt="p", response_format=dict, tools=[],
+        middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
+    )
+    middleware = captured["middleware"]
+    assert isinstance(middleware[0], ToolCallBudgetMiddleware)
+    assert isinstance(middleware[1], ExcludeToolsMiddleware)
+    assert middleware[0]._soft == TOOL_CALL_SOFT_BUDGET
+    assert middleware[0]._hard == TOOL_CALL_SOFT_BUDGET + TOOL_CALL_HARD_MARGIN
+
+
+def test_build_agent_runner_installs_the_budget_with_no_caller_middleware(monkeypatch):
+    from agent_kit import ToolCallBudgetMiddleware, build_agent_runner
+
+    captured = _capture_deep_agent(monkeypatch)
+    build_agent_runner(model=object(), system_prompt="p", response_format=dict)
+    assert [type(m) for m in captured["middleware"]] == [ToolCallBudgetMiddleware]
+
+
+def test_build_agent_runner_budget_is_overridable(monkeypatch):
+    """An operator tuning the budget, or a caller that genuinely needs an
+    unbounded pass, must be able to say so explicitly."""
+    from agent_kit import build_agent_runner
+
+    captured = _capture_deep_agent(monkeypatch)
+    build_agent_runner(model=object(), system_prompt="p", response_format=dict,
+                       tool_call_soft_budget=5, tool_call_hard_margin=2)
+    assert (captured["middleware"][0]._soft, captured["middleware"][0]._hard) == (5, 7)
+
+    captured2 = _capture_deep_agent(monkeypatch)
+    build_agent_runner(model=object(), system_prompt="p", response_format=dict,
+                       tool_call_soft_budget=0)
+    assert captured2.get("middleware") is None

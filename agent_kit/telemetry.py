@@ -1,9 +1,10 @@
 """Machinery-telemetry vocabulary for the agent loop and scheduler.
 
-These six event types (and their payload shapes) are what BaseAgent.run_once
-and Scheduler emit. Exactly one of run_finished / run_failed / run_cancelled
+These event types (and their payload shapes) are what BaseAgent.run_once and
+Scheduler emit. Exactly one of run_finished / run_failed / run_cancelled
 follows every run_started: a consumer counting starts minus terminals must
-be able to reach zero. The emitter itself is injected — see TelemetryEmitter.
+be able to reach zero. run_truncated is the one non-terminal member -- it
+annotates a run that still finishes. The emitter itself is injected — see TelemetryEmitter.
 Payload field names match novelizer's telemetry vocabulary so existing
 recorders and tui_kit adapters understand them unchanged.
 """
@@ -20,6 +21,7 @@ class TelemetryEventType:
     AGENT_RUN_FINISHED = "agent.run_finished"
     AGENT_RUN_FAILED = "agent.run_failed"
     AGENT_RUN_CANCELLED = "agent.run_cancelled"
+    AGENT_RUN_TRUNCATED = "agent.run_truncated"
 
 
 class SchedulerPicked(BaseModel):
@@ -64,6 +66,23 @@ class AgentRunCancelled(BaseModel):
     agent_name: str
     phase: str  # same contract as AgentRunFailed.phase
     duration_s: float
+
+
+class AgentRunTruncated(BaseModel):
+    """The tool-call budget had to intervene, so this run answered from less
+    than it wanted to read.
+
+    NOT a terminal event -- a truncated run still finishes, and still emits
+    run_finished after this. It exists because a degraded output that nobody can
+    distinguish from a complete one is its own trap: without this, a run landed
+    by the budget and a run that surveyed everything it needed look identical
+    downstream.
+    """
+
+    run_id: str
+    agent_name: str
+    stage: str  # "nudged" (asked to land) | "forced" (tools withdrawn)
+    tool_calls: int
 
 
 class TelemetryEmitter(Protocol):

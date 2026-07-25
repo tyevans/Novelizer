@@ -7,7 +7,7 @@ from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
 from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFinished, AgentRunFailed,
-    LlmCallStarted, LlmCallFinished, TokenDelta,
+    AgentRunTruncated, LlmCallStarted, LlmCallFinished, TokenDelta,
 )
 
 
@@ -125,6 +125,24 @@ async def test_run_with_identity_emits_cancelled_and_reraises(rig):
     cancelled = q.get_nowait()
     assert cancelled.event_type == TelemetryEventType.AGENT_RUN_CANCELLED
     assert cancelled.payload["phase"] == "agent"
+
+
+async def test_truncation_is_not_a_run_end(rig):
+    """agent.run_truncated annotates a run that is still going -- the run emits
+    run_finished afterwards. Treating it as a run end would clear the per-run
+    LLM-call bookkeeping mid-run, so the calls after the budget fired would be
+    misnumbered and `in_llm_call` would go blind for the rest of the run."""
+    store, bus, rec = rig
+    assert rec.next_call_index("r1") == 1
+    await rec.emit(TelemetryEventType.LLM_CALL_STARTED, "r1",
+                   LlmCallStarted(run_id="r1", agent_name="author", call_index=1,
+                                  model="m", prompt="p"))
+    assert rec.in_llm_call("r1")
+    await rec.emit(TelemetryEventType.AGENT_RUN_TRUNCATED, "r1",
+                   AgentRunTruncated(run_id="r1", agent_name="author",
+                                     stage="forced", tool_calls=41))
+    assert rec.in_llm_call("r1"), "truncation must not close the run's open LLM call"
+    assert rec.next_call_index("r1") == 2, "truncation must not reset call numbering"
 
 
 async def test_run_with_identity_resets_context_vars_after(rig):

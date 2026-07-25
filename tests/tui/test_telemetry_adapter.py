@@ -156,6 +156,22 @@ def test_run_cancelled_translates_and_terminates_the_live_run():
     assert "author" in line and "cancelled" in line
 
 
+def test_run_truncated_shows_in_the_trace_but_does_not_end_the_live_run():
+    """Visibility without lying: the operator must be able to tell a run that
+    answered from everything it needed from one the budget landed, so the
+    durable trace names it and says how far it got. It maps to no contract event
+    because it is NOT terminal -- the run is still going and its own
+    run_finished follows, so marking the live block finished here would close it
+    early and hide the rest of the run."""
+    ev = _ev(6, TelemetryEventType.AGENT_RUN_TRUNCATED,
+             {"run_id": "r1", "agent_name": "world_architect",
+              "stage": "forced", "tool_calls": 41})
+    assert to_contract_event(ev) is None
+    line = trace_line(ev)
+    assert "world_architect" in line
+    assert "truncated" in line and "forced" in line and "41" in line
+
+
 def test_trace_line_sanitizes_tool_call_input_summary():
     noisy = _ev(9, TelemetryEventType.TOOL_CALL_STARTED,
                 {"run_id": "r1", "agent_name": "author", "tool_name": "grep",
