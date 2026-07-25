@@ -2,6 +2,7 @@ from hypothesis import given, strategies as st
 from tui_kit.run_model import ProseBlock, ToolBlock
 from tui_kit.stream_model import (
     StreamState, visible_blocks, toggle_agent, clear_filter, on_scroll, on_new_blocks,
+    WINDOW_CAP, trim_window, prepend_blocks, oldest_sequence,
 )
 
 
@@ -67,3 +68,49 @@ def test_filtering_then_appending_equals_appending_then_filtering(blocks, agents
     appended_then_filtered = visible_blocks(on_new_blocks(state, tuple(blocks)))
     filtered = [b for b in blocks if not agents or b.agent_name in agents]
     assert list(appended_then_filtered) == filtered
+
+
+def test_trim_window_drops_the_head_when_over_cap():
+    blocks = tuple(ProseBlock(text=str(i), agent_name="author") for i in range(WINDOW_CAP + 25))
+    trimmed = trim_window(StreamState(blocks=blocks))
+    assert len(trimmed.blocks) == WINDOW_CAP
+    assert trimmed.blocks[-1].text == str(WINDOW_CAP + 24)
+
+
+def test_trim_window_is_a_noop_under_cap():
+    s = StreamState(blocks=(ProseBlock(text="a", agent_name="author"),))
+    assert trim_window(s) == s
+
+
+def test_prepend_puts_paged_history_at_the_front_and_never_counts_as_unseen():
+    s = StreamState(blocks=(ProseBlock(text="new", agent_name="author"),), follow=False)
+    s = prepend_blocks(s, (ProseBlock(text="old", agent_name="author"),))
+    assert [b.text for b in s.blocks] == ["old", "new"]
+    assert s.unseen == 0
+
+
+def test_oldest_sequence_reports_the_paging_cursor():
+    s = StreamState(blocks=(ToolBlock(tool_name="t", input_summary="", sequence=7),
+                            ToolBlock(tool_name="t", input_summary="", sequence=9)))
+    assert oldest_sequence(s) == 7
+
+
+def test_oldest_sequence_ignores_blocks_that_have_no_sequence():
+    s = StreamState(blocks=(ProseBlock(text="a", agent_name="author"),
+                            ToolBlock(tool_name="t", input_summary="", sequence=5)))
+    assert oldest_sequence(s) == 5
+
+
+def test_oldest_sequence_of_an_empty_window_is_zero():
+    assert oldest_sequence(StreamState()) == 0
+
+
+@given(st.lists(st.integers(min_value=1, max_value=50), min_size=1, max_size=20))
+def test_paging_back_then_trimming_never_exceeds_the_cap(seqs):
+    """However much history is paged in, the window stays bounded --
+    this is the whole point of windowing."""
+    s = StreamState()
+    for i in seqs:
+        s = trim_window(prepend_blocks(
+            s, tuple(ProseBlock(text="h", agent_name="author") for _ in range(i))))
+    assert len(s.blocks) <= WINDOW_CAP

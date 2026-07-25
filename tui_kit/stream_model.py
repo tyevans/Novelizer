@@ -52,3 +52,33 @@ def on_new_blocks(state: StreamState, blocks: tuple[StreamBlock, ...]) -> Stream
     if state.follow:
         return replace(state, blocks=merged)
     return replace(state, blocks=merged, unseen=state.unseen + len(blocks))
+
+
+# How many blocks stay mounted. Textual mounts a widget per block, so this
+# bounds widget count and memory both; history beyond it is paged back in
+# from the event store on demand.
+WINDOW_CAP = 400
+
+
+def trim_window(state: StreamState) -> StreamState:
+    """Drop from the head -- the tail is what a following reader is
+    watching, and paged-in history can always be re-fetched."""
+    if len(state.blocks) <= WINDOW_CAP:
+        return state
+    return replace(state, blocks=state.blocks[-WINDOW_CAP:])
+
+
+def prepend_blocks(state: StreamState, blocks: tuple[StreamBlock, ...]) -> StreamState:
+    """Paged-in history. Never touches `unseen`: the reader scrolled here
+    deliberately, so this is not a backlog."""
+    return replace(state, blocks=tuple(blocks) + state.blocks)
+
+
+def oldest_sequence(state: StreamState) -> int:
+    """Cursor for the next backward page. Only tool blocks carry a store
+    sequence; prose is reconstructed from the segments around them."""
+    for b in state.blocks:
+        seq = getattr(b, "sequence", 0)
+        if seq:
+            return seq
+    return 0
