@@ -61,6 +61,7 @@ class EnvOverrides(BaseSettings):
     summarizer_interval: int | None = None
     author_tools_enabled: bool | None = None
     outline_gate_enabled: bool | None = None
+    search_summarize: bool | None = None
     checker_tools_enabled: bool | None = None
     chat_tools_enabled: bool | None = None
     world_architect_tools_enabled: bool | None = None

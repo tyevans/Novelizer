@@ -23,6 +23,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "editor_subagent_enabled", "retconner_subagent_enabled", "curator_subagent_enabled", "structure_analyst_subagent_enabled",
     "plotter_subagent_enabled", "author_subagent_enabled", "checker_subagent_enabled",
     "extractor_token_budget", "advisory_token_budget", "summarizer_interval",
+    "search_summarize",
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
@@ -76,6 +77,12 @@ class EffectiveSettings(BaseModel):
     # first-pass blueprint exists (or the genesis fallback opens). Turn OFF to
     # restore the legacy outline-optional behavior (draft first, retrofit later).
     outline_gate_enabled: bool = True
+    # search_canon contextual summarization: when True, a semantic search also
+    # spends one LLM call plus up to five canon file reads to synthesize a
+    # short grounded answer to the caller's stated purpose. Turn OFF to get the
+    # bare ranked hit list -- identical to the pre-summarization behavior --
+    # when the token bill matters more than the round-trips it saves.
+    search_summarize: bool = True
     # Tension deviation from the mean, in either direction, that flags a chapter sag/spike.
     sag_spike_delta: float = 0.3
     # Muse: era bucket for name draws (victorian/interwar/midcentury/late20th/modern)
