@@ -10,9 +10,9 @@ from langchain_openai import ChatOpenAI
 # (trigger at 85%, keep last 10%), sized for the actual window.
 CONTEXT_WINDOW_TOKENS = 128_000
 
-# Tool-heavy passes can exceed LangGraph's default of 25; 50 still tripped
-# in practice, so give agent graphs generous headroom.
-GRAPH_RECURSION_LIMIT = 100
+# Tool-heavy passes can exceed LangGraph's default of 25; 50 and then 100 still
+# tripped in practice, so give agent graphs generous headroom.
+GRAPH_RECURSION_LIMIT = 200
 
 # The openai client's stock retry policy (2 retries, exponential backoff from
 # 0.5s) gives up within ~2 seconds, but a saturated local endpoint returns 429
