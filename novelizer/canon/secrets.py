@@ -1,7 +1,6 @@
 from __future__ import annotations
-import re
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
+from novelizer.slug import slugify
 
 
 def slugify_secret_name(title: str) -> str:
@@ -13,8 +12,7 @@ def slugify_secret_name(title: str) -> str:
     novelizer.canon.threads.slugify_thread_name exactly (see M4.1's Locked
     decision #1: same rule as threads, reused rather than reinvented).
     """
-    slug = _SLUG_RE.sub("-", title.strip().lower()).strip("-")
-    return slug or "secret"
+    return slugify(title, "secret")
 
 
 def knowledge_cell_state(matrix: dict[str, dict], secret_id: str, character_id: str) -> str:
