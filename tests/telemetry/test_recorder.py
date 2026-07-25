@@ -10,6 +10,8 @@ from novelizer.telemetry.events import (
     AgentRunTruncated, LlmCallStarted, LlmCallFinished, TokenDelta,
 )
 
+SEGMENT = TelemetryEventType.LLM_OUTPUT_SEGMENT
+
 
 @pytest.fixture
 async def rig():
@@ -169,3 +171,61 @@ async def test_run_with_identity_is_a_no_op_with_no_telemetry():
         assert current_agent_name.get() == "research"
         assert run_id  # still a real generated id, just nothing emitted
     assert current_agent_name.get() == ""
+
+
+async def test_tokens_are_buffered_not_persisted_one_by_one(rig):
+    store, bus, rec = rig
+    for ch in "hello":
+        rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text=ch))
+    persisted = await store.events_since(0)
+    assert [e for e in persisted if e.event_type == SEGMENT] == []
+
+
+async def test_flush_persists_one_segment_carrying_the_whole_buffer(rig):
+    store, bus, rec = rig
+    for ch in "hello":
+        rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text=ch))
+    await rec.flush_segment("r1")
+    persisted = await store.events_since(0)
+    segments = [e for e in persisted if e.event_type == SEGMENT]
+    assert len(segments) == 1
+    assert segments[0].payload["text"] == "hello"
+    assert segments[0].payload["kind"] == "text"
+
+
+async def test_switching_between_thinking_and_answer_flushes_a_segment_boundary(rig):
+    store, bus, rec = rig
+    rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text="mulling", kind="thinking"))
+    rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text="answer", kind="text"))
+    await rec.flush_segment("r1")
+    persisted = await store.events_since(0)
+    segments = [e for e in persisted if e.event_type == SEGMENT]
+    assert [(e.payload["kind"], e.payload["text"]) for e in segments] == [
+        ("thinking", "mulling"), ("text", "answer"),
+    ]
+
+
+async def test_flushing_an_empty_buffer_persists_nothing(rig):
+    store, bus, rec = rig
+    await rec.flush_segment("r1")
+    persisted = await store.events_since(0)
+    assert [e for e in persisted if e.event_type == SEGMENT] == []
+
+
+async def test_a_run_ending_flushes_its_pending_segment(rig):
+    store, bus, rec = rig
+    rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text="tail"))
+    await rec.emit(TelemetryEventType.AGENT_RUN_FINISHED, "r1",
+                   AgentRunFinished(run_id="r1", agent_name="author", duration_s=1.0))
+    persisted = await store.events_since(0)
+    assert [e.payload["text"] for e in persisted if e.event_type == SEGMENT] == ["tail"]
+
+
+async def test_buffers_for_different_runs_do_not_bleed_into_each_other(rig):
+    store, bus, rec = rig
+    rec.publish_token(TokenDelta(run_id="r1", agent_name="author", text="A"))
+    rec.publish_token(TokenDelta(run_id="r2", agent_name="editor", text="B"))
+    await rec.flush_segment("r1")
+    persisted = await store.events_since(0)
+    segments = [e for e in persisted if e.event_type == SEGMENT]
+    assert [(e.payload["run_id"], e.payload["text"]) for e in segments] == [("r1", "A")]

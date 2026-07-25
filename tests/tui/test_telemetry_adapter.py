@@ -233,6 +233,13 @@ def test_unmapped_stored_events_are_filtered_before_seeding_not_raised():
     assert per_agent["author"] != LiveRunState()
 
 
+def test_output_segment_becomes_a_token_delta_contract_event():
+    ev = _ev(20, TelemetryEventType.LLM_OUTPUT_SEGMENT,
+             {"run_id": "r1", "agent_name": "author", "text": "hello", "kind": "text"})
+    out = to_contract_event(ev)
+    assert out == ContractTokenDelta(run_id="r1", agent_name="author", text="hello", kind="text")
+
+
 def test_trace_detail_shows_prompt_and_produced_domain_events():
     call = _ev(2, TelemetryEventType.LLM_CALL_STARTED,
               {"run_id": "r1", "agent_name": "author", "call_index": 1, "model": "qwen",

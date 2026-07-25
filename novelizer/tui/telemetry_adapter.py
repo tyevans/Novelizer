@@ -30,6 +30,12 @@ def to_contract_event(item):
         return None
     p = item.payload
     et = item.event_type
+    if et == TelemetryEventType.LLM_OUTPUT_SEGMENT:
+        # A stored coalesced segment reconstructs prose the same way live
+        # streaming does -- replay/paged history must show the same
+        # TokenDelta the live view rendered token-by-token.
+        return contracts.TokenDelta(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
+                                    text=p.get("text", ""), kind=p.get("kind", "text"))
     if et == TelemetryEventType.AGENT_RUN_STARTED:
         return contracts.RunStarted(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""))
     if et == TelemetryEventType.AGENT_RUN_FINISHED:

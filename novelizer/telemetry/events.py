@@ -25,6 +25,7 @@ class TelemetryEventType(_MachineryEventType):
     TOOL_CALL_STARTED = "tool.call_started"
     TOOL_CALL_FINISHED = "tool.call_finished"
     TOOL_CALL_FAILED = "tool.call_failed"
+    LLM_OUTPUT_SEGMENT = "llm.output_segment"
 
 
 class LlmCallStarted(BaseModel):
@@ -91,13 +92,30 @@ class ToolCallFailed(BaseModel):
 
 
 class TokenDelta(BaseModel):
-    """One streamed chunk of model output. Bus-only: NEVER persisted (the
-    finished chapter already lands in the domain log)."""
+    """One streamed chunk of model output. Bus-only, not persisted itself --
+    persisting every token would write thousands of rows per call. The
+    coalesced LlmOutputSegment is the durable form (see below), flushed at
+    segment boundaries rather than per token."""
 
     run_id: str
     agent_name: str
     text: str
     kind: str = "text"  # "text" (answer content) | "thinking" (reasoning_content)
+
+
+class LlmOutputSegment(BaseModel):
+    """A coalesced run of streamed output, persisted at segment boundaries.
+
+    TokenDelta stays bus-only -- persisting per token would write thousands
+    of rows per call. This is the durable form, flushed when the kind
+    changes, when a tool call interrupts, when the call ends, or when the
+    buffer passes SEGMENT_FLUSH_CHARS.
+    """
+
+    run_id: str
+    agent_name: str
+    text: str
+    kind: str = "text"
 
 
 class ToolSummaryReady(BaseModel):

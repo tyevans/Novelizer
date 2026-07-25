@@ -12,7 +12,7 @@ from agent_kit import current_agent_name, current_run_id
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.events import (
     AgentRunCancelled, AgentRunFailed, AgentRunFinished, AgentRunStarted,
-    TelemetryEventType, TokenDelta,
+    LlmOutputSegment, TelemetryEventType, TokenDelta,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,25 @@ _RUN_END_TYPES = {
     # would leak its per-run call bookkeeping for the process's lifetime.
     TelemetryEventType.AGENT_RUN_CANCELLED,
 }
+
+# LLM_OUTPUT_SEGMENT must NEVER appear here: flush_segment() calls emit(),
+# and emit() flushes on these boundary types -- including it would make
+# emitting a segment flush (itself, again) and recurse forever.
+_SEGMENT_BOUNDARIES = {
+    TelemetryEventType.LLM_CALL_FINISHED,
+    TelemetryEventType.LLM_CALL_FAILED,
+    TelemetryEventType.TOOL_CALL_STARTED,
+    *_RUN_END_TYPES,
+}
+
+SEGMENT_FLUSH_CHARS = 2000
+
+
+class _Segment:
+    __slots__ = ("agent_name", "kind", "parts", "size")
+
+    def __init__(self, agent_name: str, kind: str) -> None:
+        self.agent_name, self.kind, self.parts, self.size = agent_name, kind, [], 0
 
 
 class TelemetryRecorder:
@@ -37,8 +56,13 @@ class TelemetryRecorder:
         self._bus = bus
         self._open_calls: set[str] = set()
         self._call_counts: dict[str, int] = {}
+        self._segments: dict[str, _Segment] = {}
+        self._pending_flushes: list[tuple[str, _Segment]] = []
 
     async def emit(self, event_type: str, aggregate_id: str, payload: BaseModel) -> None:
+        run_id = getattr(payload, "run_id", None)
+        if run_id and event_type in _SEGMENT_BOUNDARIES:
+            await self.flush_segment(run_id)
         self._track(event_type, payload)
         try:
             stored = await self._store.append(event_type, aggregate_id, payload)
@@ -52,7 +76,40 @@ class TelemetryRecorder:
         self._bus.publish(stored)
 
     def publish_token(self, delta: TokenDelta) -> None:
-        self._bus.publish(delta)
+        self._bus.publish(delta)  # live view is unchanged
+        self._buffer_token(delta)
+
+    def _buffer_token(self, delta: TokenDelta) -> None:
+        seg = self._segments.get(delta.run_id)
+        if seg is not None and seg.kind != delta.kind:
+            self._pending_flushes.append((delta.run_id, seg))
+            seg = None
+        if seg is None:
+            seg = _Segment(delta.agent_name, delta.kind)
+            self._segments[delta.run_id] = seg
+        seg.parts.append(delta.text)
+        seg.size += len(delta.text)
+        if seg.size >= SEGMENT_FLUSH_CHARS:
+            self._pending_flushes.append((delta.run_id, seg))
+            self._segments.pop(delta.run_id, None)
+
+    async def flush_segment(self, run_id: str) -> None:
+        """Persist this run's pending segments. Called on call end, on tool
+        call, and on run end; safe to call when there is nothing buffered.
+        publish_token is sync and only queues -- this is the async boundary
+        where the queued/current buffer actually gets written."""
+        pending = [(rid, seg) for rid, seg in self._pending_flushes if rid == run_id]
+        self._pending_flushes = [x for x in self._pending_flushes if x[0] != run_id]
+        seg = self._segments.pop(run_id, None)
+        if seg is not None:
+            pending.append((run_id, seg))
+        for rid, s in pending:
+            text = "".join(s.parts)
+            if not text:
+                continue
+            await self.emit(TelemetryEventType.LLM_OUTPUT_SEGMENT, rid,
+                            LlmOutputSegment(run_id=rid, agent_name=s.agent_name,
+                                             kind=s.kind, text=text))
 
     def in_llm_call(self, run_id: str) -> bool:
         return run_id in self._open_calls
