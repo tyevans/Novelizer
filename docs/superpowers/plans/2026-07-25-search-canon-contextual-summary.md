@@ -939,15 +939,13 @@ import novelizer.runtime as runtime_mod
 
 
 def test_phase_a_toolkit_passes_backend_settings_and_callbacks():
-    src = inspect.getsource(runtime_mod.NovelizerRuntime._phase_a_toolkit)
+    src = inspect.getsource(runtime_mod.Runtime._phase_a_toolkit)
     assert "backend=backend" in src
     assert "settings_provider=lambda: self.settings" in src
     assert "callbacks=self._llm_callbacks" in src
 ```
 
-If the runtime class is not named `NovelizerRuntime`, use the actual class
-name — find it with `grep -n "_phase_a_toolkit" -B 40 novelizer/runtime.py |
-grep "^.*class "`.
+The class is `Runtime` (`novelizer/runtime.py:212`), not `NovelizerRuntime`.
 
 - [ ] **Step 2: Run test to verify it fails**
 
