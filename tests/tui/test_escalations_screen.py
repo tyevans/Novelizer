@@ -105,3 +105,36 @@ async def test_clear_escalation_commits_event_and_refreshes(db_path):
             assert human_cleared[0].payload.get("escalation_clear_note") == "resolved by hand"
     finally:
         await rt.close()
+
+
+async def test_clearing_an_already_cleared_flag_commits_nothing(db_path):
+    # The selected flag can be cleared out from under the screen by the owning
+    # agent resolving it. Pressing the button on that stale selection must not
+    # append a second FLAG_ESCALATION_CLEARED -- the projection is a faithful
+    # fold of the log, so the guard has to sit upstream of the commit.
+    from textual.widgets import Button
+
+    app, rt = await _app_with_escalated_flag(db_path)
+    try:
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+e")
+            await pilot.pause()
+            screen = app.screen
+            table = screen.query_one("#escalations-table", DataTable)
+            table.move_cursor(row=0)
+            await pilot.press("enter")
+            await pilot.pause()
+            screen._selected = screen._selected.model_copy(update={"escalated": False})
+            await screen.on_button_pressed(
+                Button.Pressed(screen.query_one("#escalations-clear-button", Button))
+            )
+            await pilot.pause()
+            events = await rt.events.events_for_aggregate("f1")
+            human_cleared = [
+                e for e in events
+                if e.event_type == EventType.FLAG_ESCALATION_CLEARED
+                and e.payload.get("escalation_cleared_by") == "human"
+            ]
+            assert human_cleared == []
+    finally:
+        await rt.close()

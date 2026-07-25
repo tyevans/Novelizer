@@ -335,3 +335,32 @@ def test_styled_body_applies_tool_style_to_tool_lines():
 def test_styled_body_leaves_prose_unstyled():
     text = styled_body("plain prose line")
     assert text.spans == []
+
+
+# --- the idle vitals line says why ------------------------------------------
+
+def test_idle_vitals_line_reports_the_hold_reason():
+    """"idle -- waiting for the scheduler" was true of a rate-limited agent, a
+    crash-looping agent and a converged one alike, which made it useless."""
+    line = vitals_line(LiveRunState(), now=100.0, theme=THEME,
+                       hold="waiting on LLM pool permit")
+    assert line == "idle — waiting on LLM pool permit"
+
+
+def test_idle_vitals_line_falls_back_when_no_reason_is_known():
+    assert vitals_line(LiveRunState(), now=100.0, theme=THEME) == (
+        "idle — waiting for the scheduler")
+
+
+def test_a_running_vitals_line_ignores_a_stale_hold_reason():
+    """The hold is polled from the scheduler on a different cadence than the
+    token stream; a leftover reason must never caption a live run."""
+    running = LiveRunState(status="running", agent_name="author", started_at=100.0,
+                           model="m", tokens=5)
+    assert "pool" not in vitals_line(running, now=110.0, theme=THEME,
+                                     hold="waiting on LLM pool permit")
+
+
+def test_styled_vitals_threads_the_hold_reason_through():
+    text = styled_vitals(LiveRunState(), now=2.0, theme=THEME, hold="paused")
+    assert text.plain == "? idle — paused"

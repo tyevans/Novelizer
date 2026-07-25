@@ -9,7 +9,7 @@ See docs/agent-prompting/proposal-author.md §3.
 """
 from __future__ import annotations
 
-from novelizer.agents.author import _summarize
+from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT, _summarize
 from novelizer.store.models import Chapter, Character, WorldEntry
 
 
@@ -79,3 +79,20 @@ class TestPriorChapterFidelity:
         assert "SECRET PROSE" not in sent
         assert "Chapter index:" in sent
         assert "ch001" in sent
+
+
+def test_author_instructions_define_what_a_secret_is():
+    """The Author is the only agent that can originate a secret, and its
+    context carries nothing about secrets until one already exists
+    (known_secrets_note returns "" when there are none). So the standing
+    instructions are the only place a first secret can come from, and they
+    have to say what qualifies -- thread_intents and promise_intents both
+    define their subject ("load-bearing promise to the reader", "Chekhov's
+    gun"); knowledge_intents used to name the action without ever defining
+    a secret.
+    """
+    text = AUTHOR_SYSTEM_PROMPT
+    assert "knowledge_intents" in text
+    assert "withheld" in text
+    # Names the asymmetry that makes a secret a secret, not just a fact.
+    assert "who knows" in text or "knows it" in text

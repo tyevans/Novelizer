@@ -36,7 +36,8 @@ what the prose actually says, never from what you expect it to say.
   Cite arc and beat ids exactly.
 - Record knowledge: when a chapter shows a character learning a secret ON THE PAGE, emit a
   knowledge intent (action="learn", the secret's id, the character's id). A character merely acting
-  on a secret is not a learning moment and is not yours to record.
+  on a secret is not a learning moment and is not yours to record. When your context lists no
+  active secrets there is no id to cite, so emit no knowledge intents at all — never invent one.
 - Flag character contradictions: when a canonical trait and a prose action genuinely conflict, file
   a retcon_request (what conflicts with what, the conflicting ids, a proposed resolution).
 
@@ -316,15 +317,18 @@ class CharacterKeeper(BaseAgent):
                 flag = Flag(category=r.category, filed_by=self.name, description=r.description,
                             related_entry_ids=r.related_entry_ids, proposed_resolution=r.proposed_resolution)
                 await self._committer.commit(self.name, EventType.FLAG_CREATED, flag.id, flag)
-        active_secret_ids = {s.id for s in ctx.get("secrets", [])}
-        await self._commit_knowledge_intents(
-            out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"})
-        )
         # Use the in-memory seen_ids (not a fresh re-read): the ReadStore only
         # updates on the Projector's periodic catch_up, so a character minted
         # earlier in this same commit() would be invisible to a re-read here,
-        # silently dropping an arc declare for a character created moments ago.
+        # silently dropping an arc declare -- or a `learn` intent -- for a
+        # character created moments ago. This is the whole reason the roster is
+        # computed here rather than inside each commit helper.
         character_ids = seen_ids
+        active_secret_ids = {s.id for s in ctx.get("secrets", [])}
+        await self._commit_knowledge_intents(
+            out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"}),
+            character_ids=character_ids,
+        )
         # Known limitation: this active_arc_ids re-read has the same theoretical
         # staleness for a declare-then-advance-in-one-pass (an arc declared above
         # in this same commit() won't appear here either) -- left as-is since

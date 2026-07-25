@@ -832,3 +832,15 @@ async def test_readiness_stays_open_until_backlog_drained(stack):
     await events.append(EventType.CHAPTER_CREATED, "ch4", Chapter(id="ch4", title="Ch4", prose=prose))
     await proj.catch_up()
     assert await agent.readiness() > 0.0  # new prose reopens the gate
+
+
+def test_keeper_prompt_tells_it_what_to_do_when_no_secrets_exist():
+    """The Keeper's only secret action is `learn`, which needs an id from a
+    citation aid that is empty until a secret exists. Silence in that state
+    invites an invented id; the prompt has to name the empty case."""
+    from novelizer.agents.character_keeper import SYSTEM_PROMPT
+
+    # The prompt is hard-wrapped, so match on collapsed whitespace.
+    flat = " ".join(SYSTEM_PROMPT.split()).lower()
+    assert "lists no active secrets" in flat
+    assert "never invent one" in flat

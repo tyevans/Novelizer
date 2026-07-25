@@ -777,3 +777,34 @@ async def test_default_fingerprint_disables_watermarking():
     agent = BaseAgent(runner=None, read_store=None, committer=None, interval=0)
     await agent._record_watermark()
     assert await agent._gate_on_watermark(0.7) == 0.7
+
+
+async def test_commit_knowledge_intents_learn_dropped_when_character_unknown(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="phantom")],
+        active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_uses_dropped_when_character_unknown(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="uses", id="the-heir-lives", character_id="phantom")],
+        active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
+    )
+    assert await events.events_since(0) == []
+
+
+async def test_commit_knowledge_intents_matches_character_id_after_normalizing(stack):
+    events, proj, read, committer = stack
+    agent = BaseAgent(None, read, committer, interval=60, name="author")
+    await agent._commit_knowledge_intents(
+        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="  Mara ")],
+        active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
+    )
+    log = await events.events_since(0)
+    assert len(log) == 1 and log[0].payload["character_id"] == "mara"

@@ -108,10 +108,11 @@ class BaseAgent(_KitBaseAgent):
         chapter_id: str = "",
         allowed_actions: frozenset[str] = frozenset({"plant", "learn", "reveal", "uses"}),
         source: str = "declared",
+        character_ids: set[str] | None = None,
     ) -> None:
         await intent_helpers.commit_knowledge_intents(
             self._committer, self.name, intents, active_secret_ids, chapter_id=chapter_id,
-            allowed_actions=allowed_actions, source=source,
+            allowed_actions=allowed_actions, source=source, character_ids=character_ids,
         )
 
     async def _commit_causal_intents(

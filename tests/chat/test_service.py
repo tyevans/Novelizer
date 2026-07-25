@@ -318,3 +318,27 @@ async def test_runtime_wires_advisory_token_budget_into_chat_service(db_path):
         assert rt.chat.advisory_token_budget == rt.settings.advisory_token_budget
     finally:
         await rt.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_knowledge_intent_citing_unknown_character_is_dropped(db_path):
+    """The chat path validates the secret id but was the one caller not passing
+    a character roster, so a hallucinated character_id wrote a phantom
+    secret_knowledge row from the chat window."""
+    from novelizer.store.models import Character
+
+    reply = ChatReply(
+        reply_text="Noted.",
+        knowledge_intents=[KnowledgeIntent(action="learn", id="s1", character_id="phantom")],
+    )
+    rt = await _runtime(db_path, {"chat_author": _R(reply)})
+    try:
+        await rt.events.append(EventType.SECRET_CREATED, "s1", SecretCreated(id="s1", title="The Debt"))
+        await rt.events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+        await rt.projector.catch_up()
+        await rt.chat.send("author", "mara learns about the debt")
+        await rt.chat.generate_reply("author")
+        log = await rt.events.events_since(0)
+        assert not [e for e in log if e.event_type == EventType.SECRET_LEARNED]
+    finally:
+        await rt.close()

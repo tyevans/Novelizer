@@ -9,6 +9,9 @@ from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.canon.flags import (
+    mark_dismissed, mark_escalated, mark_stale, may_decide, may_escalate,
+)
 from novelizer.store.models import FlagStatus
 
 logger = logging.getLogger(__name__)
@@ -100,16 +103,19 @@ class Triage(BaseAgent):
     async def commit(self, out: TriageVerdict | None, ctx: dict) -> None:
         original = ctx["target"]
         flag = original
-        if flag is None or out is None:
+        # Triage only ever acts on flags it polled as open; a target the owning
+        # agent decided between poll and commit is stale, and re-deciding or
+        # escalating it would put a phantom on the queue.
+        if flag is None or out is None or not may_decide(flag):
             return
         if out.verdict == "dismiss":
-            rejected = flag.model_copy(update={"status": FlagStatus.rejected, "resolved_by": self.name})
-            await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id, rejected)
+            await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id,
+                                         mark_dismissed(flag, by=self.name))
             await self._remark(out.feed_note)
             return
         flag = flag.model_copy(update={"severity": out.severity})
-        if out.severity == "critical" and not flag.escalated:
-            flag = flag.model_copy(update={"escalated": True})
+        if out.severity == "critical" and may_escalate(flag):
+            flag = mark_escalated(flag)
             await self._committer.commit(self.name, EventType.FLAG_ESCALATED, flag.id, flag)
         owner = _CATEGORY_OWNERS.get(flag.category)
         if owner is not None:
@@ -133,7 +139,7 @@ class Triage(BaseAgent):
             return
         passes = flag.triage_passes + 1
         if passes >= self._stale_after:
-            aged = flag.model_copy(update={"triage_passes": passes, "status": FlagStatus.stale})
+            aged = mark_stale(flag, by=self.name, triage_passes=passes)
             await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id, aged)
         else:
             aged = flag.model_copy(update={"triage_passes": passes})

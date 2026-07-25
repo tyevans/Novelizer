@@ -140,3 +140,15 @@ async def test_engine_room_trace_rows_and_detail_pane():
         detail = app.query_one("#er_detail", Static)
         assert detail.display is True
         assert "some detail text" in str(detail.renderable)
+
+
+@pytest.mark.asyncio
+async def test_engine_room_agent_pane_shows_why_an_idle_agent_is_not_producing():
+    app = _EngineRoomHarness()
+    async with app.run_test() as pilot:
+        room = app.query_one("#engine_room", EngineRoom)
+        room.render_agent_live("editor", LiveRunState(), now=1.0,
+                              hold="backing off after error · retry in 12s")
+        await pilot.pause()
+        vitals = app.query_one("#er_vitals_editor", Static)
+        assert "backing off after error · retry in 12s" in str(vitals.renderable)

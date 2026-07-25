@@ -23,6 +23,7 @@ from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.canon.flags import FAILURE_ESCALATION_THRESHOLD
 from novelizer.agents.triage import Triage
 from novelizer.agents.retconner import Retconner
 from novelizer.agents.schemas import TriageVerdict, RetconAmendments
@@ -104,7 +105,7 @@ async def test_repeated_failure_escalates_minor_flag(stack):
     await proj.catch_up()
 
     retconner = Retconner(FakeRunner(RetconAmendments()), read, committer)
-    for _ in range(Retconner._FAILURE_ESCALATION_THRESHOLD):
+    for _ in range(FAILURE_ESCALATION_THRESHOLD):
         current = (await read.list_flags(category="contradiction"))[0]
         assert current.status == FlagStatus.open
         await retconner._decline(current, "cannot_reproduce", "no evidence")
@@ -122,5 +123,5 @@ async def test_repeated_failure_escalates_minor_flag(stack):
     escalated = await read.list_flags(escalated=True)
     assert len(escalated) == 1
     assert escalated[0].id == "f2"
-    assert escalated[0].failed_attempts == Retconner._FAILURE_ESCALATION_THRESHOLD
+    assert escalated[0].failed_attempts == FAILURE_ESCALATION_THRESHOLD
     assert escalated[0].severity == "minor"

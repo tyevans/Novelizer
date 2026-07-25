@@ -89,8 +89,17 @@ class Scheduler:
             if a.name in names:
                 a.resume()
 
+    @staticmethod
+    def _hold(agent, now: float) -> tuple[str | None, float]:
+        """The agent's own verdict on which ladder is holding it, flattened for
+        a status row. Optional surface, like seconds_until_ready: a bare
+        dispatchable object must not break the status bar."""
+        held = agent.hold(now) if hasattr(agent, "hold") else None
+        return held if held is not None else (None, 0.0)
+
     def status(self) -> list:
         now = self._clock()
+        holds = {a.name: self._hold(a, now) for a in self._agents}
         return [
             {
                 "name": a.name,
@@ -104,6 +113,12 @@ class Scheduler:
                 "last_completed": a.name == self._last_completed,
                 "run_count": self._run_count.get(a.name, 0),
                 "next_ready_in": a.seconds_until_ready(now) if hasattr(a, "seconds_until_ready") else 0.0,
+                # WHY it is not producing, when a ladder is the answer:
+                # "backing off" (erroring) vs "awaiting progress" (nothing to
+                # react to). None means no ladder holds it -- it is simply
+                # queued behind the dispatch cap.
+                "hold_reason": holds[a.name][0],
+                "hold_seconds": holds[a.name][1],
             }
             for a in self._agents
         ]
@@ -209,7 +224,11 @@ class Scheduler:
             elif a.name in self._in_flight:
                 state = (False, "running")
             elif not a.ready(now):
-                state = (False, "backing off")
+                # The holding ladder by name, from the agent that owns it: a
+                # quiet agent is "awaiting progress", not "backing off" --
+                # calling both the latter blamed a healthy converged agent for
+                # an error it never had.
+                state = (False, self._hold(a, now)[0] or "backing off")
             elif a.name in scores and scores[a.name] <= 0.0:
                 state = (False, "readiness 0")
             elif not gate_open:

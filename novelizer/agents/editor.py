@@ -85,8 +85,15 @@ file it regardless of verdict.
   what-works summary. The full ranked issue list belongs in `craft_flags`, not here.
 - `craft_flags`: the ranked, quoted craft issues from above, capped as described.
 - `thread_intents` / `theme_intents` / `knowledge_intents` / `causal_intents`: ONLY what this prose
-  demonstrably enacts, each citing an existing id from the context block. Emit none if the prose
-  shows none — an empty list is the correct and common answer.
+  demonstrably enacts. Anything acting on an existing entity cites its exact id from the context
+  block; a `plant` mints a new id from the title you give it, so it needs no id to cite and stays
+  available when the context block lists none yet. Emit none if the prose shows none — an empty
+  list is the correct and common answer.
+- `knowledge_intents` specifically: a secret is withheld knowledge some characters hold and others
+  do not — defined by who knows it. `plant` one when the prose establishes something a character
+  conceals, or hands one character knowledge another lacks, and `learn` it for the holders in the
+  same pass; `reveal`/`uses` cite an existing secret id. A fact nobody is hiding is world detail,
+  not a secret, and padding this list is worse than leaving it empty.
 - `promise_intents`: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or a red
   herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers);
   progress/pay/release cite an existing promise id exactly.
@@ -148,6 +155,7 @@ class Editor(BaseAgent):
             "threads": await self._read.list_threads(),
             "scores": await self._read.list_structure_scores(),
             "secrets": await self._read.list_secrets(),
+            "characters": await self._read.list_characters(),
             "chapters": await self._read.list_chapters(),
             "causal_edges": await self._read.list_causal_edges(),
             "themes": await self._read.list_themes(),
@@ -264,7 +272,10 @@ class Editor(BaseAgent):
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
-        await self._commit_knowledge_intents(verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id)
+        await self._commit_knowledge_intents(
+            verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id,
+            character_ids={c.id for c in ctx["characters"]},
+        )
         valid_chapter_ids = {c.id for c in ctx["chapters"]}
         await self._commit_causal_intents(verdict.causal_intents, valid_chapter_ids)
         if verdict.voice_drift_flags:

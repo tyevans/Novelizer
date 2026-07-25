@@ -208,7 +208,11 @@ def strip_line(state: LiveRunState, now: float, theme: AgentTheme, next_hint: st
     return f"idle · {next_hint}" if next_hint else "idle"
 
 
-def vitals_line(state: LiveRunState, now: float, theme: AgentTheme) -> str:
+def vitals_line(state: LiveRunState, now: float, theme: AgentTheme, hold: str = "") -> str:
+    """`hold` is the scheduler's reason this agent is not producing (see
+    tui_kit.widgets.roster.hold_phrase). It captions the idle line only: the
+    hold is polled on a different cadence than the token stream, so a leftover
+    reason must never caption a live run."""
     if state.status == "running":
         verb = theme.verb(state.agent_name)
         model = state.model or "?"
@@ -219,7 +223,7 @@ def vitals_line(state: LiveRunState, now: float, theme: AgentTheme) -> str:
     if state.status == "finished":
         return (f"{state.agent_name} · finished · "
                 f"{int(state.ended_at - state.started_at)}s · {_fmt_tokens(state.tokens)}")
-    return "idle — waiting for the scheduler"
+    return f"idle — {hold}" if hold else "idle — waiting for the scheduler"
 
 
 def live_body(state: LiveRunState) -> str:
@@ -284,10 +288,11 @@ def stream_line_kind(line: str) -> str:
 _LINE_STYLES = {"tool": "bold cyan", "call": "dim", "thinking": "italic dim magenta"}
 
 
-def styled_vitals(state: LiveRunState, now: float, theme: AgentTheme) -> Text:
+def styled_vitals(state: LiveRunState, now: float, theme: AgentTheme,
+                  hold: str = "") -> Text:
     glyph = theme.glyph(state.agent_name)
     style = theme.style(state.agent_name)
-    return Text(f"{glyph} {vitals_line(state, now, theme)}", style=style)
+    return Text(f"{glyph} {vitals_line(state, now, theme, hold)}", style=style)
 
 
 def styled_body(body: str) -> Text:

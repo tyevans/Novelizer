@@ -119,7 +119,14 @@ the story's spine — and only that:
   red herring), optionally with a target payoff window (window_lo/window_hi, 1-based
   chapter numbers); `progress`/`pay`/`release` cite an existing promise id exactly.
 - knowledge_intents — `plant` a real secret, or mark a character `learn`/`uses`/`reveal`
-  on an existing secret id.
+  on an existing secret id. A secret is withheld knowledge that some characters hold and
+  others do not: it is defined by who knows it, and it earns its keep by making a later
+  scene land differently for the reader than for the character in the dark. A fact nobody
+  is hiding is world detail, not a secret. When a chapter establishes something a
+  character conceals, or gives one character knowledge another lacks, `plant` it and
+  `learn` it for the holders in the same pass — otherwise the asymmetry lives only in the
+  prose, and no other agent can pace its reveal or catch a character acting on knowledge
+  they never earned.
 - causal_intents — link two existing chapters when one genuinely causes the other.
 - theme_intents — `introduce` or `develop` a motif the chapter truly carries.
 Leave a list empty rather than padding it: a marginal or invented thread is worse than
@@ -355,7 +362,10 @@ class Author(BaseAgent):
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter_id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
-        await self._commit_knowledge_intents(draft.knowledge_intents, active_secret_ids, chapter_id=chapter_id)
+        await self._commit_knowledge_intents(
+            draft.knowledge_intents, active_secret_ids, chapter_id=chapter_id,
+            character_ids={c.id for c in ctx["characters"]},
+        )
         await self._commit_causal_intents(draft.causal_intents, valid_chapter_ids)
         await self._commit_flag_drafts(draft.flags, category="craft")
         await self._remark(draft.feed_note)
