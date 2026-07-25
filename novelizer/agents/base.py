@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from novelizer.brain.context import rejected_flags_note
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
-    ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
+    ThreadIntent, SecretPlant, SecretCitation, CausalIntent, ThemeIntent, PromiseIntent,
     BlueprintPlan, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent, FlagDraft,
 )
 from novelizer.store.models import ChapterBriefRecord, Flag, FlagStatus
@@ -18,7 +18,8 @@ class ChapterDraft(BaseModel):
     character_ids: list[str] = Field(default_factory=list)
     feed_note: str = ""
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
-    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    secret_plants: list[SecretPlant] = Field(default_factory=list)
+    secret_citations: list[SecretCitation] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     promise_intents: list[PromiseIntent] = Field(default_factory=list)
@@ -115,17 +116,27 @@ class BaseAgent(_KitBaseAgent):
             embedding_store=embedding_store, read_store=self._read,
         )
 
-    async def _commit_knowledge_intents(
+    async def _commit_secret_plants(
         self,
-        intents: list[KnowledgeIntent],
+        plants: list[SecretPlant],
         active_secret_ids: set[str],
         chapter_id: str = "",
-        allowed_actions: frozenset[str] = frozenset({"plant", "learn", "reveal", "uses"}),
+    ) -> None:
+        await intent_helpers.commit_secret_plants(
+            self._committer, self.name, plants, active_secret_ids, chapter_id=chapter_id,
+        )
+
+    async def _commit_secret_citations(
+        self,
+        citations: list[SecretCitation],
+        active_secret_ids: set[str],
+        chapter_id: str = "",
+        allowed_actions: frozenset[str] = frozenset({"learn", "reveal", "uses"}),
         source: str = "declared",
         character_ids: set[str] | None = None,
     ) -> None:
-        await intent_helpers.commit_knowledge_intents(
-            self._committer, self.name, intents, active_secret_ids, chapter_id=chapter_id,
+        await intent_helpers.commit_secret_citations(
+            self._committer, self.name, citations, active_secret_ids, chapter_id=chapter_id,
             allowed_actions=allowed_actions, source=source, character_ids=character_ids,
         )
 

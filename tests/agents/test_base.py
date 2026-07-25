@@ -160,15 +160,15 @@ async def test_commit_thread_intents_plant_colliding_with_active_id_downgrades_t
     assert log[0].payload == {"id": "the-locket", "chapter_id": "c1", "note": "still going", "source": "declared", "evidence": ""}
 
 
-from novelizer.agents.schemas import KnowledgeIntent
+from novelizer.agents.schemas import SecretPlant, SecretCitation
 from novelizer.canon.events import SecretCreated
 
 
-async def test_commit_knowledge_intents_plant_mints_slugged_id(stack):
+async def test_commit_secret_plants_mints_slugged_id(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="plant", title="The Heir Lives")], active_secret_ids=set(),
+    await agent._commit_secret_plants(
+        [SecretPlant(title="The Heir Lives")], active_secret_ids=set(),
     )
     await proj.catch_up()
     log = await events.events_since(0)
@@ -178,28 +178,28 @@ async def test_commit_knowledge_intents_plant_mints_slugged_id(stack):
     assert log[0].payload["title"] == "The Heir Lives"
 
 
-async def test_commit_knowledge_intents_plant_dropped_when_title_blank(stack):
+async def test_commit_secret_plants_dropped_when_title_blank(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents([KnowledgeIntent(action="plant", title="   ")], active_secret_ids=set())
+    await agent._commit_secret_plants([SecretPlant(title="   ")], active_secret_ids=set())
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_plant_dropped_on_id_collision(stack):
+async def test_commit_secret_plants_dropped_on_id_collision(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="plant", title="The Heir Lives")],
+    await agent._commit_secret_plants(
+        [SecretPlant(title="The Heir Lives")],
         active_secret_ids={"the-heir-lives"},
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_learn_commits_when_id_known(stack):
+async def test_commit_secret_citations_learn_commits_when_id_known(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="found the letter")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="the-heir-lives", character_id="mara", note="found the letter")],
         active_secret_ids={"the-heir-lives"}, chapter_id="c2",
     )
     log = await events.events_since(0)
@@ -208,29 +208,29 @@ async def test_commit_knowledge_intents_learn_commits_when_id_known(stack):
     assert log[0].payload == {"id": "the-heir-lives", "character_id": "mara", "chapter_id": "c2", "note": "found the letter", "source": "declared", "evidence": ""}
 
 
-async def test_commit_knowledge_intents_learn_dropped_when_character_id_blank(stack):
+async def test_commit_secret_citations_learn_dropped_when_character_id_blank(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="the-heir-lives")], active_secret_ids={"the-heir-lives"},
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="the-heir-lives")], active_secret_ids={"the-heir-lives"},
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_drops_unknown_id_with_no_event(stack):
+async def test_commit_secret_citations_drops_unknown_id_with_no_event(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="reveal", id="not-a-real-secret")], active_secret_ids={"the-heir-lives"},
+    await agent._commit_secret_citations(
+        [SecretCitation(action="reveal", id="not-a-real-secret")], active_secret_ids={"the-heir-lives"},
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_reveal_commits_without_character_id(stack):
+async def test_commit_secret_citations_reveal_commits_without_character_id(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="editor")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="reveal", id="the-heir-lives", note="told the crowd")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="reveal", id="the-heir-lives", note="told the crowd")],
         active_secret_ids={"the-heir-lives"}, chapter_id="c5",
     )
     log = await events.events_since(0)
@@ -239,11 +239,11 @@ async def test_commit_knowledge_intents_reveal_commits_without_character_id(stac
     assert log[0].payload == {"id": "the-heir-lives", "chapter_id": "c5", "note": "told the crowd", "evidence": ""}
 
 
-async def test_commit_knowledge_intents_uses_commits_secret_referenced(stack):
+async def test_commit_secret_citations_uses_commits_secret_referenced(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="uses", id="the-heir-lives", character_id="mara")],
         active_secret_ids={"the-heir-lives"}, chapter_id="c6",
     )
     log = await events.events_since(0)
@@ -251,20 +251,24 @@ async def test_commit_knowledge_intents_uses_commits_secret_referenced(stack):
     assert log[0].payload["character_id"] == "mara"
 
 
-async def test_commit_knowledge_intents_respects_allowed_actions(stack):
+async def test_commit_secret_citations_respects_allowed_actions(stack):
+    """The Keeper is passed allowed_actions={"learn"}, so a `reveal` it somehow
+    emitted is refused. Note it can no longer even ATTEMPT a plant: KeeperOutput
+    has no secret_plants field, so Locked decision #1 is now enforced by the
+    schema rather than by this check (see test_schemas)."""
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="plant", title="Should Not Commit")],
-        active_secret_ids=set(), allowed_actions=frozenset({"learn"}),
+    await agent._commit_secret_citations(
+        [SecretCitation(action="reveal", id="the-heir-lives")],
+        active_secret_ids={"the-heir-lives"}, allowed_actions=frozenset({"learn"}),
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_noop_on_empty_list(stack):
+async def test_commit_secret_citations_noop_on_empty_list(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents([], active_secret_ids=set())
+    await agent._commit_secret_citations([], active_secret_ids=set())
     assert await events.events_since(0) == []
 
 
@@ -337,11 +341,11 @@ async def test_commit_thread_intents_accepts_explicit_source(stack):
     assert log[0].payload["source"] == "mined"
 
 
-async def test_commit_knowledge_intents_accepts_explicit_source(stack):
+async def test_commit_secret_citations_accepts_explicit_source(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="the-heir-lives", character_id="mara")],
         active_secret_ids={"the-heir-lives"}, source="mined",
     )
     await proj.catch_up()
@@ -586,11 +590,11 @@ async def test_commit_theme_intents_introduce_noop_when_no_embedding_store(stack
     assert theme is not None
 
 
-async def test_commit_knowledge_intents_normalizes_character_id_casing(stack):
+async def test_commit_secret_citations_normalizes_character_id_casing(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="character_keeper")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="s1", character_id="Kestrel")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="s1", character_id="Kestrel")],
         active_secret_ids={"s1"}, allowed_actions=frozenset({"learn"}),
     )
     log = await events.events_since(0, event_types=[EventType.SECRET_LEARNED])
@@ -598,11 +602,11 @@ async def test_commit_knowledge_intents_normalizes_character_id_casing(stack):
     assert log[0].payload["character_id"] == "kestrel"
 
 
-async def test_commit_knowledge_intents_normalizes_id_casing_for_membership_check(stack):
+async def test_commit_secret_citations_normalizes_id_casing_for_membership_check(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="uses", id="S1", character_id="kestrel")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="uses", id="S1", character_id="kestrel")],
         active_secret_ids={"s1"},
     )
     log = await events.events_since(0, event_types=[EventType.SECRET_REFERENCED])
@@ -779,31 +783,31 @@ async def test_default_fingerprint_disables_watermarking():
     assert await agent._gate_on_watermark(0.7) == 0.7
 
 
-async def test_commit_knowledge_intents_learn_dropped_when_character_unknown(stack):
+async def test_commit_secret_citations_learn_dropped_when_character_unknown(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="phantom")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="the-heir-lives", character_id="phantom")],
         active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_uses_dropped_when_character_unknown(stack):
+async def test_commit_secret_citations_uses_dropped_when_character_unknown(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="uses", id="the-heir-lives", character_id="phantom")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="uses", id="the-heir-lives", character_id="phantom")],
         active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
     )
     assert await events.events_since(0) == []
 
 
-async def test_commit_knowledge_intents_matches_character_id_after_normalizing(stack):
+async def test_commit_secret_citations_matches_character_id_after_normalizing(stack):
     events, proj, read, committer = stack
     agent = BaseAgent(None, read, committer, interval=60, name="author")
-    await agent._commit_knowledge_intents(
-        [KnowledgeIntent(action="learn", id="the-heir-lives", character_id="  Mara ")],
+    await agent._commit_secret_citations(
+        [SecretCitation(action="learn", id="the-heir-lives", character_id="  Mara ")],
         active_secret_ids={"the-heir-lives"}, character_ids={"mara"},
     )
     log = await events.events_since(0)

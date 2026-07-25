@@ -49,9 +49,9 @@ what the prose actually says, never from what you expect it to say.
   want vs need, arc type — pivot on blueprint beats, and resolve the arc when the story settles it.
   Cite arc and beat ids exactly.
 - Record knowledge: when a chapter shows a character learning a secret ON THE PAGE, emit a
-  knowledge intent (action="learn", the secret's id, the character's id). A character merely acting
+  secret_citation (action="learn", the secret's id, the character's id). A character merely acting
   on a secret is not a learning moment and is not yours to record. When your context lists no
-  active secrets there is no id to cite, so emit no knowledge intents at all — never invent one.
+  active secrets there is no id to cite, so emit no secret_citations at all — never invent one.
 - Flag character contradictions: when a canonical trait and a prose action genuinely conflict, file
   a retcon_request (what conflicts with what, the conflicting ids, a proposed resolution).
 
@@ -73,8 +73,8 @@ existing person under a new label is the failure mode to avoid.
 
 ## Output
 Return new_characters, updated_characters (id + revised arc_status, plus any corrected
-traits/motivations/backstory/voice), retcon_requests, arc intents, and knowledge intents (learn
-only). You may be shown retcon requests already filed and still open: do not re-report those, even
+traits/motivations/backstory/voice), retcon_requests, arc intents, and secret_citations (learn
+only -- you have no field for planting a secret, by design). You may be shown retcon requests already filed and still open: do not re-report those, even
 reworded.""" + DECISIVENESS_NOTE + PASS_PROMPT_INSTRUCTION
 
 # Appended only in the tooled build: the base retrieval note assumes a pushed
@@ -109,7 +109,7 @@ def _merge_outputs(outs: list[KeeperOutput]) -> KeeperOutput:
         merged.new_characters.extend(o.new_characters)
         merged.updated_characters.extend(o.updated_characters)
         merged.flags.extend(o.flags)
-        merged.knowledge_intents.extend(o.knowledge_intents)
+        merged.secret_citations.extend(o.secret_citations)
         merged.arc_intents.extend(o.arc_intents)
         merged.feed_note = o.feed_note or merged.feed_note
     merged.no_action = all(o.no_action for o in outs) if outs else False
@@ -210,7 +210,7 @@ class CharacterKeeper(BaseAgent):
             listing = "\n".join(f"- {s.id} ('{s.title}')" for s in ctx["secrets"])
             secrets_block = (
                 "\n\nActive secrets — when a chapter shows a character learning a secret "
-                "on the page, cite its id in a knowledge intent:\n" + listing
+                "on the page, cite its id in a secret_citation:\n" + listing
             )
         cast = self._guarded_line("In character", self.personality)
         retcons = open_retcons_note(ctx.get("open_retcons", []))
@@ -340,8 +340,8 @@ class CharacterKeeper(BaseAgent):
         # computed here rather than inside each commit helper.
         character_ids = seen_ids
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
-        await self._commit_knowledge_intents(
-            out.knowledge_intents, active_secret_ids, allowed_actions=frozenset({"learn"}),
+        await self._commit_secret_citations(
+            out.secret_citations, active_secret_ids, allowed_actions=frozenset({"learn"}),
             character_ids=character_ids,
         )
         # Known limitation: this active_arc_ids re-read has the same theoretical

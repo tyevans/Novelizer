@@ -1,11 +1,12 @@
 import pytest
 from novelizer.agents.intents import (
-    commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
+    commit_thread_intents, commit_theme_intents, commit_secret_plants, commit_secret_citations,
+    commit_causal_intents,
     commit_promise_intents, commit_blueprint_plan, commit_retarget_intent, commit_brief_intents,
     commit_beat_intents, commit_resolution_plan_intents, commit_arc_intents,
 )
 from novelizer.agents.schemas import (
-    ThreadIntent, ThemeIntent, KnowledgeIntent, CausalIntent, PromiseIntent,
+    ThreadIntent, ThemeIntent, SecretPlant, SecretCitation, CausalIntent, PromiseIntent,
     BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.canon.events import EventType
@@ -61,10 +62,10 @@ async def test_source_is_threaded_through():
 @pytest.mark.asyncio
 async def test_knowledge_allowed_actions_restricts():
     c = FakeCommitter()
-    await commit_knowledge_intents(
+    await commit_secret_citations(
         c, "character_keeper",
-        [KnowledgeIntent(action="reveal", id="s1"),
-         KnowledgeIntent(action="learn", id="s1", character_id="c1")],
+        [SecretCitation(action="reveal", id="s1"),
+         SecretCitation(action="learn", id="s1", character_id="c1")],
         active_secret_ids={"s1"},
         allowed_actions=frozenset({"learn"}),
     )
@@ -680,9 +681,9 @@ async def test_knowledge_learn_drops_unknown_character_id(caplog):
     real character still reads 'unknown', so the LeakDetector would later
     flag that character's legitimate use as a leak."""
     c = FakeCommitter()
-    await commit_knowledge_intents(
+    await commit_secret_citations(
         c, "character_keeper",
-        [KnowledgeIntent(action="learn", id="s1", character_id="ghost")],
+        [SecretCitation(action="learn", id="s1", character_id="ghost")],
         active_secret_ids={"s1"}, character_ids={"c1"},
     )
     assert len(c.commits) == 0
@@ -692,9 +693,9 @@ async def test_knowledge_learn_drops_unknown_character_id(caplog):
 @pytest.mark.asyncio
 async def test_knowledge_uses_drops_unknown_character_id():
     c = FakeCommitter()
-    await commit_knowledge_intents(
+    await commit_secret_citations(
         c, "editor",
-        [KnowledgeIntent(action="uses", id="s1", character_id="ghost")],
+        [SecretCitation(action="uses", id="s1", character_id="ghost")],
         active_secret_ids={"s1"}, character_ids={"c1"},
     )
     assert len(c.commits) == 0
@@ -703,9 +704,9 @@ async def test_knowledge_uses_drops_unknown_character_id():
 @pytest.mark.asyncio
 async def test_knowledge_learn_keeps_known_character_id():
     c = FakeCommitter()
-    await commit_knowledge_intents(
+    await commit_secret_citations(
         c, "character_keeper",
-        [KnowledgeIntent(action="learn", id="s1", character_id="c1")],
+        [SecretCitation(action="learn", id="s1", character_id="c1")],
         active_secret_ids={"s1"}, character_ids={"c1"},
     )
     assert len(c.commits) == 1
@@ -718,21 +719,24 @@ async def test_knowledge_character_validation_is_opt_in():
     must behave exactly as before -- plant/reveal carry no character_id at
     all, so they are never affected either way."""
     c = FakeCommitter()
-    await commit_knowledge_intents(
+    await commit_secret_citations(
         c, "author",
-        [KnowledgeIntent(action="learn", id="s1", character_id="whoever")],
+        [SecretCitation(action="learn", id="s1", character_id="whoever")],
         active_secret_ids={"s1"},
     )
     assert len(c.commits) == 1
 
 
 @pytest.mark.asyncio
-async def test_knowledge_plant_and_reveal_unaffected_by_character_roster():
+async def test_plants_and_reveals_are_unaffected_by_the_character_roster():
+    """Neither carries a character_id, so an empty roster must not touch them.
+    Plants do not even reach the roster check any more -- commit_secret_plants
+    takes no roster argument at all, which is the point of the split."""
     c = FakeCommitter()
-    await commit_knowledge_intents(
-        c, "author",
-        [KnowledgeIntent(action="plant", title="The Heir Lives"),
-         KnowledgeIntent(action="reveal", id="s1")],
+    await commit_secret_plants(c, "author", [SecretPlant(title="The Heir Lives")],
+                               active_secret_ids={"s1"})
+    await commit_secret_citations(
+        c, "author", [SecretCitation(action="reveal", id="s1")],
         active_secret_ids={"s1"}, character_ids=set(),
     )
     assert [x[1] for x in c.commits] == [EventType.SECRET_CREATED, EventType.SECRET_REVEALED]

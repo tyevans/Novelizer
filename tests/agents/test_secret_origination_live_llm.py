@@ -2,22 +2,27 @@
 secret from a story that has none.
 
 Every other secret test starts with a secret already in the room --
-tests/agents/test_author.py injects a KnowledgeIntent fixture (which proves
-only that the commit path is wired) and tests/agents/test_leak_live_llm.py
+tests/agents/test_author.py injects a SecretPlant fixture (which proves only
+that the commit path is wired) and tests/agents/test_leak_live_llm.py
 pre-seeds `the-heir-lives`. That left the origination edge unobserved, and it
 was broken in exactly the way an unobserved edge gets broken: over three
 chapters of a real story the fleet emitted 5 `promise.made`, 5
 `world_entry.created`, 2 `thread.planted`, 2 `theme.introduced` and ZERO
-`secret.*`, while telemetry showed `knowledge_intents` offered in 602 prompts
-and filled in none. Nothing was being dropped by validation; the model was
-never told what a secret is.
+`secret.*`, while telemetry showed the secret slot offered 641 times and
+filled in none. Nothing was being dropped by validation. Three causes were
+found and fixed: the Author never defined what a secret IS, the Editor's
+output contract required every knowledge intent to cite an existing id (which
+forbade planting outright), and -- the structural one -- minting was a 1-in-4
+`action` branch on a merged KnowledgeIntent whose required fields depended on
+which branch you picked. `secret_plants` is now its own list.
 
 The premise here is engineered so a secret is the only honest reading of the
 scene -- one character is concealing something from another, on the page,
 by the chapter's own setup -- and then the REAL Author runs with its
 production prompt and no manual instruction beyond ordinary room state.
-There is no secret to cite, so the only intent that can express what the
-chapter does is `plant`, which mints its own id.
+There is no secret to cite, so `secret_citations` is unusable here by
+construction and `secret_plants` -- which needs only a title -- is the only
+slot that can express what the chapter does.
 
 Requires the configured OpenAI-compatible LLM endpoint
 (`load_effective_settings().llm_base_url`) to be reachable and serving the
@@ -69,7 +74,7 @@ async def test_real_author_plants_the_first_secret_in_a_story_that_has_none(stac
     ))
     # An ordinary seed signal, the same channel the Director uses in a live
     # run: it sets the scene, not the bookkeeping. It says nothing about
-    # secrets, knowledge_intents, or planting -- if the Author declares one,
+    # secrets, secret_plants, or planting -- if the Author declares one,
     # it is reading its own draft, which is the whole point.
     await events.append(EventType.DIRECTOR_SIGNAL_CREATED, "s1", DirectorSignal(
         id="s1", kind=SignalKind.seed, target_agent="author",
@@ -88,13 +93,14 @@ async def test_real_author_plants_the_first_secret_in_a_story_that_has_none(stac
     created = [e for e in log if e.event_type == EventType.SECRET_CREATED]
     assert created, (
         "The real Author wrote a chapter whose premise IS a concealment -- Mara "
-        "withholding from Kestrel what she signed -- and declared no "
-        "knowledge_intents `plant`, so no `secret.created` landed. Nothing was "
-        "dropped by validation (no drop warning is logged for a plant with a "
-        "non-blank title), which means this is a prompt/awareness failure: "
-        "check that AUTHOR_SYSTEM_PROMPT still DEFINES what a secret is under "
-        "`knowledge_intents`, not merely names the action. That definition is "
-        "the fix this test exists to protect."
+        "withholding from Kestrel what she signed -- and left `secret_plants` "
+        "empty, so no `secret.created` landed. Nothing was dropped by "
+        "validation (no drop warning is logged for a plant with a non-blank "
+        "title), which means this is a prompt/awareness failure. Check both "
+        "halves of what this test protects: that AUTHOR_SYSTEM_PROMPT still "
+        "DEFINES what a secret is rather than merely naming the field, and "
+        "that `secret_plants` is still a list of its own on ChapterDraft "
+        "rather than folded back into a multi-action slot."
     )
     secrets = await read.list_secrets()
     assert secrets and secrets[0].title.strip(), (

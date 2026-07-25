@@ -6,7 +6,8 @@ from typing import Callable
 from novelizer.canon.events import EventType, ChatUserMessaged, ChatAgentReplied
 from novelizer.canon.threads import active_thread_ids
 from novelizer.agents.intents import (
-    commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
+    commit_thread_intents, commit_theme_intents, commit_secret_plants, commit_secret_citations,
+    commit_causal_intents,
 )
 from novelizer.chat.personas import CHAT_PERSONAS
 from novelizer.chat.schemas import ChatReply
@@ -159,16 +160,28 @@ class ChatService:
                 await commit_theme_intents(self._committer, agent_name, reply.theme_intents, active_themes, source="chat")
             else:
                 logger.warning("%s: dropped %d theme intents not permitted in chat", agent_name, len(reply.theme_intents))
-        if reply.knowledge_intents:
-            if persona.knowledge_actions:
+        if reply.secret_plants:
+            # Minting is still gated on the persona carrying "plant", not on the
+            # field existing: ChatReply is one schema shared by every persona, so
+            # unlike KeeperOutput it cannot deny the slot structurally.
+            if "plant" in persona.knowledge_actions:
                 active_secrets = {s.id for s in await self._read.list_secrets()}
-                await commit_knowledge_intents(
-                    self._committer, agent_name, reply.knowledge_intents, active_secrets,
-                    allowed_actions=persona.knowledge_actions, source="chat",
+                await commit_secret_plants(
+                    self._committer, agent_name, reply.secret_plants, active_secrets,
+                )
+            else:
+                logger.warning("%s: dropped %d secret plants not permitted in chat", agent_name, len(reply.secret_plants))
+        if reply.secret_citations:
+            citing_actions = persona.knowledge_actions - {"plant"}
+            if citing_actions:
+                active_secrets = {s.id for s in await self._read.list_secrets()}
+                await commit_secret_citations(
+                    self._committer, agent_name, reply.secret_citations, active_secrets,
+                    allowed_actions=citing_actions, source="chat",
                     character_ids={c.id for c in await self._read.list_characters()},
                 )
             else:
-                logger.warning("%s: dropped %d knowledge intents not permitted in chat", agent_name, len(reply.knowledge_intents))
+                logger.warning("%s: dropped %d secret citations not permitted in chat", agent_name, len(reply.secret_citations))
         if reply.causal_intents:
             if persona.allow_causal:
                 valid_chapters = {c.id for c in await self._read.list_chapters()}

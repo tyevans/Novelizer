@@ -15,7 +15,7 @@ import logging
 import pytest
 
 from novelizer.agents import intents as intent_helpers
-from novelizer.agents.schemas import CausalIntent, KnowledgeIntent, ThreadIntent
+from novelizer.agents.schemas import CausalIntent, SecretCitation, ThreadIntent
 from novelizer.canon.events import EventType
 
 
@@ -35,7 +35,7 @@ class TestSchemaAcceptsEvidence:
 
     def test_each_citing_intent_accepts_evidence(self):
         assert ThreadIntent(action="touch", id="t1", evidence="ch003").evidence == "ch003"
-        assert KnowledgeIntent(action="learn", id="s1", character_id="mara",
+        assert SecretCitation(action="learn", id="s1", character_id="mara",
                                evidence="chapters/003-x.md").evidence == "chapters/003-x.md"
         assert CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2",
                             evidence="ch001").evidence == "ch001"
@@ -55,9 +55,9 @@ class TestEvidenceIsRecordedOnTheEvent:
 
     async def test_knowledge_learn_carries_evidence_onto_the_payload(self):
         committer = FakeCommitter()
-        await intent_helpers.commit_knowledge_intents(
+        await intent_helpers.commit_secret_citations(
             committer, "character_keeper",
-            [KnowledgeIntent(action="learn", id="s1", character_id="mara", evidence="ch004")],
+            [SecretCitation(action="learn", id="s1", character_id="mara", evidence="ch004")],
             {"s1"}, chapter_id="c9", allowed_actions=frozenset({"learn"}),
         )
         _, _, payload = committer.commits[0]
@@ -110,8 +110,8 @@ class TestUngroundedCitingIntentsAreVisible:
         committer = FakeCommitter()
         kwargs = {"character_id": "mara"} if action in ("learn", "uses") else {}
         with caplog.at_level(logging.WARNING):
-            await intent_helpers.commit_knowledge_intents(
-                committer, "author", [KnowledgeIntent(action=action, id="s1", **kwargs)],
+            await intent_helpers.commit_secret_citations(
+                committer, "author", [SecretCitation(action=action, id="s1", **kwargs)],
                 {"s1"}, allowed_actions=frozenset({"plant", "learn", "reveal", "uses"}),
             )
         assert "evidence" in caplog.text

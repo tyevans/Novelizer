@@ -98,16 +98,21 @@ file it regardless of verdict.
 - `notes`: on revise, the Author-facing instructions for the rewrite; on approve, the one-line
   what-works summary. The full ranked issue list belongs in `craft_flags`, not here.
 - `craft_flags`: the ranked, quoted craft issues from above, capped as described.
-- `thread_intents` / `theme_intents` / `knowledge_intents` / `causal_intents`: ONLY what this prose
-  demonstrably enacts. Anything acting on an existing entity cites its exact id from the context
-  block; a `plant` mints a new id from the title you give it, so it needs no id to cite and stays
+- `thread_intents` / `theme_intents` / `causal_intents`: ONLY what this prose demonstrably
+  enacts. Anything acting on an existing entity cites its exact id from the context block; a
+  `plant` mints a new id from the name you give it, so it needs no id to cite and stays
   available when the context block lists none yet. Emit none if the prose shows none — an empty
   list is the correct and common answer.
-- `knowledge_intents` specifically: a secret is withheld knowledge some characters hold and others
-  do not — defined by who knows it. `plant` one when the prose establishes something a character
-  conceals, or hands one character knowledge another lacks, and `learn` it for the holders in the
-  same pass; `reveal`/`uses` cite an existing secret id. A fact nobody is hiding is world detail,
-  not a secret, and padding this list is worse than leaving it empty.
+- `secret_plants`: a NEW secret this prose established — a `title` and a note, nothing else; the
+  system mints the id. A secret is withheld knowledge some characters hold and others do not,
+  defined by who knows it. Plant one when the prose establishes something a character conceals,
+  or hands one character knowledge another lacks. This list needs no secret to exist yet, so it
+  stays available when the active-secrets block lists none. A fact nobody is hiding is world
+  detail, not a secret, and padding this list is worse than leaving it empty.
+- `secret_citations`: an action on a secret ALREADY listed in the active-secrets block, citing its
+  exact id — `learn`, `uses`, or `reveal`. `learn`/`uses` name the `character_id`; `reveal` leaves
+  it blank. When the prose both establishes a concealment and gives it a holder, plant it above
+  and cite a `learn` for the holder here in the same pass.
 - `promise_intents`: 'make' plants a discrete setup (a Chekhov's gun, foreshadowing, or a red
   herring), optionally with a target payoff window (window_lo/window_hi, 1-based chapter numbers);
   progress/pay/release cite an existing promise id exactly.
@@ -228,7 +233,7 @@ class Editor(BaseAgent):
         pacing_plan = resolution_pacing_note(ctx["threads"], ctx["secrets"], ctx["chapters"])
         beat_drift = beat_drift_note(ctx.get("blueprint"), ctx.get("beats", []), ctx["chapters"])
         # Citation aid, not knowledge-state injection (that is Author-only per
-        # Locked decision #7): knowledge_intents must cite an existing secret
+        # Locked decision #7): a secret_citation must cite an existing secret
         # id or be dropped at commit time, so the Editor needs the id list in
         # its context to annotate what the prose shows. Empty when no secrets
         # exist -- the prompt stays byte-identical (pinned by tests).
@@ -236,7 +241,7 @@ class Editor(BaseAgent):
         if ctx["secrets"]:
             listing = "\n".join(f"- {s.id} ('{s.title}')" for s in ctx["secrets"])
             secret_ids = (
-                "\n\nActive secrets you may cite by id in knowledge_intents when "
+                "\n\nActive secrets you may cite by id in secret_citations when "
                 "the prose shows a character planting, learning, revealing, or "
                 "using one:\n" + listing
             )
@@ -287,8 +292,9 @@ class Editor(BaseAgent):
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
         active_secret_ids = {s.id for s in ctx["secrets"]}
-        await self._commit_knowledge_intents(
-            verdict.knowledge_intents, active_secret_ids, chapter_id=ch.id,
+        await self._commit_secret_plants(verdict.secret_plants, active_secret_ids, chapter_id=ch.id)
+        await self._commit_secret_citations(
+            verdict.secret_citations, active_secret_ids, chapter_id=ch.id,
             character_ids={c.id for c in ctx["characters"]},
         )
         valid_chapter_ids = {c.id for c in ctx["chapters"]}

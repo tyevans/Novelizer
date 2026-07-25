@@ -102,17 +102,17 @@ def test_chapter_draft_carries_thread_intents():
     assert d.thread_intents[0].name == "The Locket"
 
 
-def test_knowledge_intent_plant_defaults():
-    from novelizer.agents.schemas import KnowledgeIntent
-    intent = KnowledgeIntent(action="plant", title="The Heir Lives")
-    assert intent.id == "" and intent.character_id == "" and intent.note == ""
+def test_secret_plant_defaults():
+    from novelizer.agents.schemas import SecretPlant
+    plant = SecretPlant(title="The Heir Lives")
+    assert plant.note == ""
 
 
-def test_knowledge_intent_learn_roundtrips():
-    from novelizer.agents.schemas import KnowledgeIntent
-    intent = KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="found the letter")
-    again = KnowledgeIntent.model_validate_json(intent.model_dump_json())
-    assert again == intent
+def test_secret_citation_learn_roundtrips():
+    from novelizer.agents.schemas import SecretCitation
+    cite = SecretCitation(action="learn", id="the-heir-lives", character_id="mara", note="found the letter")
+    again = SecretCitation.model_validate_json(cite.model_dump_json())
+    assert again == cite
 
 
 def test_causal_intent_roundtrips():
@@ -122,48 +122,53 @@ def test_causal_intent_roundtrips():
     assert again == intent
 
 
-def test_editor_verdict_default_knowledge_and_causal_intents_empty():
-    assert EditorVerdict().knowledge_intents == []
+def test_editor_verdict_default_secret_and_causal_intents_empty():
+    assert EditorVerdict().secret_plants == []
+    assert EditorVerdict().secret_citations == []
     assert EditorVerdict().causal_intents == []
 
 
-def test_editor_verdict_carries_knowledge_and_causal_intents():
-    from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
+def test_editor_verdict_carries_both_secret_halves_and_causal_intents():
+    from novelizer.agents.schemas import SecretPlant, SecretCitation, CausalIntent
     v = EditorVerdict(
         verdict="approve",
-        knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara")],
+        secret_plants=[SecretPlant(title="The Heir Lives")],
+        secret_citations=[SecretCitation(action="learn", id="the-heir-lives", character_id="mara")],
         causal_intents=[CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2")],
     )
-    assert v.knowledge_intents[0].character_id == "mara"
+    assert v.secret_plants[0].title == "The Heir Lives"
+    assert v.secret_citations[0].character_id == "mara"
     assert v.causal_intents[0].effect_chapter_id == "c2"
 
 
-def test_keeper_output_default_knowledge_intents_empty():
+def test_keeper_output_default_secret_citations_empty():
     from novelizer.agents.schemas import KeeperOutput
-    assert KeeperOutput().knowledge_intents == []
+    assert KeeperOutput().secret_citations == []
 
 
-def test_keeper_output_carries_knowledge_intents():
-    from novelizer.agents.schemas import KeeperOutput, KnowledgeIntent
-    out = KeeperOutput(knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara")])
-    assert out.knowledge_intents[0].id == "the-heir-lives"
+def test_keeper_output_carries_secret_citations():
+    from novelizer.agents.schemas import KeeperOutput, SecretCitation
+    out = KeeperOutput(secret_citations=[SecretCitation(action="learn", id="the-heir-lives", character_id="mara")])
+    assert out.secret_citations[0].id == "the-heir-lives"
 
 
-def test_chapter_draft_default_knowledge_and_causal_intents_empty():
+def test_chapter_draft_default_secret_and_causal_intents_empty():
     from novelizer.agents.base import ChapterDraft
     d = ChapterDraft(title="T", prose="P")
-    assert d.knowledge_intents == [] and d.causal_intents == []
+    assert d.secret_plants == [] and d.secret_citations == [] and d.causal_intents == []
 
 
-def test_chapter_draft_carries_knowledge_and_causal_intents():
+def test_chapter_draft_carries_both_secret_halves_and_causal_intents():
     from novelizer.agents.base import ChapterDraft
-    from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
+    from novelizer.agents.schemas import SecretPlant, SecretCitation, CausalIntent
     d = ChapterDraft(
         title="T", prose="P",
-        knowledge_intents=[KnowledgeIntent(action="plant", title="The Heir Lives")],
+        secret_plants=[SecretPlant(title="The Heir Lives")],
+        secret_citations=[SecretCitation(action="reveal", id="the-heir-lives")],
         causal_intents=[CausalIntent(cause_chapter_id="c1", effect_chapter_id="c2")],
     )
-    assert d.knowledge_intents[0].title == "The Heir Lives"
+    assert d.secret_plants[0].title == "The Heir Lives"
+    assert d.secret_citations[0].character_id == ""
     assert d.causal_intents[0].cause_chapter_id == "c1"
 
 
@@ -256,3 +261,58 @@ def test_curation_decision_shapes():
         action="revise",
         entry=WorldEntryDraft(title="X", body="y", domain="nonsense"),
     ).entry.domain == "other"
+
+
+# -- F6: minting and citing are separate slots ---------------------------------
+#
+# KnowledgeIntent was ONE slot whose action Literal chose between minting
+# (`plant`, needs title) and citing (`learn`/`reveal`/`uses`, need an existing
+# id, and learn/uses a character_id). Requiredness therefore depended on the
+# action -- a shape pydantic cannot express -- so the model got no structural
+# signal about what to fill in. Worse, all three citing actions need a secret
+# that already exists, so in a story with ZERO secrets three of four actions
+# were unreachable by construction and the only reachable one was a 1-in-4
+# branch inside one of seven optional lists. Measured: offered 641 times, fired
+# zero times, and that was still true after the prompt causes were fixed.
+
+
+def test_secret_plant_needs_only_a_title():
+    from novelizer.agents.schemas import SecretPlant
+
+    plant = SecretPlant(title="The Heir Lives")
+    assert plant.title == "The Heir Lives" and plant.note == ""
+    assert not hasattr(plant, "id"), "a plant mints its own id; carrying one invites a citation"
+    assert not hasattr(plant, "character_id")
+
+
+def test_secret_citation_carries_id_and_action_and_cannot_plant():
+    from novelizer.agents.schemas import SecretCitation
+
+    import pydantic
+
+    cite = SecretCitation(action="learn", id="the-heir-lives", character_id="mara")
+    assert cite.evidence == ""
+    with pytest.raises(pydantic.ValidationError):
+        SecretCitation(action="plant", id="x")
+
+
+def test_author_and_editor_carry_both_halves():
+    from novelizer.agents.base import ChapterDraft
+    from novelizer.agents.schemas import EditorVerdict
+
+    for cls in (ChapterDraft, EditorVerdict):
+        fields = cls.model_fields
+        assert "secret_plants" in fields and "secret_citations" in fields, cls.__name__
+        assert "knowledge_intents" not in fields, f"{cls.__name__} still has the merged slot"
+
+
+def test_keeper_cannot_plant_because_it_has_no_slot_to_plant_in():
+    """Locked decision #1 -- minting is reserved to Author/Editor -- was a
+    runtime allowed_actions check the model could still be asked to violate.
+    Denying the Keeper the field makes it unrepresentable instead."""
+    from novelizer.agents.schemas import KeeperOutput
+
+    fields = KeeperOutput.model_fields
+    assert "secret_citations" in fields
+    assert "secret_plants" not in fields
+    assert "knowledge_intents" not in fields

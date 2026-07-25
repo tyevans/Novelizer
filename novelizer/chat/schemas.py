@@ -1,6 +1,8 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent
+from novelizer.agents.schemas import (
+    ThreadIntent, SecretPlant, SecretCitation, CausalIntent, ThemeIntent,
+)
 
 
 class ChatReply(BaseModel):
@@ -10,6 +12,7 @@ class ChatReply(BaseModel):
 
     reply_text: str
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
-    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    secret_plants: list[SecretPlant] = Field(default_factory=list)
+    secret_citations: list[SecretCitation] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
