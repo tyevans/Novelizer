@@ -32,6 +32,8 @@ class GlobalConfig(BaseModel):
     prose_profile: str | None = None
     author_model: str | None = None
     agent_model: str | None = None
+    light_model: str | None = None
+    light_reasoning: bool | None = None
     embed_model: str | None = None
     author_temperature: float | None = None
     agent_temperature: float | None = None
@@ -91,6 +93,8 @@ class StoryConfig(BaseModel):
     prose_profile: str | None = None
     author_model: str | None = None
     agent_model: str | None = None
+    light_model: str | None = None
+    light_reasoning: bool | None = None
     embed_model: str | None = None
     author_temperature: float | None = None
     agent_temperature: float | None = None

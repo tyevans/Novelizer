@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from substrate.agent_registry import AgentContext, AgentSpec, SubagentGrant, ToolGrant
+from substrate.agent_registry import AgentContext, AgentSpec, AgentTier, SubagentGrant, ToolGrant
 from substrate.event_registry import EventTypeRegistry, EventTypeSpec, GatingTier
 from substrate.policy import is_gated
 from substrate.postgres.deps import PostgresDepsStore
@@ -12,6 +12,7 @@ from substrate.runtime import RuntimeBase
 __all__ = [
     "AgentContext",
     "AgentSpec",
+    "AgentTier",
     "EventTypeRegistry",
     "EventTypeSpec",
     "GatingTier",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import pytest
-from substrate.agent_registry import AgentContext, AgentSpec, ToolGrant
+from substrate.agent_registry import AgentTier, AgentContext, AgentSpec, ToolGrant
 
 
 class _Settings:
@@ -12,7 +12,7 @@ def test_agent_spec_is_constructible_with_no_fiction_specific_fields():
     def _construct(ctx):
         return object()
 
-    spec = AgentSpec(name="scout", tool_grant=None, construct=_construct)
+    spec = AgentSpec(name="scout", tool_grant=None, construct=_construct, tier=AgentTier.FULL)
     assert spec.name == "scout"
     assert spec.tool_grant is None
     assert spec.construct is _construct
@@ -46,7 +46,7 @@ def test_agent_spec_is_frozen_and_holds_construct_callable():
         called["ctx"] = ctx
         return "agent-instance"
 
-    spec = AgentSpec(name="author", tool_grant=None, construct=construct)
+    spec = AgentSpec(name="author", tool_grant=None, construct=construct, tier=AgentTier.FULL)
     assert spec.name == "author"
     result = spec.construct("fake-ctx")
     assert result == "agent-instance"

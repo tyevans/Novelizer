@@ -18,6 +18,8 @@ EXPECTED = {
     "SchedulerPicked", "SchedulerEligibilityChanged",
     "current_run_id", "current_agent_name",
     "build_chat_model", "build_agent_runner",
+    "build_light_model", "build_simple_runner",
+    "LIGHT_MAX_TOKENS", "THINKING_TEMPLATE_KEY",
     "GRAPH_RECURSION_LIMIT", "CONTEXT_WINDOW_TOKENS", "LLM_MAX_RETRIES",
     "ExcludeToolsMiddleware",
     # The soft tool-call budget: every domain builder must be able to install it

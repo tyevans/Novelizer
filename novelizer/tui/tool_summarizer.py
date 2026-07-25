@@ -1,6 +1,6 @@
 from __future__ import annotations
 from langchain_core.messages import HumanMessage
-from agent_kit import build_chat_model
+from agent_kit import build_light_model
 
 _PROMPT = (
     "Summarize this tool call in one short plain sentence (under 15 words), "
@@ -19,9 +19,10 @@ async def summarize_tool_call(
     result_line = f"Error: {error}" if error else f"Result: {output_summary}"
     prompt = _PROMPT.format(tool_name=tool_name, input_summary=input_summary,
                             result_line=result_line)
-    model = build_chat_model(
-        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
-        temperature=0.0, max_tokens=40,
+    # Light path: fifteen words describing a tool call that already happened.
+    model = build_light_model(
+        settings.resolved_light_model, settings.llm_base_url, settings.llm_api_key,
+        max_tokens=40, reasoning=settings.light_reasoning,
     )
     response = await model.ainvoke([HumanMessage(content=prompt)])
     text = str(response.content).strip().replace("\n", " ")

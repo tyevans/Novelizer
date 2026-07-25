@@ -218,7 +218,7 @@ def build_structure_analyst_runner(settings, callbacks=None, backend=None, tools
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=StructureAnalystOutput)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> StructureAnalyst:
@@ -240,5 +240,6 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="structure_analyst_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="structure_analyst_subagent_enabled"),
     construct=_construct,
+    tier=AgentTier.FULL,
     rebuild_on=("agent_temperature",),
 )

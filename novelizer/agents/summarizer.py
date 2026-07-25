@@ -160,7 +160,7 @@ def build_summarizer_runner(settings, callbacks=None):
                              response_format=ProviderStrategy(SummarizerOutput))
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier
 
 
 def _construct(ctx: AgentContext) -> Summarizer:
@@ -173,4 +173,5 @@ def _construct(ctx: AgentContext) -> Summarizer:
     )
 
 
-SPEC = AgentSpec(name="summarizer", tool_grant=None, construct=_construct)
+SPEC = AgentSpec(name="summarizer", tool_grant=None, construct=_construct,
+                 tier=AgentTier.FULL)

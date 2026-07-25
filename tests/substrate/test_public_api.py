@@ -4,6 +4,7 @@ import substrate
 EXPECTED_PUBLIC_API = [
     "AgentContext",
     "AgentSpec",
+    "AgentTier",
     "EventTypeRegistry",
     "EventTypeSpec",
     "GatingTier",

@@ -112,6 +112,8 @@ from novelizer.canon_fs.search_summary import summarize
 
 class _Settings:
     agent_model = "m"
+    resolved_light_model = "m"
+    light_reasoning = False
     llm_base_url = "http://x"
     llm_api_key = "k"
     llm_max_tokens = 4096
@@ -138,7 +140,7 @@ class _Model:
 
 def _patch_model(monkeypatch, model):
     monkeypatch.setattr(
-        summary_mod, "build_chat_model", lambda *a, **k: model)
+        summary_mod, "build_light_model", lambda *a, **k: model)
     return model
 
 

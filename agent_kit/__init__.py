@@ -20,11 +20,15 @@ from agent_kit.base import (
 from agent_kit.llm import (
     CONTEXT_WINDOW_TOKENS,
     GRAPH_RECURSION_LIMIT,
+    LIGHT_MAX_TOKENS,
     LLM_MAX_RETRIES,
+    THINKING_TEMPLATE_KEY,
     TOOL_CALL_HARD_MARGIN,
     TOOL_CALL_SOFT_BUDGET,
     build_agent_runner,
     build_chat_model,
+    build_light_model,
+    build_simple_runner,
 )
 from agent_kit.middleware import ExcludeToolsMiddleware, ToolCallBudgetMiddleware
 from agent_kit.pool import AdaptivePool
@@ -60,6 +64,13 @@ __all__ = [
     "current_agent_name",
     "build_chat_model",
     "build_agent_runner",
+    # The light path: a cheap-call model builder and the graph-free runner that
+    # pairs with it. Exported at the root for the same package-boundary reason
+    # as everything else here.
+    "build_light_model",
+    "build_simple_runner",
+    "LIGHT_MAX_TOKENS",
+    "THINKING_TEMPLATE_KEY",
     "GRAPH_RECURSION_LIMIT",
     "CONTEXT_WINDOW_TOKENS",
     "LLM_MAX_RETRIES",
