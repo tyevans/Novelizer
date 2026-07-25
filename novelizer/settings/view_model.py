@@ -19,6 +19,10 @@ from novelizer.settings.toml_io import load_toml_file, write_toml_file
 RESTART_REQUIRED_KEYS: frozenset[str] = frozenset({
     "llm_base_url", "llm_api_key", "llm_max_tokens", "author_model", "agent_model", "embed_model",
     "embed_base_url", "embed_api_key",
+    # light_model is deliberately absent: unlike agent_model, every consumer of
+    # the light tier picks it up live -- flaglabeler names it in rebuild_on, and
+    # the tool/search summarizers construct a model per call. Claiming a restart
+    # here would be the settings screen telling the operator a falsehood.
 })
 
 SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key", "embed_api_key"})

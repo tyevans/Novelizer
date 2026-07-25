@@ -209,7 +209,7 @@ def build_retconner_runner(settings, callbacks=None, backend=None, tools=None, s
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=RetconAmendments)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Retconner:
@@ -230,5 +230,6 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="retconner_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="retconner_subagent_enabled"),
     construct=_construct,
+    tier=AgentTier.FULL,
     rebuild_on=("agent_temperature",),
 )

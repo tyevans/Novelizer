@@ -213,7 +213,7 @@ def build_world_architect_runner(settings, callbacks=None, backend=None, tools=N
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=WorldEntriesDraft)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> WorldArchitect:
@@ -234,5 +234,6 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="world_architect_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="world_architect_subagent_enabled"),
     construct=_construct,
+    tier=AgentTier.FULL,
     rebuild_on=("agent_temperature",),
 )

@@ -72,7 +72,7 @@ class Muse(BaseAgent):
         return hand
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier
 
 
 def _construct(ctx: AgentContext) -> Muse:
@@ -85,4 +85,5 @@ def _construct(ctx: AgentContext) -> Muse:
     )
 
 
-SPEC = AgentSpec(name="muse", tool_grant=None, construct=_construct)
+SPEC = AgentSpec(name="muse", tool_grant=None, construct=_construct,
+                 tier=AgentTier.FULL)

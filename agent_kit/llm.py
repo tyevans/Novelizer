@@ -144,7 +144,8 @@ def build_chat_model(
 
 def build_light_model(
     model: str, base_url: str, api_key: str, *,
-    max_tokens: int = LIGHT_MAX_TOKENS, callbacks=None, **kwargs,
+    max_tokens: int = LIGHT_MAX_TOKENS, callbacks=None,
+    reasoning: bool | None = False, **kwargs,
 ):
     """The one definition of a cheap call: cold, capped, and not thinking.
 
@@ -154,13 +155,17 @@ def build_light_model(
     before this existed. Consolidating them means the reasoning flag (and the
     next such lever) lands in one place rather than five.
 
+    reasoning defaults to False -- suppressing the thinking block is the point
+    of the tier -- but stays overridable, because whether a chat template
+    honors the flag is a property of the served model, not of this function.
+
     Everything else, notably the retry budget, is inherited from
     build_chat_model: cheap must not mean fragile, since a light pass dropped
     to a 429 loses real work just like an expensive one.
     """
     return build_chat_model(
         model, base_url, api_key, temperature=0.0, max_tokens=max_tokens,
-        callbacks=callbacks, reasoning=False, **kwargs,
+        callbacks=callbacks, reasoning=reasoning, **kwargs,
     )
 
 
@@ -178,8 +183,29 @@ class _SimpleRunner:
     """
 
     def __init__(self, model, system_prompt: str, response_format) -> None:
+        self._raw_model = model
         self._model = model.with_structured_output(response_format)
         self._system_prompt = system_prompt
+        self.response_format = response_format
+
+    # A deepagents graph hides its model behind layers of state; this runner has
+    # exactly one, so it can answer what it was built with. Callers use these to
+    # assert the cheap path really is cheap -- otherwise a light agent silently
+    # reverting to the big model is invisible until the bill arrives.
+    @property
+    def model_name(self) -> str:
+        return getattr(self._raw_model, "model_name", None) or self._raw_model.model
+
+    @property
+    def max_tokens(self) -> int | None:
+        return self._raw_model.max_tokens
+
+    @property
+    def thinking_enabled(self) -> bool | None:
+        """What this runner asked the server to do about reasoning, or None if
+        it expressed no preference."""
+        template_kwargs = (self._raw_model.extra_body or {}).get("chat_template_kwargs") or {}
+        return template_kwargs.get(THINKING_TEMPLATE_KEY)
 
     async def ainvoke(self, inputs: dict) -> dict:
         messages = [{"role": "system", "content": self._system_prompt},

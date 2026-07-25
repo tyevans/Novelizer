@@ -215,7 +215,7 @@ def build_curator_runner(settings, callbacks=None, backend=None, tools=None, sub
     return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT, response_format=CurationDecision)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> Curator:
@@ -236,5 +236,6 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="curator_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="curator_subagent_enabled"),
     construct=_construct,
+    tier=AgentTier.FULL,
     rebuild_on=("agent_temperature",),
 )

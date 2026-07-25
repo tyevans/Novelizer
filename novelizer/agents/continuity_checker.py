@@ -616,7 +616,7 @@ def build_continuity_mining_runner(settings, callbacks=None):
     return create_deep_agent(model=model, system_prompt=MINING_SYSTEM_PROMPT, response_format=ProviderStrategy(MinedFactsOutput))
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier, ToolGrant, SubagentGrant
 
 
 def _construct(ctx: AgentContext) -> ContinuityChecker:
@@ -642,5 +642,6 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="checker_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="checker_subagent_enabled"),
     construct=_construct,
+    tier=AgentTier.FULL,
     rebuild_on=("agent_temperature",),
 )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import pytest
-from novelizer.agents.registry_types import AgentContext, AgentSpec, ToolGrant, SubagentGrant
+from novelizer.agents.registry_types import AgentTier, AgentContext, AgentSpec, ToolGrant, SubagentGrant
 
 
 class _Settings:
@@ -38,7 +38,7 @@ def test_agent_spec_is_frozen_and_holds_construct_callable():
         called["ctx"] = ctx
         return "agent-instance"
 
-    spec = AgentSpec(name="author", tool_grant=None, construct=construct)
+    spec = AgentSpec(name="author", tool_grant=None, construct=construct, tier=AgentTier.FULL)
     assert spec.name == "author"
     result = spec.construct("fake-ctx")
     assert result == "agent-instance"
@@ -58,11 +58,11 @@ def test_subagent_grant_reads_named_setting_false():
 
 
 def test_agent_spec_subagent_grant_defaults_to_none():
-    spec = AgentSpec(name="author", tool_grant=None, construct=lambda ctx: None)
+    spec = AgentSpec(name="author", tool_grant=None, construct=lambda ctx: None, tier=AgentTier.FULL)
     assert spec.subagent_grant is None
 
 
 def test_agent_spec_accepts_explicit_subagent_grant():
     grant = SubagentGrant(enabled_setting="editor_subagent_enabled")
-    spec = AgentSpec(name="editor", tool_grant=None, construct=lambda ctx: None, subagent_grant=grant)
+    spec = AgentSpec(name="editor", tool_grant=None, construct=lambda ctx: None, tier=AgentTier.FULL, subagent_grant=grant)
     assert spec.subagent_grant is grant

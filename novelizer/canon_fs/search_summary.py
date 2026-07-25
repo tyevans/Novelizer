@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from agent_kit import build_chat_model
+from agent_kit import build_light_model
 from deepagents.backends.utils import file_data_to_string
 from langchain_core.messages import HumanMessage
 
@@ -111,11 +111,13 @@ async def summarize(query, purpose, excerpts, settings, callbacks=None) -> str:
     prompt = _PROMPT.format(
         query=query, purpose=purpose, excerpts="\n\n".join(excerpts))
     try:
-        model = build_chat_model(
-            settings.agent_model, settings.llm_base_url, settings.llm_api_key,
-            temperature=0.0,
+        # Light path: an extractive synthesis over bodies the caller already
+        # retrieved, on a hot path, with a hard word budget -- cold, capped,
+        # and no reason to think out loud first.
+        model = build_light_model(
+            settings.resolved_light_model, settings.llm_base_url, settings.llm_api_key,
             max_tokens=min(SUMMARY_MAX_TOKENS, settings.llm_max_tokens),
-            callbacks=callbacks,
+            callbacks=callbacks, reasoning=settings.light_reasoning,
         )
         response = await model.ainvoke([HumanMessage(content=prompt)])
     except Exception:

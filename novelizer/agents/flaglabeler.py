@@ -97,18 +97,23 @@ class FlagLabeler(BaseAgent):
 
 
 def build_flaglabeler_runner(settings, callbacks=None):
-    from agent_kit import build_agent_runner, build_chat_model
-    # Labelling is extraction, not composition: run cold and cheap. A small
-    # generation cap keeps the pass quick and the title honest.
-    model = build_chat_model(
-        settings.agent_model, settings.llm_base_url, settings.llm_api_key,
-        temperature=0.0, max_tokens=min(200, settings.llm_max_tokens), callbacks=callbacks,
+    from agent_kit import build_light_model, build_simple_runner
+    # The light path, and the clearest case for it in the fleet: labelling is
+    # extraction, not composition, and this agent has no tools -- so the
+    # deepagents graph it used to run was a state machine wrapped around a
+    # single request. A small generation cap keeps the pass quick and the title
+    # honest; thinking is off because eight words do not need a reasoning
+    # block. See AgentTier.LIGHT.
+    model = build_light_model(
+        settings.resolved_light_model, settings.llm_base_url, settings.llm_api_key,
+        max_tokens=min(200, settings.llm_max_tokens), callbacks=callbacks,
+        reasoning=settings.light_reasoning,
     )
-    return build_agent_runner(model=model, system_prompt=SYSTEM_PROMPT,
-                              response_format=FlagLabel, callbacks=callbacks)
+    return build_simple_runner(model=model, system_prompt=SYSTEM_PROMPT,
+                               response_format=FlagLabel)
 
 
-from novelizer.agents.registry_types import AgentContext, AgentSpec
+from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier
 
 
 def _construct(ctx: AgentContext) -> FlagLabeler:
@@ -120,4 +125,10 @@ def _construct(ctx: AgentContext) -> FlagLabeler:
     )
 
 
-SPEC = AgentSpec(name="flaglabeler", tool_grant=None, construct=_construct)
+SPEC = AgentSpec(
+    name="flaglabeler",
+    tool_grant=None,
+    construct=_construct,
+    tier=AgentTier.LIGHT,
+    rebuild_on=("light_model", "light_reasoning"),
+)

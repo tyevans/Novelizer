@@ -10,6 +10,7 @@ _DEFAULT_VOICE_PACK = str(importlib.resources.files("novelizer.voices").joinpath
 STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
     "voice_pack", "prose_profile",
     "author_model", "agent_model", "embed_model",
+    "light_model", "light_reasoning",
     "author_temperature", "agent_temperature",
     "author_interval", "default_agent_interval",
     "continuity_interval", "structure_analyst_interval", "projector_interval", "muse_interval",
@@ -48,6 +49,19 @@ class EffectiveSettings(BaseModel):
     author_temperature: float = 0.8
     agent_model: str = "local-model"
     agent_temperature: float = 0.7
+    # The third tier. Labelling a flag and summarizing a tool call are
+    # deterministic formatting over text someone else wrote -- they do not need
+    # the model that reasons about continuity across forty chapters. Empty
+    # means "no separate light model": every light call runs on agent_model,
+    # which is exactly today's behavior, so this tier costs nothing until it is
+    # pointed somewhere.
+    light_model: str = ""
+    # Whether light passes may open a thinking block. Off is the point of the
+    # tier, but it stays a setting because whether a chat template honors
+    # enable_thinking is a property of the served model -- an operator who
+    # finds their template ignores it, or who points light_model at a model
+    # whose short answers are better *with* a brief think, needs the switch.
+    light_reasoning: bool = False
     # Per-request generation cap for every agent runner. Uncapped local models
     # (especially with server-side reasoning enabled) can generate past a
     # proxy's request timeout, so no request ever completes.
@@ -171,6 +185,12 @@ class EffectiveSettings(BaseModel):
     author_subagent_enabled: bool = False
     checker_subagent_enabled: bool = False
     triage_subagent_enabled: bool = False
+
+    @property
+    def resolved_light_model(self) -> str:
+        """Model for light passes: the dedicated one when set, otherwise the
+        general agent model (single-model setups, i.e. the default)."""
+        return self.light_model.strip() or self.agent_model
 
     @property
     def resolved_embed_base_url(self) -> str:
