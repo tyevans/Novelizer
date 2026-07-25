@@ -437,7 +437,7 @@ def test_build_character_keeper_runner_with_backend_bounds_recursion():
 
     backend = CanonBackend(read_store=None)
     runner = build_character_keeper_runner(_FakeSettings(), backend=backend, tools=[])
-    assert runner.config.get("recursion_limit") == 100
+    assert runner.config.get("recursion_limit") == 200
 
 
 def test_build_character_keeper_runner_tooled_branch_passes_keeper_skills(monkeypatch):

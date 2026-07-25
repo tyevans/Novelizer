@@ -6,7 +6,7 @@ from agent_kit.llm import (
 
 
 def test_recursion_limit_and_context_window_defaults():
-    assert GRAPH_RECURSION_LIMIT == 100
+    assert GRAPH_RECURSION_LIMIT == 200
     assert CONTEXT_WINDOW_TOKENS == 128_000
 
 

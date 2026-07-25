@@ -57,4 +57,4 @@ def test_build_research_runner_with_backend_includes_diagnostic_tools(monkeypatc
     assert "search_canon_stub" in tool_names
     assert {"check_stale_threads", "check_leaks", "check_paradoxes",
             "check_promise_ledger", "check_beat_drift", "check_completion"} <= tool_names
-    assert captured["config"]["recursion_limit"] == 100
+    assert captured["config"]["recursion_limit"] == 200
