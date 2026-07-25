@@ -209,6 +209,22 @@ class ReadStore:
         row = await cur.fetchone()
         return SecretRecord.model_validate_json(row[0]) if row else None
 
+    async def projection_generation(self) -> int:
+        """The projector's replay position: "the read model includes everything
+        through sequence N".
+
+        Read-side callers use this as a change stamp for the whole read model.
+        It is sound as one because the Projector advances it inside the same
+        transaction as each projection write (see Projector._apply), and canon
+        is append-only -- so a value that has not moved is proof that no
+        projection has changed. Returns 0 before the first event is projected.
+        """
+        cur = await self._conn.execute(
+            "SELECT last_sequence FROM projector_state WHERE id='singleton'"
+        )
+        row = await cur.fetchone()
+        return row[0] if row else 0
+
     async def knowledge_matrix(self) -> dict[str, dict]:
         """Return {secret_id: {"revealed": bool, "known_by": set[character_id]}}
         for every secret. `revealed` is read directly off each secret's own

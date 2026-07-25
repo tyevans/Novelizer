@@ -18,6 +18,7 @@ from deepagents.backends.protocol import (
 from wcmatch import glob as wcglob
 
 from novelizer.canon_fs.backend import READ_ONLY_ERROR
+from novelizer.canon_fs.generation import GenerationCache
 from novelizer.canon_fs.reads import sliced_read
 from novelizer.canon_fs.outline_render import (
     render_beats, render_blueprint, render_brief, render_ledger,
@@ -55,6 +56,7 @@ class OutlineBackend(BackendProtocol):
 
     def __init__(self, read_store) -> None:
         self._read = read_store
+        self._snapshot_cache = GenerationCache(read_store, self._build_snapshot)
 
     # -- writes: refused (sync impls; inherited awrite/aedit wrap them) --
 
@@ -88,6 +90,11 @@ class OutlineBackend(BackendProtocol):
         raise NotImplementedError("OutlineBackend is async-only; use aglob")
 
     async def _snapshot(self) -> _Snapshot:
+        # Same generation-keyed reuse as CanonBackend: /outline is 293 of the
+        # live story's read_file calls and rebuilt six queries on each one.
+        return await self._snapshot_cache.get()
+
+    async def _build_snapshot(self) -> _Snapshot:
         blueprint = await self._read.get_active_blueprint()
         beats = await self._read.list_beats()
         chapters = await self._read.list_chapters()
