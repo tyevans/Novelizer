@@ -572,6 +572,13 @@ class Runtime:
         )
 
     async def close(self) -> None:
+        # start() constructs the EmbeddingStore and nothing else owns it, so
+        # close() owes its release. Omitting it made every caller's
+        # `finally: await rt.close()` a no-op for the one resource that holds a
+        # sqlite handle and worker threads (see EmbeddingStore.close).
+        if self.embeddings is not None:
+            self.embeddings.close()
+            self.embeddings = None
         await self.read.close()
         await self.projector.close()
         await self.telemetry_store.close()
