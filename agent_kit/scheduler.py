@@ -50,6 +50,11 @@ class Scheduler:
         self._running = False
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
+        # Names dispatched but still queued on an LLM permit. Dispatch is
+        # deliberately NOT gated on the pool (tick creates the task; the run
+        # queues inside _run), so without this set a pool frozen by 429s is
+        # indistinguishable from a hung agent: both are "running" forever.
+        self._awaiting_pool: set[str] = set()
         self._last_error: dict[str, str] = {}
         self._eligibility: dict[str, tuple[bool, str]] = {}
         self._last_completed: str | None = None
@@ -90,7 +95,11 @@ class Scheduler:
             {
                 "name": a.name,
                 "paused": a.paused,
-                "running": a.name in self._in_flight,
+                # "running" is work actually executing: a run still queued on an
+                # LLM permit holds a dispatch slot but is doing nothing, and
+                # reports waiting_on_pool instead.
+                "running": a.name in self._in_flight and a.name not in self._awaiting_pool,
+                "waiting_on_pool": a.name in self._awaiting_pool,
                 "last_error": self._last_error.get(a.name),
                 "last_completed": a.name == self._last_completed,
                 "run_count": self._run_count.get(a.name, 0),
@@ -195,6 +204,8 @@ class Scheduler:
         for a in self._agents:
             if a.paused:
                 state = (False, "paused")
+            elif a.name in self._awaiting_pool:
+                state = (False, "waiting on pool")
             elif a.name in self._in_flight:
                 state = (False, "running")
             elif not a.ready(now):
@@ -232,7 +243,13 @@ class Scheduler:
                 # response or a bug is not congestion, and must not shrink the
                 # fleet-wide ceiling every other consumer draws from. The permit
                 # is released by slot()'s own finally whichever way the body exits.
+                #
+                # The wait for the permit is marked separately from the run
+                # itself: the body below only starts once the permit is in hand,
+                # so clearing the mark there is exactly the moment work begins.
+                self._awaiting_pool.add(agent.name)
                 async with self._pool.slot():
+                    self._awaiting_pool.discard(agent.name)
                     try:
                         await agent.run_once()
                     except Exception as e:
@@ -251,6 +268,9 @@ class Scheduler:
             # the fail ladder on every raise, so ready() holds it out on its
             # own. Backing off is the ladder's job now, not the scheduler's.
             self._in_flight.pop(agent.name, None)
+            # Belt and braces: a cancellation while queued would otherwise leave
+            # the name marked as waiting forever.
+            self._awaiting_pool.discard(agent.name)
             self._run_count[agent.name] = self._run_count.get(agent.name, 0) + 1
             # Sticky display marker, distinct from the honest in-flight
             # "running" flag.

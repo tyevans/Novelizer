@@ -917,3 +917,50 @@ async def test_in_flight_count_is_invariant_across_the_gate_closing(n_in_flight)
     finally:
         release.set()
         await sched.drain_in_flight()
+
+
+class BlockingPool:
+    """A pool whose permit is withheld until the test lets go, so a dispatched
+    run can be pinned in the "queued on the permit" state across an await
+    boundary. Mirrors SpyPool's surface; only the gating differs."""
+
+    def __init__(self) -> None:
+        self.granted = asyncio.Event()
+        self._release = asyncio.Event()
+
+    @contextlib.asynccontextmanager
+    async def slot(self):
+        await self._release.wait()
+        self.granted.set()
+        yield
+
+    def grant(self) -> None:
+        self._release.set()
+
+    def note_rate_limited(self) -> None: ...
+    def note_success(self) -> None: ...
+
+
+async def test_a_run_queued_on_a_permit_is_not_reported_as_running():
+    """A 429-frozen pool must not look like a hung agent. The run holds a
+    dispatch slot -- it really is in flight -- but nothing is executing, so
+    status() has to separate "queued on the permit" from "doing work", and the
+    eligibility reason has to say so too."""
+    a = StubAgent("a", 0.9)
+    pool = BlockingPool()
+    emitter = FakeEmitter()
+    sched = Scheduler([a], clock=lambda: 1000.0, pool=pool, telemetry=emitter)
+    await sched.tick()
+    for _ in range(5):
+        await asyncio.sleep(0)           # let _run reach slot() and block
+
+    st_ = sched.status()[0]
+    assert st_["waiting_on_pool"] is True, "no surface distinguishes a pool wait"
+    assert st_["running"] is False, "a run with no permit was reported as working"
+    await sched._emit_eligibility(1000.0, scores={})
+    assert _eligibility(emitter)[-1].reason == "waiting on pool"
+
+    pool.grant()
+    await sched.drain_in_flight()
+    assert a.ran == 1
+    assert sched.status()[0]["waiting_on_pool"] is False
