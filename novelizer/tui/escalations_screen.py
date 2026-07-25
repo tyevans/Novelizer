@@ -10,6 +10,7 @@ from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Input, Static
 
 from novelizer.canon.events import EventType
+from novelizer.canon.flags import mark_escalation_cleared, may_clear_escalation
 from novelizer.store.models import Flag
 from novelizer.tui.widgets.escalations_model import escalated_flags, escalation_timeline
 
@@ -73,12 +74,13 @@ class EscalationsScreen(Screen):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id != "escalations-clear-button" or self._selected is None:
             return
+        if not may_clear_escalation(self._selected):
+            # The owning agent cleared it between selection and this press, so
+            # there is nothing left to clear -- just resync the list.
+            await self.refresh_rows()
+            return
         note = self.query_one("#escalations-clear-note", Input).value or None
-        cleared = self._selected.model_copy(update={
-            "escalated": False,
-            "escalation_cleared_by": "human",
-            "escalation_clear_note": note,
-        })
+        cleared = mark_escalation_cleared(self._selected, by="human", note=note)
         await self.runtime.committer.commit(
             "human", EventType.FLAG_ESCALATION_CLEARED, cleared.id, cleared,
         )

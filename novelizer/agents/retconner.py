@@ -9,6 +9,10 @@ from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
+from novelizer.canon.flags import (
+    mark_declined, mark_escalated, mark_escalation_cleared, mark_resolved,
+    may_clear_escalation, may_decide, should_escalate_after_failure,
+)
 from novelizer.store.models import WorldEntry, FlagStatus
 
 logger = logging.getLogger(__name__)
@@ -59,8 +63,6 @@ feed_note — never in the amendment text, which must read as plain canon."""
 
 
 class Retconner(BaseAgent):
-    _FAILURE_ESCALATION_THRESHOLD = 3
-
     def __init__(
         self,
         runner: Runner,
@@ -112,21 +114,17 @@ class Retconner(BaseAgent):
         """Close a request without amending anything. Distinct from resolving
         it: nothing was repaired, and the filing agent's log should say so."""
         logger.info("retconner: declining request %s (%s): %s", req.id, resolution, reason)
-        attempts = req.failed_attempts + 1
-        rejected = req.model_copy(update={
-            "status": FlagStatus.rejected,
-            "resolved_by": self.name,
-            "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
-            "failed_attempts": attempts,
-        })
+        if not may_decide(req):
+            return
+        rejected = mark_declined(req, by=self.name, resolution=resolution, reason=reason)
         await self._committer.commit(self.name, EventType.FLAG_REJECTED, req.id, rejected)
-        if attempts >= self._FAILURE_ESCALATION_THRESHOLD and not rejected.escalated:
-            escalated = rejected.model_copy(update={"escalated": True})
-            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, req.id, escalated)
+        if should_escalate_after_failure(rejected):
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, req.id,
+                                         mark_escalated(rejected))
 
     async def commit(self, out: RetconAmendments | None, ctx: dict) -> None:
         req = ctx["target"]
-        if req is None or out is None:
+        if req is None or out is None or not may_decide(req):
             return
         if out.resolution != "amend":
             await self._decline(req, out.resolution, out.reason)
@@ -135,11 +133,11 @@ class Retconner(BaseAgent):
         for e in out.amended_entries:
             entry = WorldEntry(title=e.title, body=e.body, domain=e.domain, tags=e.tags, supersedes_id=e.supersedes_id)
             await self._committer.commit(self.name, EventType.WORLD_ENTRY_SUPERSEDED, entry.id, entry)
-        resolved = req.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
+        resolved = mark_resolved(req, by=self.name)
         await self._committer.commit(self.name, EventType.FLAG_RESOLVED, req.id, resolved)
-        if resolved.escalated:
-            cleared = resolved.model_copy(update={"escalated": False, "escalation_cleared_by": "agent"})
-            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, req.id, cleared)
+        if may_clear_escalation(resolved):
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, req.id,
+                                         mark_escalation_cleared(resolved, by="agent"))
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:

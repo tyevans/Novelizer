@@ -9,6 +9,10 @@ from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, WorldEntryRetired
+from novelizer.canon.flags import (
+    mark_declined, mark_escalated, mark_escalation_cleared, mark_resolved,
+    may_clear_escalation, may_decide, should_escalate_after_failure,
+)
 from novelizer.store.models import WorldEntry, FlagStatus
 
 logger = logging.getLogger(__name__)
@@ -51,8 +55,6 @@ feed_note — never in entry bodies, which must read as plain canon."""
 
 
 class Curator(BaseAgent):
-    _FAILURE_ESCALATION_THRESHOLD = 3
-
     def __init__(
         self,
         runner: Runner,
@@ -100,21 +102,17 @@ class Curator(BaseAgent):
 
     async def _decline(self, flag, resolution: str, reason: str) -> None:
         logger.info("curator: declining flag %s (%s): %s", flag.id, resolution, reason)
-        attempts = flag.failed_attempts + 1
-        rejected = flag.model_copy(update={
-            "status": FlagStatus.rejected,
-            "resolved_by": self.name,
-            "proposed_resolution": f"[{resolution}] {reason}" if reason else f"[{resolution}]",
-            "failed_attempts": attempts,
-        })
+        if not may_decide(flag):
+            return
+        rejected = mark_declined(flag, by=self.name, resolution=resolution, reason=reason)
         await self._committer.commit(self.name, EventType.FLAG_REJECTED, flag.id, rejected)
-        if attempts >= self._FAILURE_ESCALATION_THRESHOLD and not rejected.escalated:
-            escalated = rejected.model_copy(update={"escalated": True})
-            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, flag.id, escalated)
+        if should_escalate_after_failure(rejected):
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATED, flag.id,
+                                         mark_escalated(rejected))
 
     async def commit(self, out: CurationDecision | None, ctx: dict) -> None:
         flag = ctx["target"]
-        if flag is None or out is None:
+        if flag is None or out is None or not may_decide(flag):
             return
         # Validate the decision's shape; a malformed action declines rather than
         # committing a half-formed mutation.
@@ -141,11 +139,11 @@ class Curator(BaseAgent):
                 payload = WorldEntryRetired(entry_id=rid, reason=out.reason, flag_id=flag.id)
                 await self._committer.commit(self.name, EventType.WORLD_ENTRY_RETIRED, rid, payload)
 
-        resolved = flag.model_copy(update={"status": FlagStatus.resolved, "resolved_by": self.name})
+        resolved = mark_resolved(flag, by=self.name)
         await self._committer.commit(self.name, EventType.FLAG_RESOLVED, flag.id, resolved)
-        if resolved.escalated:
-            cleared = resolved.model_copy(update={"escalated": False, "escalation_cleared_by": "agent"})
-            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, flag.id, cleared)
+        if may_clear_escalation(resolved):
+            await self._committer.commit(self.name, EventType.FLAG_ESCALATION_CLEARED, flag.id,
+                                         mark_escalation_cleared(resolved, by="agent"))
         await self._remark(out.feed_note)
 
     async def _run(self) -> None:
