@@ -1,6 +1,7 @@
 import os
 import pytest
 import tempfile
+import threading
 import time
 from novelizer.store.embeddings import (
     EmbeddingStore, EmbedProbeFailure, EmptyIndexError, SearchHit,
@@ -236,8 +237,27 @@ class _EmptyEmbeddingFunction(FakeEmbeddingFunction):
 
 
 class _HangingEmbeddingFunction(FakeEmbeddingFunction):
+    """An endpoint that accepts the call and then never answers.
+
+    Blocks on an Event rather than sleeping a fixed 30s. The probe runs this in
+    a worker thread via asyncio.to_thread, and a bare `time.sleep(30)` keeps
+    that thread alive long after the probe has correctly timed out -- the test
+    itself passed in 0.25s while its teardown joined the sleeping thread for the
+    remaining ~29.75s, the single slowest entry in the whole suite.
+
+    `release()` in the test's finally lets the thread exit the moment the
+    assertion is done. The wait is still bounded well past any probe timeout, so
+    a bug that skipped the release cannot hang the suite forever.
+    """
+
+    def __init__(self) -> None:
+        self._released = threading.Event()
+
+    def release(self) -> None:
+        self._released.set()
+
     def __call__(self, input):
-        time.sleep(30)  # far past any probe timeout
+        self._released.wait(timeout=30)  # far past any probe timeout
         raise AssertionError("probe waited for a hung endpoint instead of timing out")
 
 
@@ -297,7 +317,8 @@ async def test_probe_is_bounded_and_never_hangs_on_a_dead_host(tmp_path):
     """An unreachable host can accept a TCP connection and then say nothing at
     all. Without a bound the probe would hold start() forever -- strictly worse
     than the dead index it is trying to report."""
-    store = _store(tmp_path, _HangingEmbeddingFunction())
+    hanging = _HangingEmbeddingFunction()
+    store = _store(tmp_path, hanging)
     try:
         began = time.monotonic()
         probe = await store.probe(timeout=0.25)
@@ -306,6 +327,9 @@ async def test_probe_is_bounded_and_never_hangs_on_a_dead_host(tmp_path):
         assert probe.failure is EmbedProbeFailure.timeout
         assert elapsed < 5, f"probe took {elapsed:.1f}s; the timeout did not bind"
     finally:
+        # The probe abandoned the call but its worker thread is still blocked in
+        # the fake; let it go so teardown does not join a sleeping thread.
+        hanging.release()
         store.close()
 
 

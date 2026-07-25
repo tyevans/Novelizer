@@ -22,9 +22,54 @@ def _docker_available() -> bool:
 
 
 def _free_port() -> int:
+    """A port that was free a moment ago -- necessarily a hint, not a promise.
+
+    The socket must be closed before docker can bind the port, so there is
+    always a window in which something else can take it. Serially that window
+    never mattered; under xdist every worker builds its own container at once
+    (this fixture is session-scoped, and "session" means *per worker*), so two
+    workers really can be handed the same number. `_start_container` retries
+    rather than trying to close a window that cannot be closed.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
+
+
+# Enough attempts to ride out concurrent workers colliding on a port, few
+# enough that a genuinely broken docker still fails fast.
+_PORT_ATTEMPTS = 5
+
+
+def _start_container() -> tuple[str, int]:
+    """Run the pgvector container, retrying if its port was taken in the race.
+
+    Returns (name, port). Raises the last CalledProcessError if every attempt
+    fails, so a real docker problem (no image, no daemon) still surfaces with
+    its own message instead of being retried into a generic timeout.
+    """
+    last_error = None
+    for _ in range(_PORT_ATTEMPTS):
+        port = _free_port()
+        name = f"substrate-pg-test-{uuid.uuid4().hex[:8]}"
+        result = subprocess.run(
+            [
+                "docker", "run", "-d", "--rm", "--name", name,
+                "-e", f"POSTGRES_USER={_USER}",
+                "-e", f"POSTGRES_PASSWORD={_PASSWORD}",
+                "-e", f"POSTGRES_DB={_ADMIN_DB}",
+                "-p", f"{port}:5432",
+                "pgvector/pgvector:pg16",
+            ],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return name, port
+        last_error = (result.stdout + result.stderr).decode(errors="replace")
+        # Only a port clash is worth another try; anything else recurs forever.
+        if "port is already allocated" not in last_error and "address already in use" not in last_error:
+            break
+    raise RuntimeError(f"could not start pgvector container: {last_error}")
 
 
 _USER, _PASSWORD, _ADMIN_DB = "substrate", "substrate", "substrate"
@@ -53,24 +98,17 @@ def pg_container():
     isolation from a throwaway CREATE DATABASE each (see postgres_dsn), which
     is ~100ms. Torn down with `docker kill`: the data is disposable and --rm
     removes the container on kill.
+
+    Under xdist this is one container PER WORKER, not one per run: pytest
+    instantiates session-scoped fixtures once in each worker process. That is
+    correct but not free, so only workers that actually receive a postgres test
+    pay for it -- a reason to keep the postgres files grouped (--dist loadfile)
+    rather than scattered across every worker.
     """
     if not _docker_available():
         pytest.skip("docker not available in this environment")
 
-    port = _free_port()
-    name = f"substrate-pg-test-{uuid.uuid4().hex[:8]}"
-
-    subprocess.run(
-        [
-            "docker", "run", "-d", "--rm", "--name", name,
-            "-e", f"POSTGRES_USER={_USER}",
-            "-e", f"POSTGRES_PASSWORD={_PASSWORD}",
-            "-e", f"POSTGRES_DB={_ADMIN_DB}",
-            "-p", f"{port}:5432",
-            "pgvector/pgvector:pg16",
-        ],
-        capture_output=True, check=True, timeout=30,
-    )
+    name, port = _start_container()
     try:
         deadline = time.monotonic() + 30
         last_err = None
