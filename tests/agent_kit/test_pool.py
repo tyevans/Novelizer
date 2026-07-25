@@ -353,3 +353,58 @@ async def test_raising_size_leaves_the_current_limit_for_aimd_to_grow():
     assert pool._limit == 2             # not yanked up to the new cap
     pool.note_success(); pool.note_success()
     assert pool._limit == 3             # recovers additively, now toward 8
+
+
+# --- capacity growth must wake the already-blocked -------------------------
+
+
+async def test_raising_the_limit_wakes_a_waiter_without_waiting_for_a_release():
+    """Additive increase creates capacity, and capacity is worthless if nobody
+    notices it. A waiter blocked at the old limit must wake on the increase
+    itself -- not sit there until some unrelated permit happens to release. In
+    the KG drain the signal arrives from a caller holding no permit at all, so
+    "the release will notify anyway" is not a guarantee the pool can lean on: a
+    429-shrunk pool with one long run in flight would strand every waiter for
+    the length of that run."""
+    pool = AdaptivePool(2, recover_after=1, cooldown_s=0.0)
+    pool.note_rate_limited()              # _limit: 2 -> 1
+    holder = _Holder(pool).start()
+    await holder.wait_entered()
+    blocked = _Holder(pool).start()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not blocked.entered.is_set(), "acquired while the only permit was held"
+
+    pool.note_success()                   # _limit: 1 -> 2, capacity is free NOW
+    assert pool._limit == 2
+    for _ in range(5):
+        await asyncio.sleep(0)            # a Condition wake needs no wall clock
+    assert blocked.entered.is_set(), "waiter slept through a capacity increase"
+    assert pool._active == 2
+
+    await holder.let_go()
+    await blocked.let_go()
+    assert pool._active == 0
+
+
+async def test_success_progress_does_not_survive_a_stay_at_the_ceiling():
+    """Recovery progress means "consecutive successes since the pool last could
+    have grown". Time spent at the ceiling is not progress toward anything: if a
+    partial streak survives it, the first success after the ceiling moves back
+    up jumps the limit immediately instead of earning it over `recover_after`
+    runs."""
+    pool = AdaptivePool(4, recover_after=3, cooldown_s=0.0)
+    pool.note_rate_limited()              # _limit: 4 -> 2
+    pool.note_success()
+    pool.note_success()                   # 2/3 toward the next +1
+    pool.size = 2                         # operator shrinks the endpoint: at ceiling
+    for _ in range(5):
+        pool.note_success()               # nothing to recover; not progress either
+    assert pool._limit == 2
+
+    pool.size = 4                         # room to grow again
+    pool.note_success()
+    assert pool._limit == 2, "a stale pre-ceiling streak bought an instant +1"
+    pool.note_success()
+    pool.note_success()                   # three consecutive since there was room
+    assert pool._limit == 3

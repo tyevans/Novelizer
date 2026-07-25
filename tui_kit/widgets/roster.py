@@ -11,8 +11,12 @@ DIM = "dim"
 ALARM_STYLE = "bold red"
 
 # State marks appended to each agent's glyph. Precedence: errored > paused >
-# running > idle. The spinner is static per render (any spinner char is fine).
+# waiting on the LLM pool > running > idle. The spinner is static per render
+# (any spinner char is fine). The pool wait sits above running because a run
+# queued behind the shared permit is doing nothing: a spinner there would make
+# a 429 pile-up read as a hung agent, and the idle dot would hide it.
 RUNNING_MARK = "⠋"
+WAITING_MARK = "⋯"
 IDLE_MARK = "·"
 PAUSED_MARK = "‖"
 ERROR_MARK = "!"
@@ -24,6 +28,8 @@ def _mark(s: dict) -> tuple[str, str | None]:
         return ERROR_MARK, ALARM_STYLE
     if s.get("paused"):
         return PAUSED_MARK, DIM
+    if s.get("waiting_on_pool"):
+        return WAITING_MARK, DIM
     if s.get("running"):
         return RUNNING_MARK, None
     return IDLE_MARK, DIM

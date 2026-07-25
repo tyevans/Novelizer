@@ -58,6 +58,10 @@ class AdaptivePool:
         # asyncio.Condition, not a Semaphore: a Semaphore's limit cannot shrink.
         # Constructed lazily so the pool can be built outside a running loop.
         self._cond: "object | None" = None
+        # Strong ref to the in-flight wake task from _wake_waiters; without one
+        # the loop holds only a weak reference and the notify can be collected
+        # before it runs.
+        self._wake_task: "object | None" = None
 
     @property
     def size(self) -> int:
@@ -82,6 +86,34 @@ class AdaptivePool:
         if self._cond is None:
             self._cond = asyncio.Condition()
         return self._cond
+
+    def _wake_waiters(self) -> None:
+        """Re-check every blocked acquirer after the *limit* moved.
+
+        Capacity nobody notices is capacity that does not exist: a waiter parked
+        in `wait_for(_active < _limit)` is only re-evaluated on a notify, so a
+        limit increase has to notify too, not just a permit release. The notify
+        needs the Condition's lock and `note_success` is sync, so the wake is
+        deferred onto the loop as a task -- it takes the lock briefly and then
+        drops it, so it can neither deadlock a holder nor be blocked by one.
+
+        No loop (a pool poked before the runtime started) or no Condition (no
+        acquisition has ever happened) means there is nobody to wake yet.
+        """
+        import asyncio
+
+        if self._cond is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _notify() -> None:
+            async with self._cond:
+                self._cond.notify_all()
+
+        self._wake_task = loop.create_task(_notify())
 
     @contextlib.asynccontextmanager
     async def slot(self):
@@ -136,8 +168,17 @@ class AdaptivePool:
         the congestion it just backed away from.
         """
         if self._limit >= self.size:
-            return  # already at the ceiling; nothing to recover
+            # Already at the ceiling: nothing to recover, and nothing to count
+            # either. Leaving a partial streak standing would let it survive the
+            # whole stay and buy an instant +1 the moment the ceiling moves back
+            # up (a lowered-then-raised llm_pool_size), skipping the sustained
+            # success recovery is supposed to require.
+            self._success_streak = 0
+            return
         self._success_streak += 1
         if self._success_streak >= self._recover_after:
             self._limit = min(self.size, self._limit + 1)
             self._success_streak = 0
+            # The increase itself frees capacity; waiters blocked at the old
+            # limit must be re-checked or they sit until an unrelated release.
+            self._wake_waiters()

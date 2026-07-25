@@ -1,6 +1,6 @@
 from hypothesis import given, strategies as st
 from tui_kit.widgets.roster import (
-    ALARM_STYLE, ERROR_MARK, IDLE_MARK, PAUSED_MARK, RUNNING_MARK,
+    ALARM_STYLE, ERROR_MARK, IDLE_MARK, PAUSED_MARK, RUNNING_MARK, WAITING_MARK,
     roster_glyphs, roster_summary,
 )
 
@@ -26,8 +26,9 @@ THEME = _FakeTheme()
 CAST = ("author", "editor")
 
 
-def _row(name, paused=False, running=False, last_error=None):
+def _row(name, paused=False, running=False, last_error=None, waiting_on_pool=False):
     return {"name": name, "paused": paused, "running": running, "last_error": last_error,
+            "waiting_on_pool": waiting_on_pool,
             "last_completed": False, "run_count": 0, "next_ready_in": 0.0}
 
 
@@ -46,6 +47,14 @@ def test_idle_cast_renders_every_glyph_with_idle_mark():
 def test_running_agent_carries_spinner_mark():
     strip = roster_glyphs([_row("author", running=True), _row("editor")], THEME)
     assert strip.plain == f"✎{RUNNING_MARK} §{IDLE_MARK}"
+
+
+def test_agent_queued_on_the_llm_pool_carries_its_own_mark():
+    """A run frozen behind the shared LLM permit is neither working nor idle.
+    Showing it as a spinner makes a 429 pile-up read as a hung agent; showing it
+    as idle hides it entirely."""
+    strip = roster_glyphs([_row("author", waiting_on_pool=True), _row("editor")], THEME)
+    assert strip.plain == f"✎{WAITING_MARK} §{IDLE_MARK}"
 
 
 def test_paused_agent_carries_pause_mark():
