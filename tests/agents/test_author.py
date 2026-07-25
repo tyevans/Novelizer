@@ -408,6 +408,11 @@ async def test_author_commit_plants_a_secret_from_structured_output(stack):
 
 async def test_author_commit_uses_a_known_active_secret(stack):
     events, proj, read, committer = stack
+    # Mara has to exist: a `uses` intent citing a character outside the cast is
+    # dropped at commit time, so seeding only the secret would pass for the
+    # wrong reason.
+    from novelizer.store.models import Character
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
     await proj.catch_up()
     draft = ChapterDraft(
@@ -983,3 +988,46 @@ async def test_push_mode_recap_labels_missing_summary(stack):
     await author.work(ctx)
     sent = runner.calls[-1]["messages"][0]["content"]
     assert ELISION_MARKER in sent
+
+
+async def test_author_commit_drops_knowledge_intent_citing_unknown_character(stack):
+    """A hallucinated character_id must not write a knowledge row. Left
+    unguarded it puts a phantom into the secret's known_by while the REAL
+    character's cell stays "unknown" -- so the LeakDetector flags that
+    character's later legitimate use as a leak and the reveal never shows up
+    in known_secrets_note."""
+    events, proj, read, committer = stack
+    from novelizer.store.models import Character
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives",
+                        SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await proj.catch_up()
+    draft = ChapterDraft(
+        title="T", prose="P",
+        knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="phantom")],
+    )
+    author = Author(FakeRunner(draft), read, committer)
+    await author.run_once()
+    await proj.catch_up()
+    log = await events.events_since(0)
+    assert [e.event_type for e in log if e.event_type in
+            (EventType.SECRET_LEARNED, EventType.SECRET_REFERENCED)] == []
+    matrix = await read.knowledge_matrix()
+    assert "phantom" not in matrix.get("the-heir-lives", {}).get("known_by", set())
+
+
+def test_author_prompt_defines_what_a_secret_is_not_just_the_action():
+    """The prompt contract behind the origination gap (the live observation is
+    tests/agents/test_secret_origination_live_llm.py, which does not run in
+    CI). knowledge_intents used to get one bare line naming `plant` while its
+    neighbours got definitional craft guidance -- and over 602 real prompts the
+    model filled the field zero times. This pins that the definition is
+    present and unconditional: it lives in the system prompt, so it reaches the
+    Author in the cold-start state where no secret exists yet and every
+    state-conditional context note is empty. It proves the guidance is THERE,
+    not that a model acts on it -- only the live test observes that."""
+    from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
+
+    block = AUTHOR_SYSTEM_PROMPT.split("- knowledge_intents")[1].split("- causal_intents")[0]
+    assert "withheld knowledge" in block
+    assert "who knows it" in block
