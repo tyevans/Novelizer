@@ -49,6 +49,8 @@ class GlobalConfig(BaseModel):
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
+    # Global-only, like max_concurrent_agents: dispatch-pool mechanics.
+    scheduler_aging_horizon_s: float | None = None
     # Global-only, like max_concurrent_agents: sizes a shared resource ceiling.
     llm_pool_size: int | None = None
     # Global-only (Phase 5): fan-out cap for the background drain, a

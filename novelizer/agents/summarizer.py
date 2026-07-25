@@ -49,10 +49,23 @@ class Summarizer(BaseAgent):
         return [c for c in chapters if c.id not in done]
 
     async def readiness(self) -> float:
+        """Backlog-proportional on chapters lacking a current summary.
+
+        This was a flat 0.6, which cannot express "how much undone work do I
+        have" -- and with max_concurrent_agents=2 it made the Summarizer
+        dispatchable only when fewer than two agents scored above 0.6, which in
+        a measured window was never: 0 picks against 17 "ready" states, and
+        chapter_summaries left with 0 rows. Every agent that reads the `gists`
+        block got an empty one as a result.
+
+        The divisor matches the house min(1.0, n/3) convention (editor,
+        curator, triage), and the count is the same list work() drains, so the
+        score cannot disagree with the work it is claiming to have.
+        """
         pending = await self._unsummarized()
         if not pending:
             return 0.0
-        return await self._gate_on_watermark(0.6)
+        return await self._gate_on_watermark(min(1.0, len(pending) / 3))
 
     async def _fingerprint(self) -> tuple:
         chapters = await self._read.list_chapters()
