@@ -145,6 +145,24 @@ class BaseAgent:
         directly, and a past deadline must not show as a negative wait."""
         return max(0.0, self._fail_until - now, self._idle_until - now)
 
+    def hold(self, now: float) -> tuple[str, float] | None:
+        """Which ladder is holding this agent out of dispatch, and for how long
+        -- None when it is dispatchable. seconds_until_ready() answers "how
+        long"; this answers "why", and the two ladders mean opposite things to
+        someone watching: "backing off" is an agent in trouble, "awaiting
+        progress" is an agent with nothing to react to. The distinction lives
+        here because the ladders do -- a countdown alone cannot be reverse-
+        engineered into a reason.
+
+        Reports whichever deadline actually governs (ready() waits for the later
+        of the two), and prefers the fail ladder on a tie: an erroring agent is
+        the more urgent of two simultaneous facts."""
+        fail = self._fail_until - now
+        idle = self._idle_until - now
+        if fail <= 0.0 and idle <= 0.0:
+            return None
+        return ("backing off", fail) if fail >= idle else ("awaiting progress", idle)
+
     def note_pass(self, now: float | None = None) -> None:
         """Record an explicit "nothing to do" verdict by engaging the idle
         ladder. Same clock family as the scheduler's default (time.monotonic);

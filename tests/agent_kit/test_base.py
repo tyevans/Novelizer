@@ -771,3 +771,72 @@ async def test_each_ladder_tracks_only_its_own_inputs(script):
         assert agent._idle_until <= clock()
 
     assert agent.ready(clock()) == (not fail_streak and not idle_streak)
+
+
+# --- hold() ----------------------------------------------------------------
+#
+# seconds_until_ready() answers "how long", which is the countdown. hold()
+# answers "which ladder", which is the reason -- and the two ladders mean
+# opposite things to a watcher: the fail ladder says the agent is erroring, the
+# idle ladder says the story gave it nothing to react to. The owner of the
+# ladders derives this; nothing downstream may guess it from the deadline.
+
+def test_hold_is_none_for_an_agent_the_scheduler_would_dispatch():
+    agent = BaseAgent(NullRunner(), interval=900)
+    assert agent.hold(1000.0) is None
+
+
+def test_hold_names_the_fail_ladder_and_its_remaining_wait():
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._fail_until = 1050.0
+    assert agent.hold(1000.0) == ("backing off", 50.0)
+
+
+def test_hold_names_the_idle_ladder_and_its_remaining_wait():
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._idle_until = 1075.0
+    assert agent.hold(1000.0) == ("awaiting progress", 75.0)
+
+
+def test_hold_reports_the_ladder_that_actually_governs_dispatch():
+    """Both ladders engaged: ready() waits for the later of the two, so the
+    reason shown must be that same one -- reporting the shorter wait would put a
+    countdown on screen that expires while the agent stays held."""
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._fail_until = 1010.0
+    agent._idle_until = 1090.0
+    assert agent.hold(1000.0) == ("awaiting progress", 90.0)
+
+
+def test_hold_prefers_the_fail_ladder_on_a_tie():
+    """Equal deadlines: "this agent is erroring" is the more urgent of the two
+    facts, and the one a watcher has to act on."""
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._fail_until = agent._idle_until = 1040.0
+    assert agent.hold(1000.0) == ("backing off", 40.0)
+
+
+def test_hold_ignores_elapsed_deadlines():
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._fail_until = 500.0
+    agent._idle_until = 900.0
+    assert agent.hold(1000.0) is None
+
+
+@settings(deadline=None, max_examples=50)
+@given(
+    now=st.floats(min_value=0, max_value=5000, allow_nan=False),
+    fail_offset=st.floats(min_value=-100, max_value=400, allow_nan=False),
+    idle_offset=st.floats(min_value=-100, max_value=400, allow_nan=False),
+)
+def test_hold_agrees_with_ready_and_seconds_until_ready(now, fail_offset, idle_offset):
+    """The reason and the countdown are two views of one decision: a held agent
+    always has a reason, a dispatchable one never does, and the seconds hold()
+    reports are the seconds the scheduler will actually wait."""
+    agent = BaseAgent(NullRunner(), interval=0)
+    agent._fail_until = now + fail_offset
+    agent._idle_until = now + idle_offset
+    held = agent.hold(now)
+    assert (held is None) == agent.ready(now)
+    if held is not None:
+        assert held[1] == pytest.approx(agent.seconds_until_ready(now))

@@ -1,7 +1,7 @@
 from hypothesis import given, strategies as st
 from tui_kit.widgets.roster import (
     ALARM_STYLE, ERROR_MARK, IDLE_MARK, PAUSED_MARK, RUNNING_MARK, WAITING_MARK,
-    roster_glyphs, roster_summary,
+    hold_phrase, roster_glyphs, roster_summary,
 )
 
 
@@ -98,3 +98,63 @@ def test_summary_is_the_plain_strip_and_one_cell_pair_per_agent(rows):
     assert roster_summary(status, THEME) == strip.plain
     if status:
         assert len(strip.plain) == 3 * len(status) - 1
+
+
+# --- hold_phrase: WHY an agent is not producing -----------------------------
+#
+# The glyph mark says "not running"; the phrase says why, and what the agent is
+# waiting on. Same precedence chain as _mark, one string per row, terse enough
+# for a dense status pane.
+
+def _held(name, **kw):
+    row = _row(name, **{k: v for k, v in kw.items()
+                        if k in ("paused", "running", "last_error", "waiting_on_pool")})
+    row["hold_reason"] = kw.get("hold_reason")
+    row["hold_seconds"] = kw.get("hold_seconds", 0.0)
+    return row
+
+
+def test_a_running_agent_has_no_hold_phrase():
+    assert hold_phrase(_held("author", running=True)) == ""
+
+
+def test_pool_wait_is_named_as_such():
+    """The 429 case: the agent was dispatched and is queued behind the shared
+    LLM permit. Nothing it does will change that -- the pool has to drain."""
+    assert hold_phrase(_held("author", waiting_on_pool=True)) == "waiting on LLM pool permit"
+
+
+def test_pool_wait_outranks_a_stale_error():
+    """last_error is the PREVIOUS run's; a dispatched run queued on a permit is
+    the agent's state now."""
+    assert hold_phrase(_held("author", waiting_on_pool=True, last_error="boom")) == (
+        "waiting on LLM pool permit")
+
+
+def test_paused_agent_says_paused():
+    assert hold_phrase(_held("author", paused=True)) == "paused"
+
+
+def test_fail_backoff_names_the_error_and_the_retry():
+    assert hold_phrase(_held("author", last_error="Timeout: nope",
+                             hold_reason="backing off", hold_seconds=12.4)) == (
+        "backing off after error · retry in 12s")
+
+
+def test_idle_ladder_says_what_it_is_awaiting():
+    """Not a countdown to a scheduled run -- dispatch is progress-driven. The
+    agent is waiting for the story to change; the seconds are only when it will
+    next look."""
+    assert hold_phrase(_held("author", hold_reason="awaiting progress",
+                             hold_seconds=45.0)) == (
+        "awaiting story progress · rechecks in 45s")
+
+
+def test_unheld_agent_is_waiting_for_a_dispatch_slot():
+    """Nothing is holding it: the room is simply busier than the dispatch cap,
+    which is progress, not a wedge."""
+    assert hold_phrase(_held("author")) == "ready · waiting for a dispatch slot"
+
+
+def test_hold_phrase_tolerates_a_status_row_without_the_hold_fields():
+    assert hold_phrase(_row("author")) == "ready · waiting for a dispatch slot"

@@ -467,3 +467,21 @@ async def test_seeded_per_agent_live_pane_survives_restart(rt):
         editor_vitals = str(app.query_one("#er_vitals_editor").renderable)
         assert "author" in author_vitals
         assert "editor" in editor_vitals
+
+
+async def test_agent_panes_say_why_each_agent_is_not_producing(rt):
+    """A spinner-or-"idle" pane made three very different silences look the
+    same. Every agent's pane now carries the scheduler's reason -- including
+    agents that have never run, which are exactly the ones needing explaining."""
+    import time as _time
+    editor = next(a for a in rt.agents if a.name == "editor")
+    editor.resume()
+    editor._fail_until = _time.monotonic() + 300.0
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        assert "backing off after error" in str(app.query_one("#er_vitals_editor").renderable)
+        # Everyone else in this fixture is paused, and says so.
+        assert "idle — paused" in str(app.query_one("#er_vitals_author").renderable)

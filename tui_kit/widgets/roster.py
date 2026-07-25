@@ -35,6 +35,34 @@ def _mark(s: dict) -> tuple[str, str | None]:
     return IDLE_MARK, DIM
 
 
+def hold_phrase(s: dict) -> str:
+    """Why this agent is not producing, in a phrase, plus the condition it is
+    waiting on where there is one. "" for an agent that IS producing.
+
+    The mark says "not running"; a watcher still cannot tell a rate-limited
+    fleet from a crash loop from a converged agent, and those call for three
+    different responses. The precedence follows _mark's, minus its error branch:
+    last_error is the PREVIOUS run's, and the fail ladder already carries the
+    error into this render as "backing off". Deliberately not a countdown to a
+    scheduled run: dispatch is progress-driven, so the idle seconds are only
+    when the agent will next look, not when it will next work."""
+    if s.get("paused"):
+        return "paused"
+    if s.get("waiting_on_pool"):
+        # Dispatched, queued behind the shared LLM permit. Nothing this agent
+        # does changes it -- the pool has to drain.
+        return "waiting on LLM pool permit"
+    if s.get("running"):
+        return ""
+    reason = s.get("hold_reason")
+    seconds = int(s.get("hold_seconds") or 0)
+    if reason == "backing off":
+        return f"backing off after error · retry in {seconds}s"
+    if reason == "awaiting progress":
+        return f"awaiting story progress · rechecks in {seconds}s"
+    return "ready · waiting for a dispatch slot"
+
+
 def roster_glyphs(status: list, theme: AgentTheme) -> Text:
     """The cast as a glyph strip — '✎⠋ §· ⌂· ♥· ⚖· ↺· ∿·'. Glyph in the
     agent's theme color; mark carries state. Status fields the strip does

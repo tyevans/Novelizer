@@ -23,6 +23,11 @@ class StubAgent:
     def ready(self, now): return now >= max(self._fail_until, self._idle_until)
     def seconds_until_ready(self, now):
         return max(0.0, self._fail_until - now, self._idle_until - now)
+    def hold(self, now):
+        fail, idle = self._fail_until - now, self._idle_until - now
+        if fail <= 0.0 and idle <= 0.0:
+            return None
+        return ("backing off", fail) if fail >= idle else ("awaiting progress", idle)
     async def run_once(self): self.ran += 1
     def pause(self): self.paused = True
     def resume(self): self.paused = False
@@ -359,7 +364,7 @@ async def test_a_crashing_agent_returns_once_its_backoff_expires():
 
 async def test_backed_off_agent_reports_the_backing_off_reason():
     a = StubAgent("a", 0.9, interval=900)
-    a._idle_until = 1050.0
+    a._fail_until = 1050.0
     emitter = FakeEmitter()
     sched = Scheduler([a], clock=lambda: 1000.0, telemetry=emitter)
     await sched.tick()
@@ -379,7 +384,7 @@ async def test_no_agent_is_ever_reported_as_waiting_on_an_interval():
     assert all(p.reason != "interval not elapsed" for p in _eligibility(emitter))
 
 
-async def test_backing_off_is_emitted_once_per_state_change_not_per_tick():
+async def test_a_ladder_hold_is_emitted_once_per_state_change_not_per_tick():
     now = [1000.0]
     a = StubAgent("a", 0.9)
     a._idle_until = 1050.0
@@ -392,7 +397,8 @@ async def test_backing_off_is_emitted_once_per_state_change_not_per_tick():
     await sched.tick()   # released -> one event for the change back to ready
     await sched.drain_in_flight()
     elig = _eligibility(emitter)
-    assert [(p.eligible, p.reason) for p in elig] == [(False, "backing off"), (True, "ready")]
+    assert [(p.eligible, p.reason) for p in elig] == [
+        (False, "awaiting progress"), (True, "ready")]
 
 
 # --- properties -------------------------------------------------------------
@@ -818,7 +824,7 @@ async def test_the_gate_reason_replaces_only_the_ready_reason_not_the_truer_ones
     paused agent would mislead."""
     ready = StubAgent("ready", 0.9)
     paused = StubAgent("paused", 0.9); paused.pause()
-    backing = StubAgent("backing", 0.9); backing._idle_until = 1050.0
+    backing = StubAgent("backing", 0.9); backing._fail_until = 1050.0
     async def gate(): return False
     emitter = FakeEmitter()
     sched = Scheduler([ready, paused, backing], clock=lambda: 1000.0,
@@ -964,3 +970,44 @@ async def test_a_run_queued_on_a_permit_is_not_reported_as_running():
     await sched.drain_in_flight()
     assert a.ran == 1
     assert sched.status()[0]["waiting_on_pool"] is False
+
+
+# --- why an agent is not producing -----------------------------------------
+
+async def test_status_carries_the_ladder_holding_each_agent():
+    """A spinner-or-nothing status bar cannot distinguish a 429 freeze from a
+    crash loop from a converged agent. status() reports the holding ladder by
+    name so the room can say which."""
+    a = StubAgent("a", 0.9); a._fail_until = 1050.0
+    b = StubAgent("b", 0.9); b._idle_until = 1030.0
+    c = StubAgent("c", 0.9)
+    sched = Scheduler([a, b, c], clock=lambda: 1000.0)
+    status = {s["name"]: s for s in sched.status()}
+    assert status["a"]["hold_reason"] == "backing off"
+    assert status["a"]["hold_seconds"] == 50.0
+    assert status["b"]["hold_reason"] == "awaiting progress"
+    assert status["b"]["hold_seconds"] == 30.0
+    assert status["c"]["hold_reason"] is None
+    assert status["c"]["hold_seconds"] == 0.0
+
+
+async def test_status_tolerates_an_agent_without_the_hold_surface():
+    """Same optional-surface treatment next_ready_in gets: a bare dispatchable
+    object must not break the status bar."""
+    class Bare:
+        name = "bare"; paused = False
+        def ready(self, now): return True
+    sched = Scheduler([Bare()], clock=lambda: 1000.0)
+    assert sched.status()[0]["hold_reason"] is None
+
+
+async def test_eligibility_distinguishes_the_two_ladders():
+    """"backing off" for a quiet agent blamed the wrong thing: the idle ladder
+    means the story produced nothing for it to react to, which is the room
+    working as designed, not an agent in trouble."""
+    a = StubAgent("a", 0.9); a._idle_until = 1050.0
+    emitter = FakeEmitter()
+    sched = Scheduler([a], clock=lambda: 1000.0, telemetry=emitter)
+    await sched.tick()
+    assert [(p.eligible, p.reason) for p in _eligibility(emitter)] == [
+        (False, "awaiting progress")]

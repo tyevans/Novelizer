@@ -79,10 +79,14 @@ class EngineRoom(Vertical):
         self.query_one("#er_prompt", Static).update(state.prompt or "(no call in flight)")
 
     def render_agent_live(self, agent_name: str, state: LiveRunState,
-                          now: float | None = None) -> None:
+                          now: float | None = None, hold: str = "") -> None:
+        """`hold` captions the pane while the agent is not running -- why it is
+        not producing, and what it waits on (see roster.hold_phrase). A spinner
+        or a bare "idle" made a rate-limited fleet, a crash loop and a converged
+        agent look identical."""
         now = time.monotonic() if now is None else now
         self.query_one(f"#er_vitals_{agent_name}", Static).update(
-            styled_vitals(state, now, self._theme))
+            styled_vitals(state, now, self._theme, hold))
         body = live_body(state)
         if body != self._rendered_body.get(agent_name):
             self.query_one(f"#er_stream_{agent_name}", Static).update(styled_body(body))
