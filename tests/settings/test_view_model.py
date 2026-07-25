@@ -55,7 +55,20 @@ def test_secret_redacted_and_restart_flags():
     assert "sk-secret" not in rows["llm_api_key"].value
     assert rows["llm_api_key"].restart_required is True
     assert rows["author_temperature"].restart_required is False
-    assert RESTART_REQUIRED_KEYS == {"llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model", "llm_max_tokens"}
+    assert RESTART_REQUIRED_KEYS == {
+        "llm_base_url", "llm_api_key", "author_model", "agent_model", "embed_model",
+        "llm_max_tokens", "embed_base_url", "embed_api_key",
+    }
+
+
+def test_embed_api_key_is_redacted_like_the_llm_key():
+    """The dedicated embedding endpoint's credential is a secret too."""
+    rows = _rows(
+        g=GlobalConfig(embed_api_key="sk-embed-secret"),
+        eff=EffectiveSettings(embed_api_key="sk-embed-secret"),
+    )
+    assert "sk-embed-secret" not in rows["embed_api_key"].value
+    assert rows["embed_api_key"].restart_required is True
 
 
 def test_app_managed_and_derived_keys_hidden():

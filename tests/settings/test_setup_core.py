@@ -65,6 +65,27 @@ def test_build_config_data_full():
     }
 
 
+def test_build_config_data_includes_separate_embed_endpoint():
+    data = build_global_config_data(
+        base_url="http://openrouter/api/v1",
+        api_key="sk-or",
+        embed_model="nomic-embed-text",
+        embed_base_url=" http://localhost:11434/v1/ ",
+        embed_api_key="sk-embed",
+    )
+    assert data["embed_base_url"] == "http://localhost:11434/v1"
+    assert data["embed_api_key"] == "sk-embed"
+    assert data["llm_base_url"] == "http://openrouter/api/v1"
+
+
+def test_build_config_data_omits_blank_embed_endpoint():
+    """Blank embedding URL must stay absent, so 'reuse the chat endpoint' is
+    what the config expresses rather than an empty-string override."""
+    data = build_global_config_data(base_url="http://h:1/v1", embed_base_url="  ", embed_api_key="")
+    assert "embed_base_url" not in data
+    assert "embed_api_key" not in data
+
+
 def test_build_config_data_omits_empties():
     data = build_global_config_data(base_url="http://h:1/v1", api_key="  ", author_model="")
     assert data == {"llm_base_url": "http://h:1/v1"}
