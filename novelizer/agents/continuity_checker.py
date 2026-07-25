@@ -18,6 +18,7 @@ from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
+from novelizer.canon.threads import active_thread_ids
 from novelizer.canon.events import EventType, ChapterMined, InspirationUptakeRecorded
 from novelizer.store.models import Flag, FlagStatus
 from novelizer.text_chunk import chunk_prose
@@ -305,7 +306,9 @@ class ContinuityChecker(BaseAgent):
         self, chapter_id: str, mined_out: MinedFactsOutput, ctx: dict, seen_descriptions: set[str],
     ) -> None:
         active_secret_ids = {s.id for s in ctx.get("secrets", [])}
-        active_thread_ids = {t.id for t in ctx.get("threads", [])}
+        # Non-terminal only: commit_thread_intents drops citing intents naming a
+        # terminal id, so an unfiltered set made that guard unreachable here.
+        active_ids = active_thread_ids(ctx.get("threads", []))
         matrix = ctx.get("knowledge_matrix", {})
         secret_refs = {(r.secret_id, r.character_id) for r in ctx.get("secret_references", [])}
         thread_touches = ctx.get("thread_touch_pairs", set())
@@ -314,7 +317,7 @@ class ContinuityChecker(BaseAgent):
 
         for fact in mined_out.secret_facts:
             if not fact.known_id or fact.id not in active_secret_ids:
-                if fact.id in active_thread_ids:
+                if fact.id in active_ids:
                     # Namespace confusion, not a new fact: the cited "secret" is
                     # an active thread (live: 'the-boy-s-gift', 'the-name-of-the-sea').
                     # The recoverable meaning — the prose engages that thread — is
@@ -332,7 +335,7 @@ class ContinuityChecker(BaseAgent):
                     )
                     await self._commit_thread_intents(
                         [ThreadIntent(action="touch", id=fact.id, note=fact.note)],
-                        active_thread_ids, chapter_id=chapter_id, source="mined",
+                        active_ids, chapter_id=chapter_id, source="mined",
                     )
                     continue
                 logger.warning(
@@ -377,7 +380,7 @@ class ContinuityChecker(BaseAgent):
             )
 
         for fact in mined_out.thread_facts:
-            if not fact.known_id or fact.id not in active_thread_ids:
+            if not fact.known_id or fact.id not in active_ids:
                 logger.warning(
                     "%s: mined thread %s fact citing unrecognized/unknown thread id %r in "
                     "chapter %r escalated to retcon", self.name, fact.action, fact.id, chapter_id,
@@ -398,7 +401,7 @@ class ContinuityChecker(BaseAgent):
             intent_action = _MINED_THREAD_ACTION_TO_INTENT[fact.action]
             await self._commit_thread_intents(
                 [ThreadIntent(action=intent_action, id=fact.id, note=fact.note)],
-                active_thread_ids, chapter_id=chapter_id, source="mined",
+                active_ids, chapter_id=chapter_id, source="mined",
             )
 
         for fact in mined_out.causal_facts:
@@ -418,7 +421,7 @@ class ContinuityChecker(BaseAgent):
                     PromiseIntent(action="progress", id=fact.promise_id, note=fact.note)
                     for fact in mined_out.promise_progress_facts
                 ],
-                active_promise_ids, active_thread_ids, chapter_id=chapter_id, source="mined",
+                active_promise_ids, active_ids, chapter_id=chapter_id, source="mined",
             )
 
         hand = ctx.get("hands_by_chapter", {}).get(chapter_id)

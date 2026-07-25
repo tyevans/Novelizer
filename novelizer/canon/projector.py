@@ -154,13 +154,18 @@ class Projector:
         await self._set_last_sequence(0)
 
     async def catch_up(self) -> int:
+        # No cursor write here: _apply advances it inside each event's own
+        # transaction. Persisting it once after the loop meant a raise partway
+        # through left every earlier event committed with the cursor still
+        # behind them -- and the TUI's projector loop catches the error and
+        # calls catch_up() again every tick, so a permanently-failing event
+        # re-applied the whole uncursored prefix a few times a second, forever.
         async with self._write_lock:
             last = await self._last_sequence()
             events = await self._events.events_since(last)
             for ev in events:
                 await self._apply(ev)
                 last = ev.sequence
-            await self._set_last_sequence(last)
             return last
 
     async def run(self, interval: float = 0.5) -> None:
@@ -176,12 +181,22 @@ class Projector:
         """Project one event atomically: BEGIN IMMEDIATE takes the write lock
         up front (subject to busy_timeout) so the event's reads and writes see
         one consistent snapshot, retrying if another connection holds the file
-        past the busy window."""
+        past the busy window.
+
+        The replay cursor moves inside that same transaction. Projection and
+        position are one fact -- "the read model includes everything through
+        sequence N" -- so committing them separately allowed a state that claims
+        less than it contains, and every retry then re-applied the difference.
+        """
         async def txn() -> None:
             if self._conn.in_transaction:
                 await self._conn.execute("ROLLBACK")
             await self._conn.execute("BEGIN IMMEDIATE")
             await self._project(ev)
+            await self._conn.execute(
+                "UPDATE projector_state SET last_sequence=? WHERE id='singleton'",
+                (ev.sequence,),
+            )
             await self._conn.commit()
 
         await db.retry_locked(txn)

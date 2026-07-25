@@ -6,6 +6,19 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 TERMINAL_STATES: set[str] = {"paid_off", "abandoned"}
 
 
+def active_thread_ids(threads) -> set[str]:
+    """The ids `commit_thread_intents` may be given: known and non-terminal.
+
+    That helper's contract is that a citing intent naming a terminal id is
+    dropped, so the caller owes it a filtered set -- passing every thread makes
+    the guard unreachable and lets a touch/pay_off land on a finished thread as a
+    permanent phantom event in the log. Every caller expressed this filter
+    inline, and the Continuity Checker's mining path was the one that forgot;
+    naming the rule once removes the chance to forget it again.
+    """
+    return {t.id for t in threads if t.state.value not in TERMINAL_STATES}
+
+
 def slugify_thread_name(name: str) -> str:
     """Turn a freeform thread name into a stable, id-safe slug.
 

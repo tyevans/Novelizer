@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Literal, Optional
+from novelizer.canon.ids import normalize_id
 from pydantic import BaseModel, Field, field_validator
 
 # Must match novelizer.store.models.Domain — the draft stays dependency-free of
@@ -406,7 +407,24 @@ class PlotterOutput(BaseModel):
     feed_note: str = ""
 
 
-class MinedSecretFact(BaseModel):
+# Mined facts carry ids the model *cites*, so they are normalised the moment they
+# enter the domain -- see novelizer/canon/ids.py. Doing it here rather than in
+# each consumer is what stops a membership or dedupe guard from comparing raw
+# model output against canon that is always lowercase.
+_MINED_ID_FIELDS = ("id", "character_id", "chapter_id", "cause_chapter_id",
+                    "effect_chapter_id", "promise_id")
+
+
+class _NormalisesCitedIds(BaseModel):
+    """Base for mined-fact schemas: strips and lowercases every cited id."""
+
+    @field_validator(*_MINED_ID_FIELDS, mode="before", check_fields=False)
+    @classmethod
+    def _normalise_cited_id(cls, v):
+        return normalize_id(v) if isinstance(v, str) else v
+
+
+class MinedSecretFact(_NormalisesCitedIds):
     """A secret-knowledge fact extracted by prose mining from a chapter's prose.
 
     Mining cites existing secret ids only (mining never invents new secret
@@ -425,7 +443,7 @@ class MinedSecretFact(BaseModel):
     note: str = ""
 
 
-class MinedRevealFact(BaseModel):
+class MinedRevealFact(_NormalisesCitedIds):
     """A secret-reveal fact extracted by prose mining.
 
     Unlike MinedSecretFact, reveal facts always escalate to retcon_request.created
@@ -441,7 +459,7 @@ class MinedRevealFact(BaseModel):
     note: str = ""
 
 
-class MinedThreadFact(BaseModel):
+class MinedThreadFact(_NormalisesCitedIds):
     """A plot-thread fact extracted by prose mining.
 
     Mining cites existing thread ids only (mining never mints new thread identity
@@ -459,7 +477,7 @@ class MinedThreadFact(BaseModel):
     note: str = ""
 
 
-class MinedCausalFact(BaseModel):
+class MinedCausalFact(_NormalisesCitedIds):
     """A causal-edge fact extracted by prose mining.
 
     Unlike mined secret/thread facts, causal facts cite chapter ids, which are
@@ -486,7 +504,7 @@ class MinedInspirationFact(BaseModel):
     item: str
 
 
-class PromiseProgressFact(BaseModel):
+class PromiseProgressFact(_NormalisesCitedIds):
     """A mined observation that prose touched an open ledger promise, cited
     by id. Mining never mints a new promise (that stays a declaration-only,
     judgment call for Author/Editor/Plotter) and never mines pay/release --

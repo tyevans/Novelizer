@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Callable
 from novelizer.canon.events import EventType, ChatUserMessaged, ChatAgentReplied
-from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.canon.threads import active_thread_ids
 from novelizer.agents.intents import (
     commit_thread_intents, commit_theme_intents, commit_knowledge_intents, commit_causal_intents,
 )
@@ -149,7 +149,7 @@ class ChatService:
         if reply.thread_intents:
             if persona.allow_threads:
                 threads = await self._read.list_threads()
-                active = {t.id for t in threads if t.state.value not in TERMINAL_STATES}
+                active = active_thread_ids(threads)
                 await commit_thread_intents(self._committer, agent_name, reply.thread_intents, active, source="chat")
             else:
                 logger.warning("%s: dropped %d thread intents not permitted in chat", agent_name, len(reply.thread_intents))

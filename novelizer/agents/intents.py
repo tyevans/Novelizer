@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import uuid
+from novelizer.canon.ids import normalize_id
 from novelizer.canon.events import (
     EventType, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
     SecretCreated, SecretLearned, SecretReferenced, SecretRevealed, CausalEdgeDeclared,
@@ -24,16 +25,11 @@ from novelizer.store.models import Flag, FlagStatus, ChapterBriefRecord
 logger = logging.getLogger(__name__)
 
 
-def _normalize_id(raw: str) -> str:
-    """Canonicalize an agent- or LLM-supplied id for comparison/storage.
-
-    Canon ids are minted lowercase everywhere (every `slugify_*_name`
-    output), so a casing mismatch on a *citing* id (not a minting one) is a
-    correctness bug, not an unknown-id case. Applied only at
-    membership-check/payload-construction sites in the commit helpers below
-    -- never to minting logic.
-    """
-    return raw.strip().lower()
+# The one canon-id normalisation rule, shared with the mined-fact schemas that
+# normalise at the LLM boundary (novelizer/canon/ids.py). Kept as a module-level
+# alias so the commit helpers below read unchanged: the rule having two
+# implementations is what let callers' guards disagree with the helpers.
+_normalize_id = normalize_id
 
 
 def _warn_if_ungrounded(agent_name: str, family: str, action: str, entity_id: str, evidence: str) -> None:

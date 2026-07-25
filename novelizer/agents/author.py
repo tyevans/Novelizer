@@ -15,7 +15,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, InspirationHandConsumed, ChapterBriefFulfilled
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
-from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.canon.threads import active_thread_ids
 from novelizer.canon.events import ChapterRevised
 from novelizer.muse.prompts import AI_TELL_BAN_NOTE, casting_pool_note, inspiration_note
 from novelizer.store.models import Chapter, SignalKind
@@ -344,15 +344,13 @@ class Author(BaseAgent):
                     self.name, EventType.INSPIRATION_HAND_CONSUMED, hand.id,
                     InspirationHandConsumed(hand_id=hand.id, chapter_id=chapter.id),
                 )
-        active_thread_ids = {
-            t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
-        }
-        await self._commit_thread_intents(draft.thread_intents, active_thread_ids, chapter_id=chapter_id)
+        active_ids = active_thread_ids(ctx["threads"])
+        await self._commit_thread_intents(draft.thread_intents, active_ids, chapter_id=chapter_id)
         active_promise_ids = {
             p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
         }
         await self._commit_promise_intents(
-            draft.promise_intents, active_promise_ids, active_thread_ids, chapter_id=chapter_id
+            draft.promise_intents, active_promise_ids, active_ids, chapter_id=chapter_id
         )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(draft.theme_intents, active_theme_ids, chapter_id=chapter_id)
