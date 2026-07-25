@@ -155,7 +155,8 @@ class StructureAnalyst(BaseAgent):
             listing = assemble_advisory(entries, self._advisory_token_budget)
         cast = self._guarded_line("In character", self.personality)
         calibration = self._calibration_note(ctx)
-        msg = f"Score these chapters:\n{listing}{calibration}{cast}"
+        rejections = await self._own_rejections_note()
+        msg = f"Score these chapters:\n{listing}{calibration}{rejections}{cast}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

@@ -140,9 +140,10 @@ class WorldArchitect(BaseAgent):
             f"\n\nChapter index (read these to see what the story needs):\n{chapter_map_note(chapters, gists=gists)}"
             if chapters else ""
         )
+        rejections = await self._own_rejections_note()
         msg = (
             f"Existing world entries:\n{existing}{story}\n\nDirector seeds:\n{seeds}"
-            f"{sparks}{cast}\n\nGenerate new world entries."
+            f"{sparks}{rejections}{cast}\n\nGenerate new world entries."
         )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")

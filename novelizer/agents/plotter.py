@@ -206,7 +206,8 @@ class Plotter(BaseAgent):
 
     async def work(self, ctx: dict) -> PlotterOutput | None:
         summary = _summarize(ctx, self.personality)
-        msg = f"Plan the story's shape:\n{summary}"
+        rejections = await self._own_rejections_note()
+        msg = f"Plan the story's shape:\n{summary}{rejections}"
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
 

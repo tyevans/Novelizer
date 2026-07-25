@@ -10,6 +10,7 @@ from novelizer.brain.sag_spike import SAG_SPIKE_DELTA, detect_sag_spike
 from novelizer.brain.staleness import STALENESS_THRESHOLD_CHAPTERS, stale_threads
 from novelizer.brain.tension_target import tension_deviations
 from novelizer.canon.beat_templates import beat_window
+from novelizer.canon.flags import own_rejections, resolution_note
 from novelizer.canon.secrets import knowledge_cell_state
 from novelizer.store.models import (
     ArcRecord, BeatRecord, BlueprintRecord, CausalEdgeRecord, Chapter, Character, PromiseRecord,
@@ -91,6 +92,45 @@ def open_retcons_note(requests: list[Flag]) -> str:
         return ""
     lines = "\n".join(f"- {r.description}" for r in requests[:20])
     return f"\n\nRetcon requests already filed (do not re-report these):\n{lines}"
+
+
+# A rejection line is context, not a log entry: the agent filed the flag, so it
+# needs only enough of its own wording to recognise the judgement. Long enough
+# for a full one-sentence finding, short enough that five of them cannot crowd
+# out the canon around them.
+REJECTION_DESCRIPTION_CHARS = 160
+
+
+def rejected_flags_note(flags: list[Flag], agent_name: str) -> str:
+    """Build the filer-facing block naming this agent's own recent rejections.
+
+    Closes the flag feedback loop: `filed_by` used to be write-only, so an
+    agent whose judgement was declined by the Curator or dismissed by Triage
+    re-filed it on its next pass, indefinitely. Which flags qualify is
+    `novelizer.canon.flags.own_rejections`; this only renders them.
+
+    Deliberately not a discouragement. The heading forbids re-filing the same
+    judgement and, in the same breath, says a new finding is still the agent's
+    to file -- these prompts state elsewhere that a pass filing nothing is a
+    success, and this block must not be read as "file less". Empty string when
+    the agent has no rejections, so prompts stay byte-identical.
+    """
+    mine = own_rejections(flags, filed_by=agent_name)
+    if not mine:
+        return ""
+    lines = []
+    for flag in mine:
+        description = flag.description
+        if len(description) > REJECTION_DESCRIPTION_CHARS:
+            description = description[:REJECTION_DESCRIPTION_CHARS] + "..."
+        why = resolution_note(flag)
+        # The reason trails the finding, and only when a resolver actually gave
+        # one -- a dismissal leaves the field holding this agent's own proposal.
+        lines.append(f"- [{flag.category}] {description}" + (f" — thrown out: {why}" if why else ""))
+    return (
+        "\n\nJudgements of yours that were thrown out (do not re-file these; a genuinely new "
+        "finding is still yours to file):\n" + "\n".join(lines)
+    )
 
 
 def chapter_ordinals(chapter_ids: list[str]) -> dict[str, str]:

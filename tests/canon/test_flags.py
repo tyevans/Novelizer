@@ -2,6 +2,7 @@ import pytest
 
 from novelizer.canon.flags import (
     FAILURE_ESCALATION_THRESHOLD,
+    RECENT_REJECTION_LIMIT,
     TERMINAL_FLAG_STATES,
     is_terminal,
     mark_declined,
@@ -13,6 +14,8 @@ from novelizer.canon.flags import (
     may_clear_escalation,
     may_decide,
     may_escalate,
+    own_rejections,
+    resolution_note,
     should_escalate_after_failure,
 )
 from novelizer.store.models import Flag, FlagStatus
@@ -142,3 +145,47 @@ def test_escalating_an_already_escalated_flag_raises():
 def test_clearing_an_unescalated_flag_raises():
     with pytest.raises(ValueError):
         mark_escalation_cleared(_flag(), by="human")
+
+
+# --- the read side: an agent's own rejections travelling back to it ---
+
+def _rejected(fid: str, **kw) -> Flag:
+    return Flag(id=fid, category="contradiction", description=fid, status=FlagStatus.rejected, **kw)
+
+
+def test_recent_rejection_limit_is_five():
+    assert RECENT_REJECTION_LIMIT == 5
+
+
+def test_own_rejections_keeps_only_this_agent_s_rejected_flags():
+    flags = [
+        _rejected("mine", filed_by="editor"),
+        _rejected("theirs", filed_by="plotter"),
+        Flag(id="open", category="c", description="d", filed_by="editor"),
+        Flag(id="done", category="c", description="d", filed_by="editor", status=FlagStatus.resolved),
+        Flag(id="aged", category="c", description="d", filed_by="editor", status=FlagStatus.stale),
+    ]
+    assert [f.id for f in own_rejections(flags, filed_by="editor")] == ["mine"]
+
+
+def test_own_rejections_keeps_the_last_n_in_list_order():
+    flags = [_rejected(f"f{i}", filed_by="editor") for i in range(8)]
+    assert [f.id for f in own_rejections(flags, filed_by="editor")] == ["f3", "f4", "f5", "f6", "f7"]
+
+
+def test_own_rejections_of_an_unnamed_agent_is_empty():
+    """A blank filed_by predates the field; it must not match a blank agent name."""
+    assert own_rejections([_rejected("f1")], filed_by="") == []
+
+
+def test_resolution_note_is_the_decliner_s_words():
+    declined = mark_declined(_flag(proposed_resolution="my own idea"), by="curator",
+                             resolution="not_actionable", reason="no such entry")
+    assert resolution_note(declined) == "[not_actionable] no such entry"
+
+
+def test_resolution_note_is_empty_on_a_dismissal():
+    """A dismissal leaves proposed_resolution holding the FILER's text -- reading
+    that back as "why it was rejected" would put the agent's own words in the
+    resolver's mouth."""
+    assert resolution_note(mark_dismissed(_flag(proposed_resolution="my own idea"), by="triage")) == ""

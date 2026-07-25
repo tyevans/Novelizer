@@ -451,3 +451,54 @@ def test_chapter_map_note_without_gists_unchanged():
     chapters = _chapters(2)
     assert chapter_map_note(chapters) == chapter_map_note(chapters, gists=None)
     assert "gist:" not in chapter_map_note(chapters, gists={})
+
+
+# --- rejected_flags_note: the feedback half of the flag loop ---
+
+from novelizer.brain.context import REJECTION_DESCRIPTION_CHARS, rejected_flags_note
+from novelizer.canon.flags import mark_declined, mark_dismissed
+from novelizer.store.models import Flag as _Flag, FlagStatus as _FlagStatus
+
+
+def _filed(description: str, *, by: str = "editor", category: str = "craft", proposal: str = "") -> _Flag:
+    return _Flag(category=category, description=description, filed_by=by, proposed_resolution=proposal)
+
+
+def test_rejected_flags_note_is_empty_with_nothing_rejected():
+    assert rejected_flags_note([_filed("still queued")], "editor") == ""
+
+
+def test_rejected_flags_note_names_category_description_and_resolver_note():
+    declined = mark_declined(_filed("Chapter 3 contradicts the map"), by="curator",
+                             resolution="not_actionable", reason="the map says no such road")
+    note = rejected_flags_note([declined], "editor")
+    assert "[craft] Chapter 3 contradicts the map" in note
+    assert "[not_actionable] the map says no such road" in note
+
+
+def test_rejected_flags_note_omits_a_dismissal_s_absent_note():
+    dismissed = mark_dismissed(_filed("Chapter 3 reads thin", proposal="tighten it"), by="triage")
+    note = rejected_flags_note([dismissed], "editor")
+    assert "Chapter 3 reads thin" in note
+    assert "tighten it" not in note
+
+
+def test_rejected_flags_note_ignores_other_agents_rejections():
+    theirs = mark_dismissed(_filed("not my finding", by="plotter"), by="triage")
+    assert rejected_flags_note([theirs], "editor") == ""
+
+
+def test_rejected_flags_note_permits_new_findings_explicitly():
+    """The loop must not read as "stop filing flags" -- a pass that files nothing
+    is a documented success elsewhere in these prompts, and a pass that files a
+    genuinely new finding must stay one too."""
+    note = rejected_flags_note([mark_dismissed(_filed("x"), by="triage")], "editor")
+    assert "do not re-file" in note.lower()
+    assert "new" in note.lower()
+
+
+def test_rejected_flags_note_trims_a_long_description():
+    long = mark_dismissed(_filed("z" * 400), by="triage")
+    line = rejected_flags_note([long], "editor").splitlines()[-1]
+    assert len(line) < REJECTION_DESCRIPTION_CHARS + 40
+    assert line.endswith("...")
