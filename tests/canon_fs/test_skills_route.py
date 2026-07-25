@@ -77,6 +77,7 @@ async def test_skills_ls_lists_all_packs(stack):
         "/skills/character-arcs",
         "/skills/pacing",
         "/skills/output-conventions",
+        "/skills/secrets-and-reveals",
     }
     # entries may have trailing slash for directories
     normalized = {p.rstrip("/") for p in paths}
