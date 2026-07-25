@@ -84,6 +84,15 @@ class EffectiveSettings(BaseModel):
     muse_exclusion_hands: int = 3
     # Scheduler dispatch pool size: how many agents may run concurrently.
     max_concurrent_agents: int = 2
+    # Scheduler fairness: seconds of going undispatched that doubles an agent's
+    # standing in the readiness sort, so a structurally-low scorer cannot be
+    # starved forever by a structurally-high one. 300s is ~7 median agent runs
+    # (a run is ~18 LLM calls at a 2.4s median), which leaves a genuine spike
+    # winning the near term while bounding the worst wait at minutes rather
+    # than never. 0 disables aging and restores the plain greedy sort.
+    # Global-only, like max_concurrent_agents: it governs the dispatch pool's
+    # mechanics, not a per-story creative choice.
+    scheduler_aging_horizon_s: float = 300.0
     # Shared LLM concurrency ceiling (the AdaptivePool target). Global-only,
     # like max_concurrent_agents: it sizes the vLLM endpoint's real capacity (an
     # installation/hardware fact, stated as 4-8 usable), not a per-story creative

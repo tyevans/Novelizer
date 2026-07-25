@@ -137,3 +137,38 @@ async def test_empty_summary_is_treated_as_failure():
         await read.close(); await proj.close(); await events.close()
     finally:
         os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_readiness_is_proportional_to_the_unsummarized_backlog():
+    """A flat 0.6 could not express "how much undone work do I have", and with
+    max_concurrent_agents=2 it made the Summarizer dispatchable only when fewer
+    than two agents scored above 0.6 -- nearly never. Measured consequence:
+    world.db chapter_summaries had 0 rows, so every agent reading the `gists`
+    block got an empty one.
+
+    Backlog-proportional on chapters lacking a summary, matching the house
+    min(1.0, n/3) convention (editor.py, curator.py, triage.py). The signal is
+    the same list work() consumes, so the score cannot disagree with the work.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    try:
+        events, proj, read = await _stores(path)
+        agent = Summarizer(CountingRunner(), read, Committer(events), events)
+        assert await agent.readiness() == 0.0  # nothing written yet
+
+        scores = []
+        for i in range(1, 4):
+            await events.append(EventType.CHAPTER_CREATED, f"c{i}",
+                                Chapter(id=f"c{i}", title=f"Ch {i}", prose="prose"))
+            await proj.catch_up()
+            agent._clear_watermark()
+            scores.append(await agent.readiness())
+        assert scores == sorted(scores) and len(set(scores)) == 3, (
+            f"readiness must rise with the backlog, got {scores}"
+        )
+        assert scores[0] == pytest.approx(1 / 3)
+        assert scores[2] == pytest.approx(1.0)
+        await read.close(); await proj.close(); await events.close()
+    finally:
+        os.unlink(path)

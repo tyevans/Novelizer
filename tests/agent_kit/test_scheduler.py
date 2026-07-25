@@ -1011,3 +1011,193 @@ async def test_eligibility_distinguishes_the_two_ladders():
     await sched.tick()
     assert [(p.eligible, p.reason) for p in _eligibility(emitter)] == [
         (False, "awaiting progress")]
+
+
+# -- aging: a structurally-low scorer must not be starved forever --------------
+#
+# Measured over a real window: 96 scheduler.picked events with curator (69
+# "ready" states) and summarizer (17) dispatched ZERO times, because tick() was
+# a pure greedy sort on absolute readiness with no fairness term. The harm was
+# not the unfairness: world.db chapter_summaries had 0 rows, so the `gists`
+# block world_architect assembles from list_chapter_summaries() was always
+# empty for every agent consuming it. One starved agent silently degrades the
+# whole fleet's context.
+
+
+async def _dispatch_sequence(sched, now, ticks, step=10.0):
+    order = []
+    for _ in range(ticks):
+        order += await sched.tick()
+        await sched.drain_in_flight()
+        now[0] += step
+    return order
+
+
+async def test_a_low_scorer_starved_by_a_higher_one_is_eventually_dispatched():
+    """Under the plain greedy sort `high` wins every tick forever; this is the
+    starvation that left curator and summarizer at zero picks. `low` waits, and
+    with a 100s horizon 0.33 * (1 + waited/100) overtakes the 1.0 scorer (whose
+    own age resets each time it runs) once waited passes ~233s."""
+    low = StubAgent("low", 0.33)
+    high = StubAgent("high", 1.0)
+    now = [1000.0]
+    sched = Scheduler([low, high], clock=lambda: now[0], max_concurrent_agents=1,
+                      aging_horizon_s=100.0)
+    order = await _dispatch_sequence(sched, now, ticks=40)
+    assert low.ran >= 1, f"low was starved across 40 ticks: {order}"
+    assert order.index("low") == 24, (
+        f"expected the rescue once waited passed ~233s (tick 24), got {order}"
+    )
+    # Aging rescues; it does not level. The honest top scorer still gets the
+    # bulk of the slots, which is the point of keeping absolute score in the sort.
+    assert high.ran > low.ran
+
+
+async def test_aging_never_dispatches_a_zero_readiness_agent():
+    """Aging rescues the under-prioritised; it must never manufacture work.
+    The boost is multiplicative precisely so 0.0 stays 0.0 for all time."""
+    idle = StubAgent("idle", 0.0)
+    busy = StubAgent("busy", 1.0)
+    now = [1000.0]
+    sched = Scheduler([idle, busy], clock=lambda: now[0], max_concurrent_agents=1,
+                      aging_horizon_s=100.0)
+    for _ in range(5):
+        await sched.tick()
+        await sched.drain_in_flight()
+        now[0] += 10_000.0
+    assert idle.ran == 0
+
+
+async def test_aging_does_not_override_the_progress_ladders():
+    """ready() is the gate; aging only reorders those already dispatchable. An
+    agent backing off must stay held however long it has gone without a run."""
+    held = StubAgent("held", 0.33)
+    held._idle_until = 9_999_999.0
+    other = StubAgent("other", 1.0)
+    now = [1000.0]
+    sched = Scheduler([held, other], clock=lambda: now[0], max_concurrent_agents=1,
+                      aging_horizon_s=1.0)
+    now[0] += 100_000.0
+    assert await sched.tick() == ["other"]
+    await sched.drain_in_flight()
+    assert held.ran == 0
+
+
+async def test_dispatch_resets_the_age_so_a_rescued_agent_does_not_dominate():
+    """Aging accrues from the last dispatch, so the rescue is self-limiting:
+    the slot immediately after `low` runs goes back to the honest top scorer.
+    Without the reset a rescued low scorer would hold the lead it had built."""
+    low = StubAgent("low", 0.33)
+    high = StubAgent("high", 1.0)
+    now = [1000.0]
+    sched = Scheduler([low, high], clock=lambda: now[0], max_concurrent_agents=1,
+                      aging_horizon_s=100.0)
+    order = await _dispatch_sequence(sched, now, ticks=40)
+    rescue = order.index("low")
+    assert order[rescue + 1] == "high"
+    assert order.count("low") == 1, f"one rescue in 40 ticks, got {order}"
+
+
+async def test_aging_starts_at_the_first_tick_not_at_the_epoch():
+    """The clock is monotonic and its origin arbitrary, so an agent never
+    dispatched must age from the scheduler's first tick. Treating "no recorded
+    dispatch" as time zero would read as infinite age and invert the sort on
+    tick one, dispatching the weakest agent first at every startup."""
+    low = StubAgent("low", 0.33)
+    high = StubAgent("high", 1.0)
+    sched = Scheduler([low, high], clock=lambda: 5_000_000.0,
+                      max_concurrent_agents=1, aging_horizon_s=300.0)
+    assert await sched.tick() == ["high"]
+    await sched.drain_in_flight()
+
+
+async def _ticks_until_rescue(horizon, ticks=200):
+    """Ticks the low scorer waits before aging wins it a slot, or None."""
+    low = StubAgent("low", 0.33)
+    high = StubAgent("high", 1.0)
+    now = [1000.0]
+    sched = Scheduler([low, high], clock=lambda: now[0], max_concurrent_agents=1,
+                      aging_horizon_s=horizon)
+    order = await _dispatch_sequence(sched, now, ticks=ticks)
+    return order.index("low") if "low" in order else None
+
+
+async def test_a_shorter_horizon_rescues_sooner():
+    """The horizon is the knob: it sets how long a wait has to get before it
+    outweighs a genuinely higher score. Aging is relative, so this only shows
+    up under real pressure -- if both agents wait equally their ratio never
+    changes, which is why the comparison drives repeated dispatch."""
+    fast = await _ticks_until_rescue(50.0)
+    default = await _ticks_until_rescue(300.0)
+    assert fast is not None and default is not None
+    assert fast < default
+
+
+async def test_aging_is_off_when_the_horizon_is_zero():
+    """An explicit escape hatch to the pre-aging greedy sort, so the behaviour
+    can be turned off in a run without editing code -- and the regression test
+    for the starvation itself: with no aging, `low` never runs at all."""
+    assert await _ticks_until_rescue(0.0) is None
+
+
+class HeldRunAgent(StubAgent):
+    """Occupies its dispatch slot for `run_s` of simulated time, the way a real
+    agent run does -- via _in_flight, not via a ladder. Modelling the hold as an
+    idle-ladder deadline instead turns the fleet into a round-robin and hides
+    the starvation entirely."""
+
+    def __init__(self, name, score, now, run_s=40.0):
+        super().__init__(name, score)
+        self._now = now
+        self._run_s = run_s
+
+    async def run_once(self):
+        self.ran += 1
+        release = self._now[0] + self._run_s
+        while self._now[0] < release:
+            await asyncio.sleep(0)
+
+
+async def _fleet_runs(aging_horizon_s, ticks=1200):
+    """Dispatch counts for the real fleet's measured steady-state scores.
+
+    The two live conventions are deliberately both present: inverse-saturation
+    agents score HIGH when they have little to do (continuity_checker returns
+    1.0 when there is nothing to fix), backlog-proportional ones score LOW.
+    """
+    now = [1000.0]
+    scores = {
+        "continuity_checker": 1.00, "world_architect": 0.90, "author": 0.85,
+        "editor": 0.67, "summarizer": 0.33, "curator": 0.33, "triage": 0.33,
+        "flaglabeler": 0.33, "retconner": 0.00,
+    }
+    agents = [HeldRunAgent(n, s, now) for n, s in scores.items()]
+    sched = Scheduler(agents, clock=lambda: now[0], max_concurrent_agents=2,
+                      aging_horizon_s=aging_horizon_s)
+    for _ in range(ticks):
+        await sched.tick()
+        now[0] += 1.0
+        for _ in range(4):
+            await asyncio.sleep(0)
+    return {a.name: a.ran for a in agents}, scores
+
+
+async def test_greedy_dispatch_starves_most_of_the_fleet():
+    """The measured defect, reproduced: a pure greedy sort hands every slot to
+    the two agents whose scores are HIGHEST WHEN THEY HAVE LEAST TO DO."""
+    runs, scores = await _fleet_runs(aging_horizon_s=0.0)
+    starved = sorted(n for n, c in runs.items() if c == 0 and scores[n] > 0)
+    assert len(starved) >= 4, f"expected widespread starvation, got {runs}"
+    assert "summarizer" in starved and "curator" in starved
+
+
+async def test_aging_starves_no_agent_that_has_work():
+    """The invariant F3 exists to establish. retconner is the control: it scores
+    0.0 throughout, and must STILL never be dispatched -- aging rescues the
+    under-prioritised, it does not invent work."""
+    runs, scores = await _fleet_runs(aging_horizon_s=300.0)
+    starved = sorted(n for n, c in runs.items() if c == 0 and scores[n] > 0)
+    assert starved == [], f"aging must starve nobody with work, got {runs}"
+    assert runs["retconner"] == 0
+    # Still a priority ordering, not a round-robin: the top scorer leads.
+    assert runs["continuity_checker"] > runs["summarizer"]

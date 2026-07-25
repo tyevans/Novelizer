@@ -53,6 +53,7 @@ class EnvOverrides(BaseSettings):
     muse_era: str | None = None
     muse_exclusion_hands: int | None = None
     max_concurrent_agents: int | None = None
+    scheduler_aging_horizon_s: float | None = None
     llm_pool_size: int | None = None
     background_drain_concurrency: int | None = None
     extractor_token_budget: int | None = None

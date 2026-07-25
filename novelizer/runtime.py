@@ -451,6 +451,7 @@ class Runtime:
         self.scheduler = Scheduler(
             self.agents,
             max_concurrent_agents=s.max_concurrent_agents, telemetry=self.telemetry,
+            aging_horizon_s=s.scheduler_aging_horizon_s,
             override_provider=_make_override_provider(self.read),
             gate_provider=_make_gate_provider(self.indexer, self.kg_projector),
             pool=self.pool,

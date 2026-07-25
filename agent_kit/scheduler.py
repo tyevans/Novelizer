@@ -30,6 +30,7 @@ class Scheduler:
         override_provider: Callable[[], Awaitable[str | None]] | None = None,
         gate_provider: Callable[[], Awaitable[bool]] | None = None,
         pool=None,
+        aging_horizon_s: float = 300.0,
     ) -> None:
         self._agents = list(agents)
         self._tick_sleep = tick_sleep
@@ -47,6 +48,26 @@ class Scheduler:
         # a permit gates each whole run inside _run, and the same pool object is
         # shared with the KG drain -- one fleet-wide ceiling on a single endpoint.
         self._pool = pool
+        # Fairness term over the shared priority space. readiness() answers "how
+        # much undone work do I have"; nothing answered "and how long have I been
+        # waiting", so a pure greedy top-N sort starved every structurally-low
+        # scorer permanently -- measured: 96 picks with curator and summarizer at
+        # zero, and chapter_summaries left empty for the whole fleet to read.
+        #
+        # The boost is MULTIPLICATIVE, which is the load-bearing choice: aging
+        # must rescue the under-prioritised and never manufacture work, and
+        # 0.0 * anything is still 0.0, so a genuinely idle agent stays
+        # undispatched for all time. An additive term could not promise that.
+        # Uncapped, so "cannot be starved forever" is a guarantee rather than a
+        # hope; a dispatch resets the agent's age, which is what keeps a rescued
+        # low scorer from then dominating.
+        self._aging_horizon_s = aging_horizon_s
+        # Tick of the agent's last dispatch. An agent never dispatched ages from
+        # _started_at, not from 0.0 -- the clock is monotonic and arbitrary, so
+        # a zero default would read as infinite age and invert the sort on tick
+        # one, dispatching the weakest agents first at every startup.
+        self._last_dispatch: dict[str, float] = {}
+        self._started_at: float | None = None
         self._running = False
         self._max_concurrent = max_concurrent_agents
         self._in_flight: dict[str, asyncio.Task] = {}
@@ -97,6 +118,21 @@ class Scheduler:
         held = agent.hold(now) if hasattr(agent, "hold") else None
         return held if held is not None else (None, 0.0)
 
+    def _aged(self, score: float, name: str, now: float) -> float:
+        """Scale a readiness score by how long the agent has gone undispatched.
+
+        `score * (1 + waited / horizon)`: one horizon of waiting doubles an
+        agent's standing, two triples it. So a 0.33 scorer overtakes a 1.0
+        scorer after roughly two horizons -- long enough that a genuine spike
+        always wins the near term, bounded enough that nothing waits forever.
+
+        A horizon of 0 disables aging and restores the plain greedy sort.
+        """
+        if self._aging_horizon_s <= 0.0 or score <= 0.0:
+            return score
+        since = self._last_dispatch.get(name, self._started_at if self._started_at is not None else now)
+        return score * (1.0 + max(0.0, now - since) / self._aging_horizon_s)
+
     def status(self) -> list:
         now = self._clock()
         holds = {a.name: self._hold(a, now) for a in self._agents}
@@ -129,6 +165,8 @@ class Scheduler:
         soon as tasks are created, so the tick cadence becomes the dispatch
         cadence, not a wait-for-completion cadence."""
         now = self._clock()
+        if self._started_at is None:
+            self._started_at = now
         free_slots = self._max_concurrent - len(self._in_flight)
         if free_slots <= 0:
             await self._emit_eligibility(now, scores={})
@@ -176,8 +214,12 @@ class Scheduler:
 
         scores: dict[str, float] = {}
         if len(to_dispatch) < free_slots:
-            scored = [(await a.readiness(), a) for a in eligible]
+            scored = [(self._aged(await a.readiness(), a.name, now), a) for a in eligible]
             scored.sort(key=lambda x: x[0], reverse=True)
+            # The aged score is what actually decided the slot, so it is what
+            # gets reported. The "readiness 0" eligibility reason is unaffected:
+            # the boost is multiplicative, so an aged score is zero exactly when
+            # the agent's own readiness is.
             scores = {a.name: s for s, a in scored}
             for score, a in scored:
                 if len(to_dispatch) >= free_slots:
@@ -188,6 +230,10 @@ class Scheduler:
 
         dispatched: list[str] = []
         for a in to_dispatch:
+            # Reset the age at DISPATCH, not at completion: a run holds a slot
+            # for as long as it takes, and charging that time as "waiting" would
+            # let a long-running agent come back aged and win the next slot too.
+            self._last_dispatch[a.name] = now
             if self._telemetry is not None:
                 await self._telemetry.emit(
                     TelemetryEventType.SCHEDULER_PICKED, a.name,
