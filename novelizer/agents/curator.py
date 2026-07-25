@@ -5,6 +5,7 @@ from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
 from novelizer.agents.schemas import CurationDecision
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
+from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, WorldEntryRetired
@@ -189,7 +190,7 @@ def build_curator_runner(settings, callbacks=None, backend=None, tools=None, sub
         system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=CurationDecision,
-            backend=backend, tools=tools, subagents=subagents,
+            backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
             middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}

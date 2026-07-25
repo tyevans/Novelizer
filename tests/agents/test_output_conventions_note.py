@@ -13,17 +13,12 @@ import pytest
 
 from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
 from novelizer.canon_fs.backend import CanonBackend
+from tests.agents.tooled_builders import TOOLED_BUILDERS
 
-BUILDERS = [
-    ("novelizer.agents.author", "build_author_runner"),
-    ("novelizer.agents.character_keeper", "build_character_keeper_runner"),
-    ("novelizer.agents.plotter", "build_plotter_runner"),
-    ("novelizer.agents.editor", "build_editor_runner"),
-    ("novelizer.agents.retconner", "build_retconner_runner"),
-    ("novelizer.agents.world_architect", "build_world_architect_runner"),
-    ("novelizer.agents.continuity_checker", "build_continuity_checker_runner"),
-    ("novelizer.agents.structure_analyst", "build_structure_analyst_runner"),
-]
+# Derived from AGENT_REGISTRY -- see tests/agents/tooled_builders.py. The
+# hand-maintained version of this list omitted the Curator and the Triage agent,
+# both of which shipped tooled but without the output contract.
+BUILDERS = TOOLED_BUILDERS
 
 
 class _FakeSettings:
