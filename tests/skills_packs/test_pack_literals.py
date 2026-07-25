@@ -31,6 +31,29 @@ Sweep B has two tiers, because the packs cite schema names two ways:
   generically across many. A guard that cries wolf gets muted, so this tier
   stays at union membership and the weaker bite is accepted knowingly.
 
+What the union tier does and does not prove (measured)
+------------------------------------------------------
+The limit above was also established empirically, by trying to make the union
+tier fail rather than by reasoning about it. Renaming
+``EditorVerdict.secret_plants`` to ``secret_seeds`` did NOT fail the sweep.
+Renaming it on ``EditorVerdict`` *and* ``ChapterDraft`` did not fail either. It
+failed only once the name was retired from all THREE carriers -- ``ChatReply``
+has it too -- and then it caught TWO packs, including ``output-conventions``,
+which had not been checked by hand.
+
+So the guarantee is exactly this: the union tier catches a name **retired from
+the codebase**, which is the case that actually bit this project
+(``knowledge_intents``, gone in the SecretPlant/SecretCitation split), and NOT
+per-model drift. A pack telling the Keeper to fill a field only the Author
+carries would pass the union tier. The ownership-pinned tier catches that only
+where the prose names the owner, and the Plotter-boundary test in
+tests/agents/test_secrets_skill_pack.py is the targeted guard where it matters
+most.
+
+Two failed attempts before the third worked is why this is recorded here rather
+than in a review comment: anyone trusting this guard needs to know what it does
+not prove.
+
 Enum values are excluded structurally, not by taste: ``EXCLUDED_LITERALS`` is
 every string in every ``Literal[...]`` on every candidate model. ``yes_but``,
 ``no_and`` and ``red_herring`` are legitimate pack content and would otherwise
@@ -57,8 +80,14 @@ import pytest
 from pydantic import BaseModel
 
 # Packages swept for candidate models. A package list, not a model list: adding
-# a model to any of these is covered without touching this file.
-MODEL_PACKAGES = ("novelizer.agents", "novelizer.store", "novelizer.canon", "novelizer.brain")
+# a model to any of these is covered without touching this file. `novelizer.chat`
+# is here because ChatReply (chat/schemas.py) carries intent fields the packs
+# name; leaving it out made a chat-only field resolve as unknown, which is a
+# phantom failure waiting for the first pack to mention one.
+MODEL_PACKAGES = (
+    "novelizer.agents", "novelizer.store", "novelizer.canon", "novelizer.brain",
+    "novelizer.chat",
+)
 
 _HIDDEN = {"__pycache__"}
 
