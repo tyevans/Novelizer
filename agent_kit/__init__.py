@@ -29,6 +29,7 @@ from agent_kit.pool import AdaptivePool
 from agent_kit.run_context import current_agent_name, current_run_id
 from agent_kit.scheduler import Scheduler
 from agent_kit.telemetry import (
+    AgentRunCancelled,
     AgentRunFailed,
     AgentRunFinished,
     AgentRunStarted,
@@ -48,6 +49,7 @@ __all__ = [
     "AgentRunStarted",
     "AgentRunFinished",
     "AgentRunFailed",
+    "AgentRunCancelled",
     "SchedulerPicked",
     "SchedulerEligibilityChanged",
     "current_run_id",

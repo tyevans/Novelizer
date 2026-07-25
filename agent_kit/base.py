@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import math
 import time
@@ -8,6 +9,7 @@ from typing import Protocol
 
 from agent_kit.run_context import current_agent_name, current_run_id
 from agent_kit.telemetry import (
+    AgentRunCancelled,
     AgentRunFailed,
     AgentRunFinished,
     AgentRunStarted,
@@ -262,8 +264,28 @@ class BaseAgent:
         )
         try:
             await self._run()
+        except asyncio.CancelledError:
+            # CancelledError is a BaseException, so it used to slip past the
+            # arm below and the run reached NO terminal event at all: it simply
+            # vanished, and anything counting starts minus terminals (a
+            # concurrency accumulator, most visibly) drifted upward forever.
+            # Its own event type rather than run_failed, because a cancelled
+            # run is evidence of nothing about this agent -- it was cut off
+            # from outside. Both ladders are deliberately left untouched for
+            # the same reason: it neither proves the agent is broken nor, per
+            # _note_progress's principle that an agent must never be quieted by
+            # an absence of evidence, that it has run out of work. Re-raised
+            # unconditionally -- swallowing a cancellation breaks cooperative
+            # cancellation and can hang shutdown.
+            await self._emit_telemetry(
+                TelemetryEventType.AGENT_RUN_CANCELLED, run_id,
+                AgentRunCancelled(
+                    run_id=run_id, agent_name=self.name,
+                    phase=self._phase(run_id), duration_s=time.monotonic() - started),
+            )
+            raise
         except Exception as e:
-            phase = "llm_call" if (self.telemetry and self.telemetry.in_llm_call(run_id)) else "agent"
+            phase = self._phase(run_id)
             await self._emit_telemetry(
                 TelemetryEventType.AGENT_RUN_FAILED, run_id,
                 AgentRunFailed(run_id=run_id, agent_name=self.name,
@@ -291,6 +313,10 @@ class BaseAgent:
         finally:
             current_run_id.reset(rid_token)
             current_agent_name.reset(name_token)
+
+    def _phase(self, run_id: str) -> str:
+        """Where a run ended: inside an open LLM call, or in the agent body."""
+        return "llm_call" if (self.telemetry and self.telemetry.in_llm_call(run_id)) else "agent"
 
     async def _emit_telemetry(self, event_type: str, aggregate_id: str, payload) -> None:
         if self.telemetry is None:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import time
 import uuid
@@ -10,12 +11,19 @@ from novelizer.canon.events import StoredEvent
 from agent_kit import current_agent_name, current_run_id
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.events import (
-    AgentRunFailed, AgentRunFinished, AgentRunStarted, TelemetryEventType, TokenDelta,
+    AgentRunCancelled, AgentRunFailed, AgentRunFinished, AgentRunStarted,
+    TelemetryEventType, TokenDelta,
 )
 
 logger = logging.getLogger(__name__)
 
-_RUN_END_TYPES = {TelemetryEventType.AGENT_RUN_FINISHED, TelemetryEventType.AGENT_RUN_FAILED}
+_RUN_END_TYPES = {
+    TelemetryEventType.AGENT_RUN_FINISHED,
+    TelemetryEventType.AGENT_RUN_FAILED,
+    # A cancelled run is as terminal as either of the others: leaving it out
+    # would leak its per-run call bookkeeping for the process's lifetime.
+    TelemetryEventType.AGENT_RUN_CANCELLED,
+}
 
 
 class TelemetryRecorder:
@@ -85,6 +93,20 @@ async def run_with_identity(telemetry, name: str):
         )
     try:
         yield run_id
+    except asyncio.CancelledError:
+        # Same BaseException leak BaseAgent.run_once had: a cancelled block
+        # reached no terminal event at all. Distinct type, no error fields, and
+        # re-raised — see agent_kit.base.run_once for the full reasoning.
+        if telemetry is not None:
+            await telemetry.emit(
+                TelemetryEventType.AGENT_RUN_CANCELLED, run_id,
+                AgentRunCancelled(
+                    run_id=run_id, agent_name=name,
+                    phase="llm_call" if telemetry.in_llm_call(run_id) else "agent",
+                    duration_s=time.monotonic() - started,
+                ),
+            )
+        raise
     except Exception as e:
         if telemetry is not None:
             phase = "llm_call" if telemetry.in_llm_call(run_id) else "agent"

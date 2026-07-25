@@ -13,7 +13,7 @@ EXPECTED = {
     # runtime binds AdaptivePool through the package root.
     "AdaptivePool",
     "TelemetryEventType", "TelemetryEmitter",
-    "AgentRunStarted", "AgentRunFinished", "AgentRunFailed",
+    "AgentRunStarted", "AgentRunFinished", "AgentRunFailed", "AgentRunCancelled",
     "SchedulerPicked", "SchedulerEligibilityChanged",
     "current_run_id", "current_agent_name",
     "build_chat_model", "build_agent_runner",

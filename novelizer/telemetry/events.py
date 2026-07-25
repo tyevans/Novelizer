@@ -2,6 +2,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from agent_kit import (
+    AgentRunCancelled,
     AgentRunFailed,
     AgentRunFinished,
     AgentRunStarted,
@@ -12,7 +13,7 @@ from agent_kit import (
 
 class TelemetryEventType(_MachineryEventType):
     """Machinery event vocabulary. Persisted to telemetry.db (a separate
-    EventStore), never to the domain log. The five loop/scheduler constants
+    EventStore), never to the domain log. The six loop/scheduler constants
     come from agent_kit (same strings, shared with every kit consumer); the
     LLM/tool-call vocabulary below is recorder-side and stays here until the
     recorder extraction campaign."""

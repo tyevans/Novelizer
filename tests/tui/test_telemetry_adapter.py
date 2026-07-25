@@ -134,6 +134,28 @@ def test_trace_line_formats_key_event_shapes():
     assert "picked author" in trace_line(picked)
 
 
+def test_run_cancelled_translates_and_terminates_the_live_run():
+    """A cancelled run is terminal, so the live view must close its block
+    rather than show the agent running forever. tui_kit's run model has no
+    cancelled status of its own, so it lands as a RunFailed carrying
+    CancelledError -- the durable trace keeps the distinction."""
+    from tui_kit.run_model import seed_state
+
+    ev = _ev(5, TelemetryEventType.AGENT_RUN_CANCELLED,
+             {"run_id": "r1", "agent_name": "author", "phase": "agent", "duration_s": 3.0})
+    item = to_contract_event(ev)
+    assert item == RunFailed(run_id="r1", agent_name="author",
+                             error_type="CancelledError", error_message="run cancelled")
+
+    started = _ev(4, TelemetryEventType.AGENT_RUN_STARTED,
+                  {"run_id": "r1", "agent_name": "author"})
+    state = seed_state([to_contract_event(started), item], now=100.0)
+    assert state.status != "running"
+
+    line = trace_line(ev)
+    assert "author" in line and "cancelled" in line
+
+
 def test_trace_line_sanitizes_tool_call_input_summary():
     noisy = _ev(9, TelemetryEventType.TOOL_CALL_STARTED,
                 {"run_id": "r1", "agent_name": "author", "tool_name": "grep",
