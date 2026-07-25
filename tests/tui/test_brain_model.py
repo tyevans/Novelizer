@@ -783,11 +783,11 @@ def test_index_segment_populated_count_is_quiet():
 
 
 def test_index_segment_zero_documents_reads_as_an_alarm():
-    assert index_segment(0).plain == "Index ⚠empty"
+    assert index_segment(0, indexable=9).plain == "Index ⚠empty"
 
 
 def test_index_segment_zero_documents_is_alarm_styled():
-    seg = index_segment(0)
+    seg = index_segment(0, indexable=9)
     spans = [(seg.plain[s.start:s.end], str(s.style)) for s in seg.spans]
     assert (" ⚠empty", ALARM_STYLE) in spans
 
@@ -804,7 +804,34 @@ def test_index_segment_unknown_is_quiet():
 
 
 def test_index_segment_carries_the_count_and_the_lag_together():
-    assert index_segment(0, lag=7).plain == "Index ⚠empty ⚠7 behind"
+    assert index_segment(0, lag=7, indexable=7).plain == "Index ⚠empty ⚠7 behind"
+
+
+# The empty-index alarm is corroborated: an index holding nothing is only wrong
+# when there is canon that should have populated it. Firing on every brand-new
+# story would be a false positive in the common case, and an alarm that cries
+# wolf on day one trains the operator to ignore the one that matters.
+
+
+def test_index_segment_says_nothing_for_a_fresh_story():
+    assert index_segment(0, indexable=0).plain == ""
+
+
+def test_index_segment_alarms_when_canon_exists_but_the_index_is_empty():
+    # The whole reason this readout exists -- suppression must never reach here.
+    assert index_segment(0, indexable=1).plain == "Index ⚠empty"
+
+
+def test_index_segment_alarms_when_the_canon_signal_is_unknown():
+    """A canon count that could not be read must not suppress: losing the real
+    case is worse than a rare false alarm, and unlike a fresh story (the common
+    case) an unreadable event log is exceptional."""
+    assert index_segment(0, indexable=None).plain == "Index ⚠empty"
+
+
+def test_index_segment_still_reports_lag_on_a_fresh_story():
+    # Suppressing the size alarm must not swallow the staleness readout.
+    assert index_segment(0, lag=4, indexable=0).plain == "Index ⚠4 behind"
 
 
 def test_alarm_strip_appends_the_document_count():
@@ -816,8 +843,15 @@ def test_alarm_strip_appends_the_document_count():
 
 def test_alarm_strip_appends_the_empty_index_alarm():
     assert (
-        alarm_strip(0, 0, 0, 0, 0, 0, docs=0).plain
+        alarm_strip(0, 0, 0, 0, 0, 0, docs=0, indexable=9).plain
         == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty"
+    )
+
+
+def test_alarm_strip_stays_quiet_on_a_fresh_story():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, docs=0, indexable=0).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs"
     )
 
 
@@ -830,7 +864,7 @@ def test_alarm_strip_appends_the_unknown_index_marker():
 
 def test_alarm_strip_shows_a_dead_index_and_its_lag_in_one_segment():
     assert (
-        alarm_strip(0, 0, 0, 0, 0, 0, lag=7, docs=0).plain
+        alarm_strip(0, 0, 0, 0, 0, 0, lag=7, docs=0, indexable=7).plain
         == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty ⚠7 behind"
     )
 

@@ -677,7 +677,8 @@ def arcs_tab(
 DOCS_UNREPORTED = -1
 
 
-def index_segment(docs: int | None = DOCS_UNREPORTED, lag: int = 0) -> Text:
+def index_segment(docs: int | None = DOCS_UNREPORTED, lag: int = 0,
+                  indexable: int | None = None) -> Text:
     """The 'Index …' tail of the alarm strip: the semantic index's size, then
     its staleness. Three honest states for the size -- 'Index 1284' (dim: it
     holds documents), 'Index ⚠empty' (alarm: zero documents, so every
@@ -690,14 +691,24 @@ def index_segment(docs: int | None = DOCS_UNREPORTED, lag: int = 0) -> Text:
     embedding fails the drain abandons each aggregate and jumps the cursor
     past it, after which lag() reads 0 forever and actively reassures.
 
-    Empty Text when there is nothing to say (no count passed AND the index is
-    caught up), keeping the quiet strip unchanged."""
-    if docs == DOCS_UNREPORTED and not lag:
+    `indexable` (Runtime.indexable_event_count()) corroborates the alarm: an
+    index holding nothing is only WRONG when there is canon that should have
+    populated it, so a brand-new story says nothing at all rather than crying
+    wolf on day one -- an alarm the operator has learned to ignore would cost
+    more than this one is worth, and silence keeps the strip's "quiet when all
+    is well" property. None means the canon signal itself could not be read,
+    and then the alarm STANDS: an unreadable event log is exceptional where a
+    fresh story is the common case, and losing the real failure is worse.
+
+    Empty Text when there is nothing to say (no count passed, or a fresh story,
+    AND the index is caught up), keeping the quiet strip unchanged."""
+    quiet_size = docs == DOCS_UNREPORTED or (docs == 0 and indexable == 0)
+    if quiet_size and not lag:
         return Text()
     segment = Text("Index", style=DIM)
     if docs is None:
         segment.append(" ?", style=DIM)
-    elif docs == 0:
+    elif docs == 0 and indexable != 0:
         segment.append(" ⚠empty", style=ALARM_STYLE)
     elif docs > 0:
         segment.append(f" {docs}", style=DIM)
@@ -708,16 +719,17 @@ def index_segment(docs: int | None = DOCS_UNREPORTED, lag: int = 0) -> Text:
 
 def alarm_strip(
     shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int, lag: int = 0,
-    docs: int | None = DOCS_UNREPORTED,
+    docs: int | None = DOCS_UNREPORTED, indexable: int | None = None,
 ) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
     'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs'.
 
     `lag` is the canon embedding index's staleness (CanonIndexer.lag()) --
-    how many indexable events haven't been embedded yet -- and `docs` its
-    size (Runtime.index_document_count(); None for unknown). Neither is one
-    of the six per-tab counts (there is no Index tab), so both render through
+    how many indexable events haven't been embedded yet -- `docs` its size
+    (Runtime.index_document_count(); None for unknown) and `indexable` the
+    canon that should have populated it (see index_segment). None of the three
+    is one of the six per-tab counts (there is no Index tab), so they render through
     index_segment as one trailing 'Index …' segment, and the quiet state
     ('Shape · Threads · ... · Arcs') is unchanged when nothing is passed --
     an embed-endpoint outage must never again be silently invisible in the UI."""
@@ -733,7 +745,7 @@ def alarm_strip(
         strip.append(label, style=DIM)
         if count:
             strip.append(f" ⚠{count}", style=ALARM_STYLE)
-    segment = index_segment(docs, lag)
+    segment = index_segment(docs, lag, indexable)
     if segment.plain:
         strip.append(" · ", style=DIM)
         strip.append_text(segment)
