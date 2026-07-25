@@ -73,6 +73,9 @@ def test_global_config_fields_match_overridable_plus_global_only_keys():
         "llm_base_url", "llm_api_key", "llm_max_tokens", "default_stories_dir", "last_opened_story",
         "suppress_flat_migration_prompt", "max_concurrent_agents", "llm_pool_size",
         "background_drain_concurrency", "outline_gate_enabled",
+        # The embedding endpoint is global-only for the same reason llm_base_url
+        # is: one installation fact, not a per-story creative knob.
+        "embed_base_url", "embed_api_key",
     }
 
 
