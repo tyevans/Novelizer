@@ -77,9 +77,15 @@ def block_agent(b: StreamBlock) -> str:
 
 
 def block_key(b: StreamBlock, index: int) -> str:
-    """Stable identity for widget reconciliation. Index within the run is
-    enough: blocks are append-only and never reordered, and a block's kind
-    never changes once opened."""
+    """Stable identity for widget reconciliation.
+
+    `index` MUST be the block's absolute position in the whole stream --
+    never its position in a filtered list, and never its position in a
+    window that drops blocks from the head. Blocks are append-only and
+    never reordered and a block's kind never changes once opened, so an
+    absolute index is a permanent identity; any index that can shift
+    silently aliases one block's key onto another block's widget.
+    """
     return f"{type(b).__name__}:{index}"
 
 

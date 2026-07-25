@@ -14,11 +14,11 @@ from textual.widgets import Button, Collapsible, Static
 from tui_kit.contracts import AgentTheme
 from tui_kit.output_renderer import pick_renderer
 from tui_kit.run_model import (
-    CallBlock, ProseBlock, StreamBlock, ThinkingBlock, ToolBlock, block_key,
+    CallBlock, ProseBlock, StreamBlock, ThinkingBlock, ToolBlock, block_agent,
+    block_key,
 )
 from tui_kit.stream_model import (
     StreamState, clear_filter, on_new_blocks, on_scroll, toggle_agent, trim_window,
-    visible_blocks,
 )
 from tui_kit.stream_source import StreamSource
 
@@ -43,6 +43,12 @@ class StreamView(Vertical):
         self._state = StreamState()
         self._mounted: dict[str, Static | Collapsible] = {}
         self._agents: list[str] = []
+        # How many blocks have been dropped from the head of the window so
+        # far. A block's identity is its position in the whole stream, not
+        # its position in `self._state.blocks` -- that list is renumbered
+        # every time trim_window drops from the head, and a key that moves
+        # is a key that points at another block's widget.
+        self._base = 0
 
     def compose(self) -> ComposeResult:
         yield Horizontal(id="sv_filter", classes="sv-filter")
@@ -89,8 +95,14 @@ class StreamView(Vertical):
         bar.update(f"↓ detached · {n} new · End to follow")
         bar.display = True
 
+    def _trim(self, state: StreamState) -> StreamState:
+        """trim_window, plus the bookkeeping that keeps keys absolute."""
+        trimmed = trim_window(state)
+        self._base += len(state.blocks) - len(trimmed.blocks)
+        return trimmed
+
     def append_blocks(self, blocks: tuple[StreamBlock, ...]) -> None:
-        self._state = trim_window(on_new_blocks(self._state, blocks))
+        self._state = self._trim(on_new_blocks(self._state, blocks))
         self._reconcile()
         if self._state.follow:
             self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
@@ -116,7 +128,7 @@ class StreamView(Vertical):
         state = replace(self._state, blocks=kept + tuple(blocks))
         if not state.follow and added:
             state = replace(state, unseen=state.unseen + added)
-        self._state = trim_window(state)
+        self._state = self._trim(state)
         self._reconcile()
         if self._state.follow:
             self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
@@ -125,8 +137,16 @@ class StreamView(Vertical):
     def mounted_keys(self) -> list[str]:
         return list(self._mounted)
 
+    def _keyed_blocks(self) -> list[tuple[str, StreamBlock]]:
+        """Every block in the window with its absolute key. Never enumerate
+        the *filtered* list for keys: filtering renumbers the survivors."""
+        return [(block_key(b, self._base + i), b)
+                for i, b in enumerate(self._state.blocks)]
+
     def visible_keys(self) -> list[str]:
-        return [block_key(b, i) for i, b in enumerate(visible_blocks(self._state))]
+        active = self._state.agent_filter
+        return [key for key, b in self._keyed_blocks()
+                if not active or block_agent(b) in active]
 
     def active_filter(self) -> frozenset[str]:
         return self._state.agent_filter
@@ -184,8 +204,8 @@ class StreamView(Vertical):
         Rebuilding the pane per token is what made the old string renderer
         force a scroll-to-bottom on every update."""
         window = self.query_one("#sv_window", VerticalScroll)
-        for i, block in enumerate(visible_blocks(self._state)):
-            key = block_key(block, i)
+        keyed = self._keyed_blocks()
+        for key, block in keyed:
             widget = self._mounted.get(key)
             if widget is None:
                 widget = self._mount_block(window, key, block)
@@ -195,6 +215,17 @@ class StreamView(Vertical):
                 widget.title = self._tool_summary_line(block)
             else:
                 widget.update(self._line_for(block))
+        # Blocks that fell out of the head (trim) or off the tail (a shorter
+        # sync_tail) take their widgets with them; keys are absolute, so
+        # nothing else will ever reuse them and leaving them mounted would
+        # let the widget count grow without bound.
+        live = {key for key, _ in keyed}
+        for key in [k for k in self._mounted if k not in live]:
+            self._mounted.pop(key).remove()
+        # Mount everything, then decide what is *shown*. Filtering is a
+        # display concern; unmounting on filter would throw away fold state
+        # and scroll position.
+        self._apply_filter()
 
     def _mount_block(self, window, key: str, block: StreamBlock):
         if not isinstance(block, ToolBlock):

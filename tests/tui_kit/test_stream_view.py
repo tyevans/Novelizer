@@ -1,6 +1,7 @@
 import pytest
 from textual.app import App, ComposeResult
 from tui_kit.run_model import ProseBlock, ThinkingBlock, CallBlock, ToolBlock
+from tui_kit.stream_model import WINDOW_CAP
 from tui_kit.stream_source import InMemoryStreamSource
 from tui_kit.widgets.stream_view import StreamView
 from textual.widgets import Button, Collapsible, Markdown, Static
@@ -279,3 +280,91 @@ async def test_filtered_out_widgets_are_hidden_not_unmounted():
         await pilot.pause()
         assert len(view.mounted_keys()) == 2
         assert len(view.visible_keys()) == 1
+
+
+# -- block identity must be absolute -----------------------------------------
+#
+# block_key(b, index) is only a stable widget identity if `index` never
+# shifts. Two things shift it: filtering (enumerating the *filtered* list
+# renumbers every survivor) and trim_window (dropping blocks from the head
+# renumbers everything after them). Either one makes _reconcile write one
+# block's content into another block's widget.
+
+
+def _rows(view):
+    """Ordered (kind, rendered text) of the window's direct children -- the
+    widgets themselves, in mount order, not the model they came from."""
+    window = view.query_one("#sv_window")
+    out = []
+    for w in window.children:
+        if isinstance(w, Collapsible):
+            out.append(("tool", w.title))
+        else:
+            out.append(("text", str(w.renderable)))
+    return out
+
+
+@pytest.mark.asyncio
+async def test_a_filter_does_not_renumber_blocks_into_each_others_widgets():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents(["author", "editor"])
+        view.append_blocks((ProseBlock(text="a", agent_name="author"),
+                            ProseBlock(text="b", agent_name="editor")))
+        await pilot.pause()
+        view.toggle_agent_filter("editor")
+        await pilot.pause()
+        view.append_blocks((ProseBlock(text="c", agent_name="editor"),))
+        await pilot.pause()
+        assert _rows(view) == [("text", "@ a"), ("text", "# b"), ("text", "# c")]
+
+
+@pytest.mark.asyncio
+async def test_trimming_the_window_does_not_shift_content_between_widgets():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        head = [ProseBlock(text=f"l{i}", agent_name="author") for i in range(WINDOW_CAP)]
+        head[300] = ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                              status="done", agent_name="author", sequence=1)
+        view.append_blocks(tuple(head))
+        await pilot.pause()
+        collapsible = pilot.app.query_one(Collapsible)
+
+        view.append_blocks(tuple(ProseBlock(text=f"n{i}", agent_name="author")
+                                 for i in range(5)))
+        await pilot.pause()
+
+        kept = head[5:] + [ProseBlock(text=f"n{i}", agent_name="author") for i in range(5)]
+        expected = [("tool", view._tool_summary_line(b)) if isinstance(b, ToolBlock)
+                    else ("text", f"@ {b.text}") for b in kept]
+        assert _rows(view) == expected
+        assert pilot.app.query_one(Collapsible) is collapsible
+
+
+@pytest.mark.asyncio
+async def test_a_block_mutating_in_place_keeps_its_key_and_its_widget():
+    """Prose grows token by token and a tool goes running -> done. Neither is
+    a new block, so neither may get a new key or a new widget."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        run = (ProseBlock(text="he", agent_name="author"),
+               ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                         status="running", agent_name="author"))
+        view.sync_tail(run, replacing=0)
+        await pilot.pause()
+        keys = view.mounted_keys()
+        prose_widget = view.query_one("#sv_window").children[0]
+        collapsible = pilot.app.query_one(Collapsible)
+
+        grown = (ProseBlock(text="hello", agent_name="author"),
+                 ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                           status="done", duration_s=1.5, agent_name="author",
+                           sequence=9))
+        view.sync_tail(grown, replacing=2)
+        await pilot.pause()
+
+        assert view.mounted_keys() == keys
+        assert view.query_one("#sv_window").children[0] is prose_widget
+        assert pilot.app.query_one(Collapsible) is collapsible
+        assert str(prose_widget.renderable) == "@ hello"
+        assert "1.5s" in collapsible.title
