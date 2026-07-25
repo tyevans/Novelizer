@@ -1,6 +1,8 @@
 from __future__ import annotations
 import hashlib
 
+import pytest
+
 from novelizer.canon import db as _db
 
 # Test modules import `postgres_dsn` directly; its session-scoped container
@@ -25,6 +27,39 @@ async def _nosync_connect(path: str):
 
 
 _db.connect = _nosync_connect
+
+
+# --- chromadb: release each test's Chroma systems -----------------------------
+# chromadb's Rust core spawns ~15-20 tokio worker threads per PersistentClient
+# and only tears them down when the client is closed. Production closes its one
+# client (Runtime.close -> EmbeddingStore.close), but ~20 test sites construct an
+# EmbeddingStore directly and let it fall out of scope, which frees no threads:
+# a full run accumulated 1536 tokio threads across ~1800 OS threads and then
+# stalled mid-suite -- the wedge described in docs/TESTING-TUI.md.
+#
+# This releases only systems a test actually created (diffed against the set
+# alive before it), so a client still referenced by an outer scope is untouched.
+# Every Chroma-touching fixture in the suite is function-scoped, so per-test
+# release is safe; a module- or session-scoped one would need excluding here.
+@pytest.fixture(autouse=True)
+def _release_chroma_systems():
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    before = set(SharedSystemClient._identifier_to_system)
+    try:
+        yield
+    finally:
+        for identifier in set(SharedSystemClient._identifier_to_system) - before:
+            system = SharedSystemClient._identifier_to_system.pop(identifier, None)
+            SharedSystemClient._identifier_to_refcount.pop(identifier, None)
+            if system is not None:
+                try:
+                    system.stop()
+                except Exception:
+                    # A store the test already closed, or a half-built client
+                    # from a test asserting a construction failure: the goal is
+                    # to free threads, never to fail an otherwise-passing test.
+                    pass
 
 
 class FakeEmbeddingFunction:

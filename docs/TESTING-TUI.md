@@ -95,6 +95,36 @@ large pool of `tokio-rt-worker` threads (observed: 112), and under some ordering
 interpreter wedges at or near shutdown — all tests done, process asleep on a futex,
 forever. Two rules follow:
 
+> **The thread pile-up itself was a leak, and it is fixed (2026-07-25).** The 112
+> threads were not inherent to chromadb: nothing ever closed the Chroma client.
+> `Runtime.close()` released read/projector/telemetry/events/kg_store but not
+> `embeddings`, and `EmbeddingStore.close()` was `pass  # chromadb PersistentClient
+> auto-flushes` — so every `finally: await rt.close()` in the suite freed nothing,
+> and each started Runtime leaked its whole ~15-20-thread tokio pool. chromadb's own
+> `Client.close()` docstring calls releasing it "particularly important for
+> PersistentClient to avoid SQLite file locking issues".
+>
+> Two changes: `EmbeddingStore.close()` now closes the client (idempotent, since
+> callers close from `finally`) and `Runtime.close()` calls it; and because ~20 test
+> sites construct an `EmbeddingStore` directly and drop it, an autouse
+> `_release_chroma_systems` fixture in `tests/conftest.py` stops the systems each
+> test created. Measured over `tests/store tests/brain` (~290 tests), threads at
+> exit went **1909 total / 1627 tokio → 32 total / 16 tokio**; over N
+> `Runtime.start()/close()` cycles, 2/5/10 cycles went 54/111/206 threads → a flat
+> 16. Regression tests: `tests/test_runtime_closes_resources.py` and
+> `tests/store/test_embedding_store_lifecycle.py` (the thread-growth one is the load-
+> bearing assertion — it fails on any reintroduced per-Runtime leak).
+>
+> A *separate* mid-run wedge in `tests/test_runtime.py` survives this fix and is
+> still open: the run stops partway through that file with the main thread suspended
+> in `selectors.select` (so an awaited coroutine, not CPU work) and only ~32 tokio
+> threads alive, i.e. no longer thread exhaustion. It reproduces on plain `main`
+> too, so it predates the fixes above; `tests/test_runtime.py` passes in isolation
+> (57 passed, ~170s). `Runtime.start()` is not the culprit on its own — probed with
+> `socket.socket.connect` patched to raise, start() with tools enabled makes **zero**
+> connection attempts. Until it is diagnosed, verify with
+> `--ignore=tests/test_runtime.py` plus a separate isolated run of that file.
+
 1. **Never pipe a long pytest run through `tail`/`head`.** The pipe only flushes on
    EOF; if the process wedges at exit you get an empty file and zero visibility into
    1000 tests that may all have passed. Redirect to a file instead:

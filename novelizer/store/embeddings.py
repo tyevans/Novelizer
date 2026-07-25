@@ -83,7 +83,24 @@ class EmbeddingStore:
         self._write_lock = asyncio.Lock()
 
     def close(self) -> None:
-        pass  # chromadb PersistentClient auto-flushes
+        """Release the Chroma client this store constructed.
+
+        Writes are already durable (the PersistentClient auto-flushes), so this
+        is about the *handle*, not the data. chromadb reference-counts one
+        sqlite-backed System per persist path and only tears it down when the
+        last client closes; skipping that leaks the sqlite handle plus the
+        client's worker threads for the life of the process. Chroma's own
+        Client.close() docstring calls this "particularly important for
+        PersistentClient to avoid SQLite file locking issues" -- and it is: with
+        enough leaked systems in one process, a later client blocks inside
+        Chroma's native create_collection and never returns.
+
+        Idempotent, because callers close from `finally` blocks and may close
+        twice on an error path.
+        """
+        client, self._client = self._client, None
+        if client is not None:
+            client.close()
 
     async def upsert_world_entry(self, entry: WorldEntry) -> None:
         text = _cap(f"{entry.title}\n{entry.body}")
