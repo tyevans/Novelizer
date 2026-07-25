@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import math
 import time
 
@@ -195,6 +196,40 @@ async def test_run_once_failure_emits_failed_and_reraises():
     assert failed.error_type == "ValueError"
     assert failed.error_message == "boom"
     assert failed.phase == "agent"
+
+
+async def test_run_once_cancellation_emits_cancelled_and_reraises():
+    """CancelledError inherits BaseException, so the broad `except Exception`
+    never saw it: a cancelled run emitted neither a finished nor a failed
+    event and simply vanished, leaving every starts-minus-terminals consumer
+    drifting upward forever. Every run now reaches exactly one terminal
+    event, and the cancellation still propagates -- swallowing it would
+    break cooperative cancellation and hang shutdown."""
+    agent = RecordingAgent(fail=asyncio.CancelledError())
+    emitter = FakeEmitter()
+    agent.telemetry = emitter
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run_once()
+    types = [e[0] for e in emitter.events]
+    assert types == [TelemetryEventType.AGENT_RUN_STARTED,
+                     TelemetryEventType.AGENT_RUN_CANCELLED]
+    started, cancelled = emitter.events[0][2], emitter.events[1][2]
+    assert cancelled.run_id == started.run_id
+    assert cancelled.agent_name == "rec"
+    assert cancelled.phase == "agent"
+    assert cancelled.duration_s >= 0.0
+    # The contextvars are still unwound: the finally arm runs on BaseException.
+    assert current_run_id.get() is None
+    assert current_agent_name.get() == ""
+
+
+async def test_run_once_cancellation_phase_llm_call_when_recorder_says_so():
+    agent = RecordingAgent(fail=asyncio.CancelledError())
+    emitter = FakeEmitter(llm_call_run_ids={"*"})
+    agent.telemetry = emitter
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run_once()
+    assert emitter.events[1][2].phase == "llm_call"
 
 
 async def test_run_once_failure_phase_llm_call_when_recorder_says_so():
@@ -471,6 +506,29 @@ async def test_probe_not_consulted_when_the_run_failed():
     assert probe.calls == 0
     assert agent._idle_streak == 0
     assert agent._idle_until <= clock()
+
+
+async def test_cancellation_leaves_both_ladders_untouched():
+    """A cancelled run is evidence of nothing about this agent: it was cut off
+    from outside, so it neither proves the agent is broken (fail ladder) nor
+    that it has run out of work (idle ladder) -- and _note_progress's own
+    principle is that an agent must never be quieted by an absence of
+    evidence. Both ladders are left exactly as the cancellation found them,
+    including a fail streak already standing: clearing it would be the same
+    error in the other direction."""
+    clock = FakeClock()
+    probe = ProbeSpy(answer=False)
+    agent = LadderAgent(fail=asyncio.CancelledError(), progress_probe=probe, clock=clock)
+    agent._advance_fail(clock())  # a streak already standing from an earlier crash
+    fail_until, fail_streak = agent._fail_until, agent._fail_streak
+
+    with pytest.raises(asyncio.CancelledError):
+        await agent.run_once()
+
+    assert probe.calls == 0
+    assert (agent._fail_streak, agent._fail_until) == (fail_streak, fail_until)
+    assert agent._idle_streak == 0
+    assert agent._idle_until == 0.0
 
 
 # --- the two ladders -------------------------------------------------------

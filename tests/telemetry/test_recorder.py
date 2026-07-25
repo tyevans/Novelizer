@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import pytest
@@ -108,6 +109,22 @@ async def test_run_with_identity_emits_failed_and_reraises(rig):
     assert failed.event_type == TelemetryEventType.AGENT_RUN_FAILED
     assert failed.payload["error_type"] == "ValueError"
     assert failed.payload["error_message"] == "boom"
+
+
+async def test_run_with_identity_emits_cancelled_and_reraises(rig):
+    """run_with_identity gives non-BaseAgent call sites (chat, research) the
+    same contract run_once gives agents, so it owes the same guarantee: every
+    started run reaches exactly one terminal event. CancelledError is a
+    BaseException and used to escape the `except Exception` arm entirely."""
+    store, bus, rec = rig
+    q = bus.subscribe()
+    with pytest.raises(asyncio.CancelledError):
+        async with run_with_identity(rec, "chat:author"):
+            raise asyncio.CancelledError()
+    q.get_nowait()  # started
+    cancelled = q.get_nowait()
+    assert cancelled.event_type == TelemetryEventType.AGENT_RUN_CANCELLED
+    assert cancelled.payload["phase"] == "agent"
 
 
 async def test_run_with_identity_resets_context_vars_after(rig):

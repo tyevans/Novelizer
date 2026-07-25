@@ -186,6 +186,7 @@ one-to-one:
 | `AGENT_RUN_STARTED` | `RunStarted(run_id, agent_name)` |
 | `AGENT_RUN_FINISHED` | `RunFinished(run_id, agent_name, duration_s)` |
 | `AGENT_RUN_FAILED` | `RunFailed(run_id, agent_name, error_type, error_message)` |
+| `AGENT_RUN_CANCELLED` | `RunFailed(run_id, agent_name, "CancelledError", "run cancelled")` — the run model has no cancelled status, and a terminal event that maps to nothing leaves the run reading as still running |
 | `LLM_CALL_STARTED` | `LLMCallStarted(run_id, agent_name, call_index, model, prompt)` |
 | `LLM_CALL_FINISHED` | `LLMCallFinished(run_id, agent_name, call_index, duration_s, output_tokens)` |
 | `TOOL_CALL_STARTED` | `ToolCallStarted(run_id, agent_name, tool_name, input_summary, delegate)` |

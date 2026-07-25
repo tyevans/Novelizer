@@ -39,6 +39,15 @@ def to_contract_event(item):
         return contracts.RunFailed(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
                                    error_type=p.get("error_type", "?"),
                                    error_message=p.get("error_message", ""))
+    if et == TelemetryEventType.AGENT_RUN_CANCELLED:
+        # Terminal, so the live block must close -- an unmapped terminal event
+        # would leave the agent reading as running forever. tui_kit's run model
+        # has only finished/failed, and "cancelled" is the nearer of the two
+        # (it did not complete); the error_type carries the distinction the
+        # generic model has no status for, and the durable trace below keeps it
+        # spelled out.
+        return contracts.RunFailed(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
+                                   error_type="CancelledError", error_message="run cancelled")
     if et == TelemetryEventType.LLM_CALL_STARTED:
         return contracts.LLMCallStarted(run_id=p.get("run_id", ""), agent_name=p.get("agent_name", ""),
                                         call_index=p.get("call_index", 0), model=p.get("model", ""),
@@ -83,6 +92,9 @@ def trace_line(ev: StoredEvent) -> str:
         return f"{_t(ev)} {p.get('agent_name', '?')} run ✓ {p.get('duration_s', 0):.0f}s"
     if et == TelemetryEventType.AGENT_RUN_FAILED:
         return (f"{_t(ev)} {p.get('agent_name', '?')} run ✗ {p.get('error_type', '?')} "
+                f"({p.get('phase', '?')})")
+    if et == TelemetryEventType.AGENT_RUN_CANCELLED:
+        return (f"{_t(ev)} {p.get('agent_name', '?')} run ⊘ cancelled "
                 f"({p.get('phase', '?')})")
     if et == TelemetryEventType.LLM_CALL_STARTED:
         return (f"{_t(ev)} {p.get('agent_name', '?')} llm call {p.get('call_index', '?')} "

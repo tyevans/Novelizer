@@ -52,10 +52,12 @@ def test_machinery_vocabulary_is_shared_with_agent_kit():
     assert events.AgentRunStarted is agent_kit.AgentRunStarted
     assert events.AgentRunFinished is agent_kit.AgentRunFinished
     assert events.AgentRunFailed is agent_kit.AgentRunFailed
+    assert events.AgentRunCancelled is agent_kit.AgentRunCancelled
     assert events.SchedulerPicked is agent_kit.SchedulerPicked
     assert events.SchedulerEligibilityChanged is agent_kit.SchedulerEligibilityChanged
     assert issubclass(events.TelemetryEventType, agent_kit.TelemetryEventType)
     for const in ("SCHEDULER_PICKED", "SCHEDULER_ELIGIBILITY_CHANGED",
-                  "AGENT_RUN_STARTED", "AGENT_RUN_FINISHED", "AGENT_RUN_FAILED"):
+                  "AGENT_RUN_STARTED", "AGENT_RUN_FINISHED", "AGENT_RUN_FAILED",
+                  "AGENT_RUN_CANCELLED"):
         assert getattr(events.TelemetryEventType, const) == getattr(
             agent_kit.TelemetryEventType, const)
