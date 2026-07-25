@@ -18,6 +18,7 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
     from deepagents import create_deep_agent
     from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
+    from novelizer.agents.middleware import tool_call_budget
     model_name = settings.author_model if agent_name == "author" else settings.agent_model
     model = build_chat_model(
         model_name, settings.llm_base_url, settings.llm_api_key,
@@ -31,7 +32,8 @@ def build_chat_runner(settings, agent_name: str, callbacks=None, backend=None, t
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChatReply,
             backend=backend, tools=tools, skills=CRAFT_SKILLS,
-            middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
+            middleware=[tool_call_budget(),
+                        ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:

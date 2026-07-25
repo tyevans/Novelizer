@@ -187,6 +187,7 @@ one-to-one:
 | `AGENT_RUN_FINISHED` | `RunFinished(run_id, agent_name, duration_s)` |
 | `AGENT_RUN_FAILED` | `RunFailed(run_id, agent_name, error_type, error_message)` |
 | `AGENT_RUN_CANCELLED` | `RunFailed(run_id, agent_name, "CancelledError", "run cancelled")` — the run model has no cancelled status, and a terminal event that maps to nothing leaves the run reading as still running |
+| `AGENT_RUN_TRUNCATED` | *(none)* — the tool-call budget landed the run early. Deliberately unmapped: the run is still going and emits its own terminal event afterwards, so closing the live block here would hide the rest of it. It shows in the durable trace instead |
 | `LLM_CALL_STARTED` | `LLMCallStarted(run_id, agent_name, call_index, model, prompt)` |
 | `LLM_CALL_FINISHED` | `LLMCallFinished(run_id, agent_name, call_index, duration_s, output_tokens)` |
 | `TOOL_CALL_STARTED` | `ToolCallStarted(run_id, agent_name, tool_name, input_summary, delegate)` |

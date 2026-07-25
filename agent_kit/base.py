@@ -7,12 +7,18 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from agent_kit.run_context import current_agent_name, current_run_id
+from agent_kit.run_context import (
+    RunBudget,
+    current_agent_name,
+    current_run_budget,
+    current_run_id,
+)
 from agent_kit.telemetry import (
     AgentRunCancelled,
     AgentRunFailed,
     AgentRunFinished,
     AgentRunStarted,
+    AgentRunTruncated,
     TelemetryEventType,
 )
 
@@ -258,6 +264,13 @@ class BaseAgent:
         started = time.monotonic()
         rid_token = current_run_id.set(run_id)
         name_token = current_agent_name.set(self.name)
+        # A fresh holder per run, installed here rather than owned by the graph:
+        # one graph serves every run of an agent, so anything the graph held onto
+        # would report the first truncated run forever. ToolCallBudgetMiddleware
+        # mutates this object in place from inside the graph -- see RunBudget for
+        # why it must be a shared mutable and not a ContextVar.set() down there.
+        budget = RunBudget()
+        budget_token = current_run_budget.set(budget)
         await self._emit_telemetry(
             TelemetryEventType.AGENT_RUN_STARTED, run_id,
             AgentRunStarted(run_id=run_id, agent_name=self.name),
@@ -301,6 +314,16 @@ class BaseAgent:
             self._advance_fail(self._clock())
             raise
         else:
+            if budget.truncated:
+                # Emitted BEFORE run_finished so a reader of the trace sees why
+                # the output is thin before it sees the run succeed. Deliberately
+                # not a terminal event and deliberately not a failure: the run
+                # did finish and did produce a usable answer.
+                await self._emit_telemetry(
+                    TelemetryEventType.AGENT_RUN_TRUNCATED, run_id,
+                    AgentRunTruncated(run_id=run_id, agent_name=self.name,
+                                      stage=budget.stage, tool_calls=budget.tool_calls),
+                )
             await self._emit_telemetry(
                 TelemetryEventType.AGENT_RUN_FINISHED, run_id,
                 AgentRunFinished(run_id=run_id, agent_name=self.name,
@@ -313,6 +336,7 @@ class BaseAgent:
         finally:
             current_run_id.reset(rid_token)
             current_agent_name.reset(name_token)
+            current_run_budget.reset(budget_token)
 
     def _phase(self, run_id: str) -> str:
         """Where a run ended: inside an open LLM call, or in the agent body."""

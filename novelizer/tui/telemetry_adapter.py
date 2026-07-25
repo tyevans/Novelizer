@@ -96,6 +96,11 @@ def trace_line(ev: StoredEvent) -> str:
     if et == TelemetryEventType.AGENT_RUN_CANCELLED:
         return (f"{_t(ev)} {p.get('agent_name', '?')} run ⊘ cancelled "
                 f"({p.get('phase', '?')})")
+    if et == TelemetryEventType.AGENT_RUN_TRUNCATED:
+        # The whole point of the event: an operator reading the trace can tell a
+        # thin answer from a complete one, and see which budget stage caused it.
+        return (f"{_t(ev)} {p.get('agent_name', '?')} run ✂ truncated "
+                f"({p.get('stage', '?')} at {p.get('tool_calls', '?')} tool calls)")
     if et == TelemetryEventType.LLM_CALL_STARTED:
         return (f"{_t(ev)} {p.get('agent_name', '?')} llm call {p.get('call_index', '?')} "
                 f"started ({p.get('model', '?')})")

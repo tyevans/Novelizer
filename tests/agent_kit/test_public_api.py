@@ -14,11 +14,15 @@ EXPECTED = {
     "AdaptivePool",
     "TelemetryEventType", "TelemetryEmitter",
     "AgentRunStarted", "AgentRunFinished", "AgentRunFailed", "AgentRunCancelled",
+    "AgentRunTruncated",
     "SchedulerPicked", "SchedulerEligibilityChanged",
     "current_run_id", "current_agent_name",
     "build_chat_model", "build_agent_runner",
     "GRAPH_RECURSION_LIMIT", "CONTEXT_WINDOW_TOKENS", "LLM_MAX_RETRIES",
     "ExcludeToolsMiddleware",
+    # The soft tool-call budget: every domain builder must be able to install it
+    # through the package root, same reason as AdaptivePool above.
+    "ToolCallBudgetMiddleware", "TOOL_CALL_SOFT_BUDGET", "TOOL_CALL_HARD_MARGIN",
 }
 
 

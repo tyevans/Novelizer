@@ -326,6 +326,7 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None, suba
     from deepagents import create_deep_agent
     from agent_kit import build_chat_model
     from agent_kit import ExcludeToolsMiddleware
+    from novelizer.agents.middleware import tool_call_budget
     if backend is not None:
         model = build_chat_model(
             settings.agent_model, settings.llm_base_url, settings.llm_api_key,
@@ -336,7 +337,8 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None, suba
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=EditorVerdict,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
-            middleware=[ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
+            middleware=[tool_call_budget(),
+                        ExcludeToolsMiddleware(excluded=frozenset({"write_todos"}))],
         )
         config = {"recursion_limit": GRAPH_RECURSION_LIMIT}
         if callbacks:
