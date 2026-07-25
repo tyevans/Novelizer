@@ -14,7 +14,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.canon.promises import TERMINAL_PROMISE_STATES
-from novelizer.canon.threads import TERMINAL_STATES
+from novelizer.canon.threads import active_thread_ids
 from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, Flag, FlagStatus
 
 SYSTEM_PROMPT = """You are the Editor of a living, continuously-written novel. One chapter has been
@@ -253,15 +253,13 @@ class Editor(BaseAgent):
         else:
             sig = DirectorSignal(kind=SignalKind.revise, body=verdict.notes, target_agent="author", target_entity=ch.id)
             await self._committer.commit(self.name, EventType.DIRECTOR_SIGNAL_CREATED, sig.id, sig)
-        active_thread_ids = {
-            t.id for t in ctx["threads"] if t.state.value not in TERMINAL_STATES
-        }
-        await self._commit_thread_intents(verdict.thread_intents, active_thread_ids, chapter_id=ch.id)
+        active_ids = active_thread_ids(ctx["threads"])
+        await self._commit_thread_intents(verdict.thread_intents, active_ids, chapter_id=ch.id)
         active_promise_ids = {
             p.id for p in ctx["promises"] if p.state.value not in TERMINAL_PROMISE_STATES
         }
         await self._commit_promise_intents(
-            verdict.promise_intents, active_promise_ids, active_thread_ids, chapter_id=ch.id
+            verdict.promise_intents, active_promise_ids, active_ids, chapter_id=ch.id
         )
         active_theme_ids = {t.id for t in ctx["themes"]}
         await self._commit_theme_intents(verdict.theme_intents, active_theme_ids, chapter_id=ch.id)
