@@ -333,6 +333,9 @@ class Author(BaseAgent):
                 pull_mode=self.pull_mode,
                 gate_enabled=self.gate_enabled,
             )
+        # Both paths: the Author files craft flags whether it is drafting fresh
+        # or revising, so either pass can be the one repeating a thrown-out one.
+        content += await self._own_rejections_note()
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": content}]})
         return result.get("structured_response")
 

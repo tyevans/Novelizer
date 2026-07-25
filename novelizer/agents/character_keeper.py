@@ -228,7 +228,8 @@ class CharacterKeeper(BaseAgent):
         note = arc_note(
             ctx.get("all_arcs", []), ctx["characters"], ctx.get("chapters", []), beats, ctx.get("blueprint"),
         )
-        tail = f"{secrets_block}{retcons}{cast}{arcs_block}{note}"
+        rejections = await self._own_rejections_note()
+        tail = f"{secrets_block}{retcons}{rejections}{cast}{arcs_block}{note}"
 
         def build_msg(prose_block: str) -> str:
             if self.pull_mode:

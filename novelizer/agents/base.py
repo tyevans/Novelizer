@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from agent_kit import BaseAgent as _KitBaseAgent, Runner  # noqa: F401 — Runner re-exported for agent imports
 from pydantic import BaseModel, Field
+from novelizer.brain.context import rejected_flags_note
 from novelizer.canon.events import EventType, AgentRemark
 from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
@@ -57,6 +58,19 @@ class BaseAgent(_KitBaseAgent):
             return
         await self._committer.commit(
             self.name, EventType.AGENT_REMARKED, self.name, AgentRemark(agent_name=self.name, note=note)
+        )
+
+    async def _own_rejections_note(self) -> str:
+        """This agent's own recent rejections, as a prompt block (empty when none).
+
+        The read half of `filed_by`, which every filing site wrote and nothing
+        read: an agent could not learn a judgement of its own had been thrown
+        out. It lives beside `_commit_flag_drafts` because the write side does,
+        and on the chassis rather than in each agent because seven agents file
+        flags — the bound and the wording are one decision, not seven.
+        """
+        return rejected_flags_note(
+            await self._read.list_flags(status=FlagStatus.rejected), self.name
         )
 
     async def _commit_flag_drafts(self, drafts: list[FlagDraft], category: str) -> None:

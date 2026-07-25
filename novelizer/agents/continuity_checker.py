@@ -234,7 +234,11 @@ class ContinuityChecker(BaseAgent):
             ]
             chapters = assemble_advisory(entries, self._advisory_token_budget) or "None."
             chapters_block = f"Recent chapters:\n{chapters}"
-        msg = f"World entries:\n{world}\n\nCharacters:\n{chars}\n\n{chapters_block}{retcons}{cast}"
+        rejections = await self._own_rejections_note()
+        msg = (
+            f"World entries:\n{world}\n\nCharacters:\n{chars}\n\n"
+            f"{chapters_block}{retcons}{rejections}{cast}"
+        )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         out = result.get("structured_response")
 

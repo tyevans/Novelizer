@@ -250,9 +250,10 @@ class Editor(BaseAgent):
             listing = "\n".join(f"- {d.description}" for d in drift_filed_flags[:20])
             drift = "\n\nVoice-drift flags already filed (do not re-flag these lines):\n" + listing
         revisions = _revision_budget_note(ch.revision_count)
+        rejections = await self._own_rejections_note()
         msg = (
             f"Chapter title: {ch.title}\n\nProse:\n{ch.prose}{voice}{cast}{voices}{pacing}{causal}"
-            f"{secret_ids}{drift}{ledger}{pacing_plan}{beat_drift}{revisions}"
+            f"{secret_ids}{drift}{rejections}{ledger}{pacing_plan}{beat_drift}{revisions}"
         )
         result = await self._runner.ainvoke({"messages": [{"role": "user", "content": msg}]})
         return result.get("structured_response")
