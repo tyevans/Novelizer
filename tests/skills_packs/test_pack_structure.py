@@ -11,14 +11,19 @@ import importlib.resources
 
 import pytest
 
-PACK_NAMES = [
-    "outlining",
-    "promise-payoff",
-    "character-arcs",
-    "scene-sequel",
-    "pacing",
-    "output-conventions",
-]
+# Derived from the shipped package, not hand-listed: a hand-maintained copy is
+# how a pack gets added without ever being shape-checked (the same drift that
+# left the Curator out of the fleet-wide prompt sweeps). The roster itself is
+# pinned where being wrong actually costs something -- what the skills
+# container hands agents -- by tests/canon_fs/test_skills_seam.py's
+# EXPECTED_PACKS, which the last test here cross-checks against.
+_HIDDEN = {"__pycache__"}
+
+PACK_NAMES = sorted(
+    entry.name
+    for entry in importlib.resources.files("novelizer.skills_packs").iterdir()
+    if entry.is_dir() and entry.name not in _HIDDEN
+)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
@@ -86,8 +91,13 @@ def test_references_nonempty(pack_name: str) -> None:
         assert content.strip(), f"{ref_file} is empty"
 
 
-def test_packaging_lists_five_packs() -> None:
-    root = importlib.resources.files("novelizer.skills_packs")
-    dir_names = {entry.name for entry in root.iterdir() if entry.is_dir()}
-    for pack_name in PACK_NAMES:
-        assert pack_name in dir_names, f"{pack_name} not discoverable via importlib.resources"
+def test_shipped_packs_match_the_registered_roster() -> None:
+    """The derivation above sweeps whatever ships; this is the one place that
+    says what SHOULD ship. A pack added on disk but never added to the seam
+    test's roster is a pack nobody decided to route -- and one dropped from
+    disk while still listed there is guidance agents are promised and cannot
+    read."""
+    from tests.canon_fs.test_skills_seam import EXPECTED_PACKS
+
+    assert PACK_NAMES, "derivation found no packs -- it is broken"
+    assert set(PACK_NAMES) == EXPECTED_PACKS

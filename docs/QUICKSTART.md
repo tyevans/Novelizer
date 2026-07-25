@@ -282,7 +282,7 @@ snapshot — the arc aggregate is the plan it's measured against.
 
 Agents no longer carry all their craft knowledge in their prompts. **Skill packs**
 ship with novelizer — outlining, promise-payoff, character-arcs, scene-sequel, pacing,
-output-conventions — and are mounted read-only at `/skills/`. Every tooled agent sees the *names and
+secrets-and-reveals, output-conventions — and are mounted read-only at `/skills/`. Every tooled agent sees the *names and
 descriptions* of all packs (progressive disclosure keeps that cost to a
 handful of lines per pack) until a task actually calls for one; then it reads the pack
 body, and pulls reference tables (beat frameworks with their percentage positions,

@@ -35,6 +35,7 @@ EXPECTED_PACKS = {
     "scene-sequel",
     "pacing",
     "output-conventions",
+    "secrets-and-reveals",
 }
 
 
@@ -48,8 +49,9 @@ def _real_composite() -> CompositeBackend:
     )
 
 
-async def test_skills_middleware_loads_all_five_packs_via_container_source():
-    """The exact seam the M10 review found broken: deepagents' own listing
+async def test_skills_middleware_loads_all_packs_via_container_source():
+    """The exact seam the M10 review found broken (five packs at the time):
+    deepagents' own listing
     coroutine, against our real backend, using the container source shape
     every tooled builder now passes."""
     backend = _real_composite()
