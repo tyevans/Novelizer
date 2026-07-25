@@ -1,7 +1,7 @@
 import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Static
-from tui_kit.run_model import Block, LiveRunState
+from tui_kit.run_model import ProseBlock, LiveRunState
 from tui_kit.widgets.activity_strip import ActivityStrip
 from tui_kit.widgets.engine_room import EngineRoom
 from tui_kit.widgets.live_stream_panel import LiveStreamPanel
@@ -49,7 +49,7 @@ async def test_live_stream_panel_running_state_shows_agent_name_in_vitals():
     async with app.run_test() as pilot:
         panel = app.query_one("#panel", LiveStreamPanel)
         state = LiveRunState(status="running", agent_name="author", started_at=0.0,
-                             blocks=(Block(kind="prose", text="hello"),))
+                             blocks=(ProseBlock(text="hello"),))
         panel.render(state, now=1.0)
         await pilot.pause()
         vitals = panel.query_one(LiveStreamPanel._VITALS_ID, Static)
@@ -97,7 +97,7 @@ async def test_engine_room_renders_live_state_into_the_all_pane():
     async with app.run_test() as pilot:
         room = app.query_one("#engine_room", EngineRoom)
         state = LiveRunState(status="running", agent_name="author", started_at=0.0,
-                             blocks=(Block(kind="prose", text="The sea rose."),))
+                             blocks=(ProseBlock(text="The sea rose."),))
         room.render_live(state, now=1.0)
         await pilot.pause()
         assert "author" in str(app.query_one("#er_vitals").renderable)
@@ -110,7 +110,7 @@ async def test_engine_room_renders_per_agent_pane_independently():
     async with app.run_test() as pilot:
         room = app.query_one("#engine_room", EngineRoom)
         state = LiveRunState(status="running", agent_name="editor", started_at=0.0,
-                             blocks=(Block(kind="prose", text="looks good"),))
+                             blocks=(ProseBlock(text="looks good"),))
         room.render_agent_live("editor", state, now=1.0)
         await pilot.pause()
         body = app.query_one("#er_stream_editor", Static).renderable

@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Static
 from textual.containers import VerticalScroll
 from tui_kit.widgets.live_stream_panel import LiveStreamPanel
-from tui_kit.run_model import Block, LiveRunState
+from tui_kit.run_model import ProseBlock, LiveRunState
 from novelizer.tui.identity import NOVELIZER_AGENT_THEME
 
 
@@ -29,7 +29,7 @@ async def test_running_state_shows_agent_name_in_vitals():
     async with app.run_test() as pilot:
         panel = app.query_one("#panel", LiveStreamPanel)
         state = LiveRunState(status="running", agent_name="research", started_at=0.0,
-                             blocks=(Block(kind="prose", text="hello"),))
+                             blocks=(ProseBlock(text="hello"),))
         panel.render(state, now=1.0)
         await pilot.pause()
         vitals = panel.query_one(LiveStreamPanel._VITALS_ID, Static)
