@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from novelizer.settings.story_dir import StoryDirectory, is_story_dir
 from novelizer.settings.toml_io import TOMLFileError, load_toml_file
+from novelizer.slug import slugify as _slugify
 
 
 @dataclass(frozen=True)
@@ -46,5 +46,5 @@ def order_stories(stories: list[StoryMeta], last_opened: str | None) -> list[Sto
 
 
 def slugify(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug or "story"
+    """A story title as a directory name; never empty ("story" fallback)."""
+    return _slugify(name, "story")

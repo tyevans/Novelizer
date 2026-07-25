@@ -1,17 +1,14 @@
 from __future__ import annotations
-import re
 
+from novelizer.slug import slugify as _slugify
 from novelizer.store.models import (
     Chapter, Character, SecretRecord, ThemeRecord, ThreadRecord, WorldEntry,
 )
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
 
 def slugify(text: str) -> str:
     """Lowercase filename-safe slug; never empty ("untitled" fallback)."""
-    slug = _SLUG_RE.sub("-", text.lower()).strip("-")
-    return slug or "untitled"
+    return _slugify(text, "untitled")
 
 
 def _claim(directory: str, name: str, record_id: str, taken: set[str]) -> str:
