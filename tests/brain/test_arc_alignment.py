@@ -14,7 +14,19 @@ def _blueprint(target_chapter_count=10):
 
 # --- contradiction: consistency table ---------------------------------
 
-CONSISTENT_ROWS = [(t, next(iter(outs))) for t, outs in ARC_CONSISTENT_OUTCOMES.items()]
+# Every (arc_type, consistent_outcome) pair, in a stable order.
+#
+# Was `next(iter(outs))` -- an ARBITRARY element of a set, and "arbitrary"
+# differs between processes because PYTHONHASHSEED randomizes str hashing. That
+# made the generated test IDs nondeterministic, which serial runs never noticed
+# but xdist rejects outright ("Different tests were collected between gw0 and
+# gw7"). Sorting fixes the order; taking every outcome instead of one also stops
+# the table's second entry (flat/world_changed) from going untested.
+CONSISTENT_ROWS = [
+    (arc_type, outcome)
+    for arc_type, outs in ARC_CONSISTENT_OUTCOMES.items()
+    for outcome in sorted(outs)
+]
 CONTRADICTORY_ROWS = [(t, "some_other_outcome") for t in ARC_CONSISTENT_OUTCOMES]
 
 

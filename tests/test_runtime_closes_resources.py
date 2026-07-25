@@ -10,6 +10,8 @@ internals -- anything start() acquires and close() forgets is the same bug.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from novelizer.runtime import Runtime
@@ -91,7 +93,22 @@ async def test_repeated_start_close_cycles_do_not_accumulate_threads(tmp_path):
     baseline = os_threads()
     for i in range(1, 4):
         await cycle(i)
-    assert os_threads() <= baseline, (
+
+    # close() asks the threads to stop; the kernel reaps them a moment later.
+    # Sampling /proc immediately can therefore catch a thread that is already
+    # exiting, which under parallel load (pytest -n) showed up as a phantom
+    # "grew from 34 to 35". Give them a moment to actually go.
+    for _ in range(20):
+        if os_threads() <= baseline:
+            break
+        await asyncio.sleep(0.1)
+
+    # A leak of the kind this guards against is a whole tokio pool per cycle
+    # (~15-20 threads, so 45-60 over three); a residual thread or two is
+    # scheduler noise, not the unbounded growth that wedged the suite. The
+    # bound stays far below one pool so a real regression still fails loudly.
+    grew = os_threads() - baseline
+    assert grew <= 3, (
         f"threads grew from {baseline} to {os_threads()} over 3 start/close cycles -- "
         "a per-Runtime resource is being leaked"
     )

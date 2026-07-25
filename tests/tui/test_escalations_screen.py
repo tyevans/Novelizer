@@ -88,7 +88,15 @@ async def test_clear_escalation_commits_event_and_refreshes(db_path):
             await screen.on_button_pressed(
                 Button.Pressed(screen.query_one("#escalations-clear-button", Button))
             )
-            await pilot.pause()
+            # The clear commits an event and the table refreshes off it; under
+            # parallel load one pause() is not always enough for that round trip
+            # to land (seen as row_count 1 under pytest -n). Pump the event loop
+            # until it does, then assert exactly as before -- a table that never
+            # empties still fails, just without the timing race.
+            for _ in range(50):
+                if table.row_count == 0:
+                    break
+                await pilot.pause()
             assert table.row_count == 0
 
             # Runtime is fully running (real agent polling loops), so the
