@@ -198,3 +198,25 @@ async def test_appending_while_detached_does_not_scroll_the_window():
         view.append_blocks((ProseBlock(text="new", agent_name="author"),))
         await pilot.pause()
         assert window.scroll_offset.y == 0
+
+
+@pytest.mark.asyncio
+async def test_real_scrolling_flips_follow_state_without_calling_notify_scroll():
+    """Proves the widget's own scroll wiring drives detach/reattach -- not
+    just that on_scroll(state, at_bottom) has correct arithmetic. Never
+    calls notify_scroll() directly."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks(tuple(ProseBlock(text=f"l{i}", agent_name="author")
+                                 for i in range(200)))
+        await pilot.pause()
+        assert view.is_following() is True
+
+        window = pilot.app.query_one("#sv_window")
+        window.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        assert view.is_following() is False
+
+        window.scroll_end(animate=False)
+        await pilot.pause()
+        assert view.is_following() is True
