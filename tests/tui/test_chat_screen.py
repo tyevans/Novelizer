@@ -12,6 +12,7 @@ from novelizer.agents.schemas import (
     WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments, StructureAnalystOutput,
     SummarizerOutput,
 )
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -33,7 +34,7 @@ def _fake_agent_runners():
 
 async def _runtime(path):
     settings = Settings(db_path=path, projector_interval=0.05)
-    rt = Runtime(settings, runners=_fake_agent_runners())
+    rt = Runtime(settings, runners=stub_runners(**_fake_agent_runners()))
     await rt.start()
     return rt
 

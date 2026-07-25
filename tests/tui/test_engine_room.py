@@ -11,6 +11,7 @@ from novelizer.agents.schemas import (
     ContinuityOutput, RetconAmendments, StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -40,7 +41,7 @@ async def rt(tmp_path):
     settings = Settings(db_path=str(tmp_path / "world.db"),
                         author_interval=3600, default_agent_interval=3600,
                         continuity_interval=3600, projector_interval=0.1)
-    runtime = Runtime(settings, runners=_runners())
+    runtime = Runtime(settings, runners=stub_runners(**_runners()))
     await runtime.start()
     # Long intervals: agents were never marked ran, so first tick would run one.
     # Pause them all so tests drive telemetry by hand.

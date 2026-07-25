@@ -5,6 +5,7 @@ from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
 from novelizer.agents.schemas import SummarizerOutput
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -19,7 +20,7 @@ async def test_detail_pane_scrolls_long_content_and_resets_on_update():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners={"summarizer": _R()})
+    rt = Runtime(settings, runners=stub_runners(**{"summarizer": _R()}))
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])

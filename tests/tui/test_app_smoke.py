@@ -9,6 +9,7 @@ from novelizer.agents.schemas import (
     ContinuityOutput, RetconAmendments, StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -44,7 +45,7 @@ async def test_feed_renders_authored_chapter():
         projector_interval=0.1,
         outline_gate_enabled=False,  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
     )
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:

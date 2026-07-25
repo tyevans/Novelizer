@@ -13,6 +13,7 @@ from novelizer.agents.schemas import (
     SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -33,7 +34,7 @@ def _runners():
 async def _gated_app(n_proposals: int = 1):
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])
@@ -74,7 +75,7 @@ async def test_a_key_opens_modal_with_id_free_rows_and_context():
 async def test_a_key_does_nothing_when_no_open_proposals():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])

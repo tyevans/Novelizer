@@ -9,6 +9,7 @@ from novelizer.agents.schemas import (
     StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -33,7 +34,7 @@ def _runners():
 async def test_mission_control_panes_present_and_populate():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, author_interval=1, projector_interval=0.1, default_agent_interval=1, continuity_interval=1, outline_gate_enabled=False)  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -77,7 +78,7 @@ async def test_proposals_banner_appears_and_approve_via_command_clears_it():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     # Pause all background agents to ensure deterministic test (only the intended proposal exists)
     for name in ["world_architect", "character_keeper", "author", "editor",
@@ -122,7 +123,7 @@ async def test_proposals_banner_stays_hidden_in_engine_mode():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -156,7 +157,7 @@ async def test_proposals_banner_hidden_on_a_quiet_story():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -177,7 +178,7 @@ async def test_story_brain_threads_and_shape_tabs_populate():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner", "structure_analyst"]:
         rt.scheduler.pause_agent(name)
@@ -210,7 +211,7 @@ async def test_story_brain_secrets_matrix_and_causeway_tabs_populate():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor", "continuity_checker", "retconner", "structure_analyst"]:
         rt.scheduler.pause_agent(name)
@@ -245,7 +246,7 @@ async def test_story_brain_secrets_matrix_and_causeway_tabs_populate():
 async def test_every_pane_has_its_border_title():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -274,7 +275,7 @@ async def test_detail_border_title_follows_selection_and_resets():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -309,7 +310,7 @@ async def test_tool_call_finish_triggers_a_summary_that_lands_in_the_live_state(
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -362,7 +363,7 @@ async def test_tool_call_finish_with_multiline_long_input_summary_still_lands_a_
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:
@@ -412,7 +413,7 @@ async def test_projector_loop_tick_also_runs_index_catch_up():
     embed_store = EmbeddingStore(
         str(tempfile.mkdtemp()), embedding_function=FakeEmbeddingFunction()
     )
-    rt = Runtime(settings, runners=_runners(), embedding_store=embed_store)
+    rt = Runtime(settings, runners=stub_runners(**_runners()), embedding_store=embed_store)
     await rt.start()
     for name in ["world_architect", "character_keeper", "author", "editor",
                  "continuity_checker", "retconner", "structure_analyst"]:

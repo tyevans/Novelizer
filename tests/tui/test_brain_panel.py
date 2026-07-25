@@ -8,6 +8,7 @@ from novelizer.tui.widgets.brain_model import (
     ARCS_EMPTY, CAUSEWAY_EMPTY, OUTLINE_EMPTY, SECRETS_EMPTY, SHAPE_EMPTY, THREADS_EMPTY,
 )
 from novelizer.agents.schemas import SummarizerOutput
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -18,7 +19,7 @@ class _R:
 async def _app(**settings_overrides):
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1, **settings_overrides)
-    rt = Runtime(settings, runners={"summarizer": _R()})
+    rt = Runtime(settings, runners=stub_runners(**{"summarizer": _R()}))
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])
