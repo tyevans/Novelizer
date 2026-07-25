@@ -41,9 +41,12 @@ def build_global_config_data(
     author_model: str = "",
     agent_model: str = "",
     embed_model: str = "",
+    embed_base_url: str = "",
+    embed_api_key: str = "",
 ) -> dict:
     """Pure assembly of a global-config dict from wizard fields. Empty fields
-    are omitted so built-in defaults keep applying."""
+    are omitted so built-in defaults keep applying — including embed_base_url,
+    whose absence means 'embed against the chat endpoint'."""
     base = base_url.strip().rstrip("/")
     if not base:
         raise ValueError("LLM base URL is required")
@@ -54,6 +57,8 @@ def build_global_config_data(
         ("author_model", author_model),
         ("agent_model", agent_model),
         ("embed_model", embed_model),
+        ("embed_base_url", embed_base_url.strip().rstrip("/")),
+        ("embed_api_key", embed_api_key),
     ):
         value = value.strip()
         if value:

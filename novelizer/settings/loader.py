@@ -26,6 +26,8 @@ class EnvOverrides(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_max_tokens: int | None = None
+    embed_base_url: str | None = None
+    embed_api_key: str | None = None
     default_stories_dir: str | None = None
     last_opened_story: str | None = None
     suppress_flat_migration_prompt: bool | None = None
@@ -64,12 +66,14 @@ class EnvOverrides(BaseSettings):
     character_keeper_tools_enabled: bool | None = None
     editor_tools_enabled: bool | None = None
     retconner_tools_enabled: bool | None = None
+    curator_tools_enabled: bool | None = None
     structure_analyst_tools_enabled: bool | None = None
     plotter_tools_enabled: bool | None = None
     world_architect_subagent_enabled: bool | None = None
     character_keeper_subagent_enabled: bool | None = None
     editor_subagent_enabled: bool | None = None
     retconner_subagent_enabled: bool | None = None
+    curator_subagent_enabled: bool | None = None
     structure_analyst_subagent_enabled: bool | None = None
     plotter_subagent_enabled: bool | None = None
     author_subagent_enabled: bool | None = None

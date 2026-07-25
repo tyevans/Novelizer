@@ -66,10 +66,20 @@ you're setting. You'll see:
   live. `~` expands; relative paths resolve from where you launch novelizer.
 - **Test connection** — a button; click it to probe the endpoint and populate the model
   pickers below from its live model list.
-- **Author model** / **Agent model** / **Embedding model** — three dropdowns, disabled
-  (showing "run Test connection first") until the connection test succeeds. Author writes
-  the prose (pick your strongest model), Agent runs the support agents (a faster model
-  works well), Embedding builds the semantic index for canon search.
+- **Author model** / **Agent model** — two dropdowns, disabled (showing "run Test
+  connection first") until the connection test succeeds. Author writes the prose (pick
+  your strongest model), Agent runs the support agents (a faster model works well).
+- **Embedding base URL (optional)** — a separate OpenAI-compatible embedding endpoint.
+  Leave it blank to embed against the LLM endpoint above. Fill it in when your chat
+  endpoint serves no embedding models — **OpenRouter serves none at all**, so an
+  OpenRouter setup needs something else here (Ollama at `http://localhost:11434/v1`,
+  or OpenAI).
+- **Embedding API key** — a password field for that endpoint only. The LLM API key is
+  never forwarded to a separate embedding host.
+- **Test embedding connection** — probes the embedding endpoint and fills the embedding
+  dropdown from *its* model list.
+- **Embedding model** — builds the semantic index for canon search. Filled by whichever
+  connection test last reported models; must be a real embedding model, not a chat model.
 - **Save & continue** — writes your global config and proceeds to the story picker (only
   enabled once you've saved or the connection test has populated the model lists).
 - **Skip model picks — save endpoint only** — an escape hatch if you just want the endpoint
@@ -77,7 +87,8 @@ you're setting. You'll see:
 
 *Verified against: `novelizer/tui/setup_wizard.py`'s actual widget ids
 (`base_url`, `api_key`, `stories_dir`, `probe`, `author_model`, `agent_model`,
-`embed_model`, `save`, `skip`) and its `_field` label/help copy.*
+`embed_base_url`, `embed_api_key`, `probe_embed`, `embed_model`, `save`, `skip`) and its
+`_field` label/help copy.*
 
 After the wizard, a story picker appears — it lists any existing stories in your stories
 directory (empty on a first run) and lets you create a new one. `novelizer --story

@@ -10,6 +10,10 @@ from textual.widgets import Button, Footer, Header, Input, Label, Select, Static
 from novelizer.settings.setup_core import build_global_config_data, probe_endpoint
 
 _MODEL_SELECT_IDS = ("author_model", "agent_model", "embed_model")
+# Chat-endpoint picks. The embedding pick is filled by the chat probe too (so a
+# single endpoint that does both still needs one probe), but a dedicated
+# embedding probe overrides just that one dropdown.
+_CHAT_SELECT_IDS = ("author_model", "agent_model")
 
 
 def _field(label: str, widget: Widget, help_text: str) -> Iterator[Widget]:
@@ -48,6 +52,9 @@ class SetupWizardApp(App[dict | None]):
     def __init__(self, probe=probe_endpoint) -> None:
         super().__init__()
         self._probe = probe
+        # Set once the dedicated embedding probe succeeds, so a later chat probe
+        # doesn't overwrite the embedding pick with a chat model.
+        self._embed_probed = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -83,6 +90,25 @@ class SetupWizardApp(App[dict | None]):
                 "Runs the support agents (editor, continuity, plotting…). "
                 "A faster model works well.",
             )
+            yield Static(
+                "Embeddings need a provider that serves embedding models. Chat "
+                "routers often don't — OpenRouter serves none. Leave the URL "
+                "blank to embed against the endpoint above."
+            )
+            yield from _field(
+                "Embedding base URL (optional)",
+                Input(id="embed_base_url", placeholder="http://localhost:11434/v1"),
+                "Separate OpenAI-compatible embedding endpoint (Ollama, OpenAI…). "
+                "Blank reuses the LLM endpoint above.",
+            )
+            yield from _field(
+                "Embedding API key",
+                Input(id="embed_api_key", password=True),
+                "Only for the embedding endpoint. The LLM key above is never "
+                "forwarded to it.",
+            )
+            yield Button("Test embedding connection", id="probe_embed")
+            yield Static("", id="probe_embed_result")
             yield from _field(
                 "Embedding model",
                 Select([], prompt="run Test connection first", id="embed_model", disabled=True),
@@ -96,6 +122,8 @@ class SetupWizardApp(App[dict | None]):
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "probe":
             await self._run_probe()
+        elif event.button.id == "probe_embed":
+            await self._run_embed_probe()
         elif event.button.id == "save":
             self._finish(with_models=True)
         elif event.button.id == "skip":
@@ -111,13 +139,36 @@ class SetupWizardApp(App[dict | None]):
             return
         out.update(f"✓ connected — models: {', '.join(result.models) or '(none reported)'}")
         options = [(m, m) for m in result.models]
-        for select_id in _MODEL_SELECT_IDS:
+        targets = _CHAT_SELECT_IDS if self._embed_probed else _MODEL_SELECT_IDS
+        for select_id in targets:
             select = self.query_one(f"#{select_id}", Select)
             select.set_options(options)
             select.disabled = not options
             if options:
                 select.value = result.models[0]
         self.query_one("#save", Button).disabled = not options
+
+    async def _run_embed_probe(self) -> None:
+        """Probe the dedicated embedding endpoint and refill only #embed_model.
+        Save stays governed by the chat probe — embeddings fall back to the
+        chat endpoint and the built-in embed_model default when skipped."""
+        out = self.query_one("#probe_embed_result", Static)
+        base_url = self.query_one("#embed_base_url", Input).value.strip()
+        if not base_url:
+            out.update("✗ enter an embedding base URL first")
+            return
+        api_key = self.query_one("#embed_api_key", Input).value.strip() or "not-needed"
+        result = await self._probe(base_url, api_key=api_key)
+        if not result.ok:
+            out.update(f"✗ {result.error}")
+            return
+        out.update(f"✓ connected — models: {', '.join(result.models) or '(none reported)'}")
+        select = self.query_one("#embed_model", Select)
+        select.set_options([(m, m) for m in result.models])
+        select.disabled = not result.models
+        if result.models:
+            select.value = result.models[0]
+            self._embed_probed = True
 
     def _selected(self, select_id: str) -> str:
         value = self.query_one(f"#{select_id}", Select).value
@@ -132,6 +183,10 @@ class SetupWizardApp(App[dict | None]):
                 author_model=self._selected("author_model") if with_models else "",
                 agent_model=self._selected("agent_model") if with_models else "",
                 embed_model=self._selected("embed_model") if with_models else "",
+                # Endpoint config, not a model pick: kept even on "skip", the
+                # same way the LLM URL and key are.
+                embed_base_url=self.query_one("#embed_base_url", Input).value,
+                embed_api_key=self.query_one("#embed_api_key", Input).value,
             )
         except ValueError as e:
             self.query_one("#probe_result", Static).update(f"✗ {e}")

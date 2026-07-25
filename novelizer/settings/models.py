@@ -26,7 +26,7 @@ STORY_OVERRIDABLE_KEYS: frozenset[str] = frozenset({
 })
 
 # Secrets: hard error if present in story.toml (stories are shareable).
-FORBIDDEN_STORY_KEYS: frozenset[str] = frozenset({"llm_api_key"})
+FORBIDDEN_STORY_KEYS: frozenset[str] = frozenset({"llm_api_key", "embed_api_key"})
 
 
 class EffectiveSettings(BaseModel):
@@ -51,6 +51,14 @@ class EffectiveSettings(BaseModel):
     # (especially with server-side reasoning enabled) can generate past a
     # proxy's request timeout, so no request ever completes.
     llm_max_tokens: int = 4096
+    # Separate embedding endpoint. Chat routers are not embedding providers --
+    # OpenRouter, for one, serves no embedding models at all -- so the semantic
+    # index needs its own endpoint whenever the chat endpoint can't embed.
+    # Empty means "reuse the chat endpoint", which keeps the all-local
+    # one-endpoint setup (Ollama, llama.cpp) working with no extra config.
+    # Global-only, like llm_base_url: an installation fact, not a story knob.
+    embed_base_url: str = ""
+    embed_api_key: str = ""
     # DEPRECATED (context-assembly v2): no code path reads this any more.
     prior_chapter_summary_chars: int = 200
     # DEPRECATED (context-assembly v2): no code path reads this any more.
@@ -147,3 +155,22 @@ class EffectiveSettings(BaseModel):
     author_subagent_enabled: bool = False
     checker_subagent_enabled: bool = False
     triage_subagent_enabled: bool = False
+
+    @property
+    def resolved_embed_base_url(self) -> str:
+        """Endpoint the embedding function talks to: the dedicated one when set,
+        otherwise the chat endpoint (single-endpoint local setups)."""
+        return self.embed_base_url.strip() or self.llm_base_url
+
+    @property
+    def resolved_embed_api_key(self) -> str:
+        """Key for the embedding endpoint.
+
+        Deliberately does NOT fall back to llm_api_key once embed_base_url is
+        set: a dedicated embedding endpoint is a *different* provider, so
+        forwarding the chat key would leak a paid credential to an unrelated
+        host. Only the shared-endpoint case reuses the chat key.
+        """
+        if self.embed_base_url.strip():
+            return self.embed_api_key.strip() or "not-needed"
+        return self.embed_api_key.strip() or self.llm_api_key

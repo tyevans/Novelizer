@@ -3,8 +3,9 @@
 #
 # Layering: built-in defaults <- this file <- story.toml <- NOVELIZER_* env vars.
 # Any setting here can be overridden per story in <story>/story.toml, EXCEPT:
-#   llm_base_url, llm_api_key, default_stories_dir, last_opened_story (global-only;
-#   llm_api_key in a story.toml is an error — stories are shareable).
+#   llm_base_url, llm_api_key, embed_base_url, embed_api_key, default_stories_dir,
+#   last_opened_story (global-only; llm_api_key or embed_api_key in a story.toml is
+#   an error — stories are shareable).
 # All of these are also viewable/editable at runtime via :settings in the TUI.
 
 # --- LLM endpoint (OpenAI-compatible) ---
@@ -16,6 +17,15 @@ llm_base_url = "http://localhost:8080/v1"
 author_model = "local-model"
 agent_model = "local-model"
 embed_model = "nomic-embed-text"
+
+# --- Embedding endpoint (optional) ---
+# Leave unset to embed against llm_base_url above — correct for a local server that
+# serves chat and embeddings together (Ollama, llama.cpp behind a router).
+# Set these when your chat endpoint serves no embedding models. Hosted chat routers
+# usually don't: OpenRouter serves NONE, so an OpenRouter setup needs an embedding
+# provider here. The llm_api_key above is never forwarded to this endpoint.
+# embed_base_url = "http://localhost:11434/v1"
+# embed_api_key = "sk-..."
 
 # --- Generation ---
 author_temperature = 0.8

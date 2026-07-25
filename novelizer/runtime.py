@@ -315,8 +315,8 @@ class Runtime:
             self.embeddings = EmbeddingStore(
                 str(Path(self.settings.db_path).with_name("embeddings")),
                 embed_model=self.settings.embed_model,
-                base_url=self.settings.llm_base_url,
-                api_key=self.settings.llm_api_key,
+                base_url=self.settings.resolved_embed_base_url,
+                api_key=self.settings.resolved_embed_api_key,
             )
         # One shared LLM concurrency ceiling for the whole fleet, built BEFORE
         # the projectors so both the scheduler and the two background drains draw

@@ -18,9 +18,10 @@ from novelizer.settings.toml_io import load_toml_file, write_toml_file
 
 RESTART_REQUIRED_KEYS: frozenset[str] = frozenset({
     "llm_base_url", "llm_api_key", "llm_max_tokens", "author_model", "agent_model", "embed_model",
+    "embed_base_url", "embed_api_key",
 })
 
-SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key"})
+SECRET_KEYS: frozenset[str] = frozenset({"llm_api_key", "embed_api_key"})
 _SECRET_KEYS = SECRET_KEYS  # internal alias, kept for existing call sites in this module
 _HIDDEN_KEYS: frozenset[str] = frozenset({
     "last_opened_story", "suppress_flat_migration_prompt",
