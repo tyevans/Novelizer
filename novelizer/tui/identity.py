@@ -47,6 +47,13 @@ IDENTITIES: dict[str, AgentIdentity] = {
     "summarizer": AgentIdentity("summarizer", "Summary", "≡", "Z", "#5fafd7"),
     "plotter": AgentIdentity("plotter", "Plotter", "⌖", "P", "#00d7ff"),
     "muse": AgentIdentity("muse", "Muse", "✦", "M", "#d75fd7"),
+    # Added when the parity tests caught them absent: all three commit canon,
+    # so all three were already appearing in the feed -- under the dim
+    # unknown-agent fallback, whose title-cased "Flaglabeler" also overflowed
+    # the speaker column and broke the feed's alignment.
+    "curator": AgentIdentity("curator", "Curator", "❖", "U", "#af87ff"),
+    "triage": AgentIdentity("triage", "Triage", "⑂", "T", "#ffaf5f"),
+    "flaglabeler": AgentIdentity("flaglabeler", "Flags", "⚑", "F", "#87d7af"),
     "director": AgentIdentity("director", "Director", "★", "D", "bold"),
     "system": AgentIdentity("system", "System", "·", "-", "dim"),
 }
@@ -69,10 +76,18 @@ def identity_for(agent_name: str) -> AgentIdentity:
 
 # Mirrors AGENT_REGISTRY's scheduling order in novelizer/agents/registry.py --
 # kept as a plain tuple (not imported) so this module stays free of the heavy
-# agent-construction import chain. Keep in sync if agents are added/removed.
+# agent-construction import chain.
+#
+# "Keep in sync" as a comment did not hold: this drifted to 9 of 13 agents, and
+# because novelizer/tui/app.py gates render_agent_live() on `agent in
+# AGENT_NAMES`, the four missing ones (curator, summarizer, triage, flaglabeler)
+# had no Engine Room lane and were never drawn live -- they worked invisibly.
+# tests/tui/test_identity_registry_parity.py now asserts this equals the
+# registry, so the next added agent fails a test instead of vanishing.
 AGENT_NAMES = (
     "world_architect", "character_keeper", "muse", "plotter", "author",
-    "editor", "continuity_checker", "retconner", "structure_analyst",
+    "editor", "continuity_checker", "retconner", "curator", "structure_analyst",
+    "summarizer", "triage", "flaglabeler",
 )
 
 _VERBS = {
@@ -83,6 +98,12 @@ _VERBS = {
     "continuity_checker": "checking continuity",
     "retconner": "retconning",
     "structure_analyst": "scoring structure",
+    "summarizer": "summarizing",
+    "plotter": "plotting",
+    "muse": "drawing inspiration",
+    "curator": "curating canon",
+    "triage": "triaging flags",
+    "flaglabeler": "labelling flags",
 }
 
 
