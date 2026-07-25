@@ -232,8 +232,10 @@ async def test_chapter_revised_reflows_prose_extracted_entities(wiring, tmp_path
     # Reflow cleared the mention; the embedding was deleted, though the
     # kg_entities row itself can remain (harmless orphan row, out of scope
     # to garbage-collect per this task -- see docstring in kg_projector.py).
-    hits = await emb.search("Salted Gull", kinds=["entity"])
-    assert hits == []
+    # The tavern's vector was the only document in the index, so deleting it
+    # empties the index; search() reports an empty index as unavailable rather
+    # than answering, so assert on the count instead of querying.
+    assert await emb.document_count() == 0
 
 
 @pytest.mark.asyncio
@@ -320,8 +322,9 @@ async def test_chapter_revised_keeps_entity_mentioned_in_another_chapter(wiring,
     await kgp.catch_up()
 
     assert await kg.has_mentions(entity_id) is False
-    hits = await emb.search("Salted Gull", kinds=["entity"])
-    assert hits == []
+    # Its vector was the last document in the index (see the sibling reflow
+    # test): an empty index is unavailable, not queryable, so count instead.
+    assert await emb.document_count() == 0
 
 
 @pytest.mark.asyncio

@@ -41,13 +41,40 @@ _PREFIX_TO_KIND = {
 }
 
 
+class ProjectionNotReady(RuntimeError):
+    """The record this event should index has not been projected into the read
+    store yet, so there is nothing to embed -- YET.
+
+    Raised rather than skipped because the drain reads a clean return as "this
+    sequence is done" and advances the cursor over it. A no-op success there is
+    permanent, silent loss: the embedding is never written and the event is
+    never seen again (observed in production as embed_cursor.json parked at
+    sequence 97 of 117 with an index of zero documents and a reported backlog of
+    zero). A raise routes the event through the poison ladder instead, which
+    retries it and -- crucially -- still gives up after poison_skip_after passes,
+    so a genuinely bad event cannot wedge the drain.
+    """
+
+
+def _require_projected(record, kind: str, aggregate_id: str):
+    """Guard for a hydrate-current-record read: absence means not-ready, not done."""
+    if record is None:
+        raise ProjectionNotReady(
+            f"{kind} {aggregate_id!r} is not in the read store yet; "
+            f"the canon projection is behind the event log"
+        )
+    return record
+
+
 class CanonIndexer:
     """Event-cursor-driven embedding indexer (Projector's cursor pattern,
     but hydrating CURRENT records from ReadStore so create/revise/update
     share one path). Failure-tolerant by contract: an embed-endpoint outage
     logs a warning and leaves the cursor at the last indexed event, so the
     next catch_up retries -- up to poison_skip_after consecutive attempts on
-    the same event, after which it is abandoned. Never writes to world.db.
+    the same event, after which it is abandoned. A record the canon projection
+    has not written yet takes that same retry path (ProjectionNotReady) rather
+    than counting as indexed. Never writes to world.db.
     """
 
     def __init__(self, events, read_store, embedding_store, cursor_path: str,
@@ -121,9 +148,9 @@ class CanonIndexer:
     async def _index_one(self, event_type: str, aggregate_id: str) -> None:
         kind = _PREFIX_TO_KIND[event_type.split(".")[0]]
         if kind == "chapter":
-            record = await self._read.get_chapter(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_chapter(record)
+            record = _require_projected(await self._read.get_chapter(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_chapter(record)
         elif kind == "world":
             entries = {e.id: e for e in await self._read.list_world_entries()}
             record = entries.get(aggregate_id)
@@ -142,41 +169,50 @@ class CanonIndexer:
                     except Exception as e:
                         logger.debug("superseded world entry %s not present in index to delete (%s: %s)",
                                      supersedes_id, type(e).__name__, e)
-            else:  # superseded out of the active list
+            elif await self._read.get_world_entry(aggregate_id) is None:
+                # No row at all: absence here is the projection lagging, not a
+                # retirement, and list_world_entries cannot tell the two apart
+                # (both read as "not in the active list").
+                raise ProjectionNotReady(
+                    f"world entry {aggregate_id!r} is not in the read store yet; "
+                    f"the canon projection is behind the event log"
+                )
+            else:
+                # Row present but no longer active (superseded or retired): it
+                # legitimately leaves the search index. Genuinely done.
                 try:
                     await self._emb.delete(aggregate_id, "world_entries")
                 except Exception as e:
                     logger.debug("world entry %s not present in index to delete (%s: %s)",
                                  aggregate_id, type(e).__name__, e)
         elif kind == "character":
-            record = await self._read.get_character(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_character(record)
+            record = _require_projected(await self._read.get_character(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_character(record)
         elif kind == "thread":
-            record = await self._read.get_thread(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_thread(record)
+            record = _require_projected(await self._read.get_thread(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_thread(record)
         elif kind == "secret":
-            record = await self._read.get_secret(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_secret(record)
+            record = _require_projected(await self._read.get_secret(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_secret(record)
         elif kind == "theme":
-            record = await self._read.get_theme(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_theme(record)
+            record = _require_projected(await self._read.get_theme(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_theme(record)
         elif kind == "promise":
-            record = await self._read.get_promise(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_promise(record)
+            record = _require_projected(await self._read.get_promise(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_promise(record)
         elif kind == "brief":
             briefs = {b.id: b for b in await self._read.list_briefs()}
-            record = briefs.get(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_brief(record)
+            record = _require_projected(briefs.get(aggregate_id), kind, aggregate_id)
+            await self._emb.upsert_brief(record)
         elif kind == "arc":
-            record = await self._read.get_arc(aggregate_id)
-            if record is not None:
-                await self._emb.upsert_arc(record)
+            record = _require_projected(await self._read.get_arc(aggregate_id),
+                                        kind, aggregate_id)
+            await self._emb.upsert_arc(record)
         else:
             logger.warning("canon indexer: unknown kind %r for event_type %s (aggregate %s); skipping",
                             kind, event_type, aggregate_id)

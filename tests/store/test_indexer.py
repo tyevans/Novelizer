@@ -300,6 +300,57 @@ async def test_embed_failure_leaves_cursor_for_retry(stack, tmp_path):
     assert await indexer.catch_up() == 9  # untouched cursor path still backfills
 
 
+# --- projection lag is a retry-later, never a silent success ----------------
+
+
+async def test_projection_lag_does_not_advance_the_cursor(stack, tmp_path):
+    """A read-store row that has not been projected YET is not "nothing to
+    index", it is "not ready yet". Treating it as success advanced the cursor
+    past an event whose embedding was never written -- permanent, silent loss
+    (observed in production: embed_cursor.json parked at 97 of 117 events, an
+    index of zero documents, and no backlog left to tell anyone)."""
+    events, proj, read, store, indexer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose="The bell rang."))
+    # Deliberately NO proj.catch_up(): the chapters table has no ch1 row yet.
+
+    assert await indexer.catch_up() == 0
+    assert indexer._load_cursor() == 0   # never past an event that wasn't indexed
+    assert await indexer.lag() == 1      # and the backlog still says so
+    assert await store.document_count() == 0
+
+    await proj.catch_up()                # the projection catches up
+    assert await indexer.catch_up() == 1
+    assert indexer._load_cursor() == 1
+    assert {h.id for h in await store.search("bell", kinds=["chapter"])} == {"ch1"}
+
+
+async def test_a_never_projected_event_is_still_abandoned_after_the_budget(stack, tmp_path, caplog):
+    """The other half of the contract: retry-later must stay BOUNDED. An event
+    whose aggregate never appears in the read store (a genuinely bad event, not
+    a lagging one) would otherwise wedge the drain forever, and under the strict
+    background gate a wedged drain pauses every agent forever. The poison ladder
+    already owns that decision, so retrying via a raise inherits it unchanged."""
+    events, proj, read, store, _ = stack
+    await events.append(EventType.CHAPTER_CREATED, "ghost",
+                        Chapter(id="ghost", title="Never Projected", prose="The bell rang."))
+    indexer = CanonIndexer(events, read, store, str(tmp_path / "lag.json"),
+                           poison_skip_after=3)
+
+    assert await indexer.catch_up() == 0
+    assert indexer._load_cursor() == 0
+    assert await indexer.catch_up() == 0
+    assert indexer._load_cursor() == 0
+
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        assert await indexer.catch_up() == 0  # budget spent: abandoned, not processed
+    assert [r for r in caplog.records if r.levelname == "ERROR"], \
+        "abandoning an event is data loss; it must be logged at ERROR"
+    assert indexer._load_cursor() == 1  # cursor jumped past it: the drain is free
+    assert await indexer.lag() == 0
+
+
 async def test_promise_brief_arc_kind_filter_isolates_each(stack):
     events, proj, read, store, indexer = stack
     await seed(events, proj)
@@ -442,8 +493,10 @@ async def test_retired_world_entry_removed_from_index(stack):
                         WorldEntryRetired(entry_id="w1", reason="redundant"))
     await proj.catch_up()
     await indexer.catch_up()
-    hits = await store.search("bell", n=20)
-    assert "w1" not in {h.id for h in hits}
+    # w1's vector was the only one in the index, so its removal empties the
+    # index outright -- and search() now reports an empty index as unavailable
+    # rather than answering it, so count the documents instead of querying.
+    assert await store.document_count() == 0
 
 
 async def test_lag_counts_in_sql_without_hydrating_pending_rows(stack, tmp_path):
@@ -767,9 +820,15 @@ async def test_cursor_is_exactly_the_longest_contiguous_success_prefix(outcomes)
         # earlier one, only the cursor is. A serial loop breaks at the first
         # failure and never reaches the later successes, so this is where the
         # property distinguishes parallel drain from the loop it replaces.
-        embedded = {h.id for h in await store.search("bell", n=20)}
         should_be_embedded = {ids[i] for i, ok in enumerate(outcomes) if ok}
-        assert should_be_embedded <= embedded
+        if should_be_embedded:
+            embedded = {h.id for h in await store.search("bell", n=20)}
+            assert should_be_embedded <= embedded
+        else:
+            # Every aggregate failed, so nothing was embedded at all. An index
+            # with zero documents cannot be queried (search() reports itself
+            # unavailable), so the document count carries the same claim.
+            assert await store.document_count() == 0
     finally:
         await read.close()
         await proj.close()

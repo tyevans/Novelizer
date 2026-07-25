@@ -51,6 +51,18 @@ class ReadStore:
             )
         return [WorldEntry.model_validate_json(r[0]) for r in await cur.fetchall()]
 
+    async def get_world_entry(self, entry_id: str) -> Optional[WorldEntry]:
+        """One entry by id REGARDLESS of canon_status, unlike list_world_entries.
+
+        Lets a caller tell "this entry left active canon" (row present, status
+        superseded/retired) apart from "this entry has not been projected yet"
+        (no row at all) -- two states list_world_entries reports identically as
+        absence, and which mean opposite things to the indexer.
+        """
+        cur = await self._conn.execute("SELECT data FROM world_entries WHERE id=?", (entry_id,))
+        row = await cur.fetchone()
+        return WorldEntry.model_validate_json(row[0]) if row else None
+
     async def list_characters(self) -> list[Character]:
         cur = await self._conn.execute(
             "SELECT data FROM characters WHERE canon_status='active' ORDER BY rowid"

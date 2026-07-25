@@ -43,6 +43,27 @@ async def test_search_canon_kind_filter_and_no_results(store):
     assert await tool.ainvoke({"query": "alpha", "kinds": ["secret"]}) == "No results."
 
 
+async def test_search_canon_empty_index_reads_as_unavailable_not_as_a_miss(store):
+    # Nothing indexed: "No results." would be a lie the agent acts on -- it
+    # rephrases and retries forever instead of falling back to ls/glob/grep.
+    tool = build_search_canon_tool(store, FakeReadStore(), None)
+    out = await tool.ainvoke({"query": "the locket"})
+    assert out.startswith("Search unavailable")
+    assert "index is empty" in out
+    assert "ls/glob/grep" in out
+    assert "No results." not in out
+
+
+async def test_search_canon_genuine_miss_on_populated_index_still_says_no_results(store):
+    # The distinction is the point: a populated index that simply has nothing
+    # for this query must NOT tell the agent search is broken.
+    ch = Chapter(id="ch1", title="One", prose="alpha")
+    await store.upsert_chapter(ch)
+    tool = build_search_canon_tool(store, FakeReadStore(chapters=[ch]), None)
+    out = await tool.ainvoke({"query": "alpha", "kinds": ["theme", "arc"]})
+    assert out == "No results."
+
+
 async def test_search_canon_unavailable_on_store_error(store):
     class Boom:
         async def search(self, *a, **k): raise RuntimeError("down")

@@ -1,7 +1,7 @@
 import os
 import pytest
 import tempfile
-from novelizer.store.embeddings import EmbeddingStore, SearchHit
+from novelizer.store.embeddings import EmbeddingStore, EmptyIndexError, SearchHit
 from novelizer.store.models import WorldEntry, ThemeRecord, ThreadRecord, SecretRecord, Chapter, Character
 from tests.conftest import FakeEmbeddingFunction
 
@@ -88,6 +88,28 @@ async def test_search_unknown_kind_raises(fake_store):
         await fake_store.search("x", kinds=["novel"])
 
 
+async def test_search_on_empty_index_raises_rather_than_reporting_a_miss(fake_store):
+    # Nothing indexed at all: the store cannot answer the question, and saying
+    # so is the difference between the caller reporting "unavailable" and
+    # reporting "canon contains nothing on this topic".
+    with pytest.raises(EmptyIndexError):
+        await fake_store.search("anything")
+
+
+async def test_search_unknown_kind_still_wins_over_empty_index(fake_store):
+    # Corrective kind feedback is actionable; the emptiness report is not, so
+    # validation stays ahead of the emptiness check even on a dead index.
+    with pytest.raises(ValueError):
+        await fake_store.search("x", kinds=["novel"])
+
+
+async def test_document_count_totals_every_collection(fake_store):
+    assert await fake_store.document_count() == 0
+    await fake_store.upsert_secret(SecretRecord(id="s1", title="Scar"))
+    await fake_store.upsert_theme(ThemeRecord(id="th1", title="Memory"))
+    assert await fake_store.document_count() == 2
+
+
 async def test_upsert_chapter_chunks_oversized_prose(fake_store):
     from novelizer.store.embeddings import _CHAPTER_CHUNK_CHARS
     huge_prose = "word " * 5000  # far past a single chunk
@@ -160,8 +182,12 @@ async def test_entity_upsert_is_searchable_as_entity_kind(tmp_path):
 async def test_delete_entity_removes_it_from_search(tmp_path):
     store = EmbeddingStore(str(tmp_path / "chroma"), embedding_function=FakeEmbeddingFunction())
     await store.upsert_entity("42", "The Salted Gull", "a dockside tavern")
+    # A second entity keeps the index populated, so this stays a test about
+    # deletion rather than about the empty-index case search() now reports as
+    # unavailable.
+    await store.upsert_entity("43", "The Ashfields", "a blasted plain")
 
     await store.delete_entity("42")
 
     hits = await store.search("Salted Gull", kinds=["entity"])
-    assert hits == []
+    assert [h.id for h in hits] == ["43"]

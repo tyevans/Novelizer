@@ -932,7 +932,7 @@ async def test_start_wires_the_background_gate_into_the_scheduler(settings):
         await rt.close()
 
 
-async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(settings):
+async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(settings, tmp_path):
     """End to end at the runtime level. A THREAD_PLANTED event is indexable by
     the CanonIndexer but NOT by the KGProjector, so it raises indexer lag alone
     -- no KG LLM call is ever provoked, keeping the test hermetic. With that lag
@@ -940,8 +940,16 @@ async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(set
     even though the Author is ready and scores 1.0. Once index_catch_up drains
     the cursor (lag -> 0), the gate reopens and agents dispatch again."""
     from novelizer.canon.events import ThreadPlanted
+    from novelizer.store.embeddings import EmbeddingStore
+    from tests.conftest import FakeEmbeddingFunction
 
-    rt = Runtime(settings, runners=_all_fake_runners())
+    # Inject the deterministic embedding function (the store's documented CI
+    # seam): draining the backlog now requires really embedding the record --
+    # an unindexed event no longer advances the cursor -- and no live embed
+    # endpoint is available here. The gate and both indexers stay real.
+    rt = Runtime(settings, runners=_all_fake_runners(),
+                 embedding_store=EmbeddingStore(str(tmp_path / "emb"),
+                                                embedding_function=FakeEmbeddingFunction()))
     await rt.start()
     try:
         # Sanity: a fresh room is caught up, so the gate starts open.
@@ -950,6 +958,10 @@ async def test_pending_index_lag_holds_every_agent_then_releases_on_catch_up(set
         # Create indexer lag without touching the KG projector or its LLM.
         await rt.events.append(EventType.THREAD_PLANTED, "t1",
                                ThreadPlanted(id="t1", name="The Ledger"))
+        # And project it: the indexer hydrates the CURRENT record from the read
+        # store, so an unprojected event is not yet indexable and its cursor
+        # deliberately refuses to advance (ProjectionNotReady).
+        await rt.projector.catch_up()
         assert await rt.indexer.lag() > 0
         assert await rt.kg_projector.lag() == 0
         assert await rt.scheduler._gate_provider() is False, "pending index lag must close the gate"
@@ -1083,7 +1095,56 @@ async def test_background_progress_handles_missing_indexers(settings):
     assert p.total == 9
 
 
-async def test_background_progress_spans_both_real_indexers_end_to_end(settings):
+# --- semantic index size: the one number that makes a dead index visible ----
+#
+# A zero-document index is invisible from every existing readout: lag reads 0
+# (the cursor believes it consumed the backlog), catch_up reports success, and
+# search_canon answers every question with a confident miss. In production that
+# state ran for 690 consecutive search_canon calls before anyone noticed. The
+# document count is the signal, so the runtime must be able to report it.
+#
+# Unknown is NOT zero here, unlike _safe_lag: zero IS the alarm value, so a
+# missing store or a failed probe must read as None rather than raise the alarm.
+
+
+class _FakeCountingStore:
+    def __init__(self, count: int) -> None:
+        self._count = count
+
+    async def document_count(self) -> int:
+        return self._count
+
+
+class _RaisingCountingStore:
+    async def document_count(self) -> int:
+        raise RuntimeError("database is locked")
+
+
+async def test_index_document_count_reports_the_semantic_index_size(settings):
+    rt = Runtime(settings)
+    rt.embeddings = _FakeCountingStore(42)
+    assert await rt.index_document_count() == 42
+
+
+async def test_index_document_count_reports_zero_for_a_dead_index(settings):
+    """Zero must come through as zero, not be smoothed into None: it is the
+    whole point of the readout."""
+    rt = Runtime(settings)
+    rt.embeddings = _FakeCountingStore(0)
+    assert await rt.index_document_count() == 0
+
+
+async def test_index_document_count_is_none_when_unknown(settings):
+    """No store, or a probe that raises, is UNKNOWN -- distinct from a store
+    that genuinely holds nothing, and never a crash in the status loop."""
+    rt = Runtime(settings)  # __init__ leaves embeddings None
+    assert await rt.index_document_count() is None
+
+    rt.embeddings = _RaisingCountingStore()
+    assert await rt.index_document_count() is None
+
+
+async def test_background_progress_spans_both_real_indexers_end_to_end(settings, tmp_path):
     """End to end against the REAL wired indexers, mirroring
     test_pending_index_lag_holds_every_agent_then_releases_on_catch_up. A
     THREAD_PLANTED event is indexable by the CanonIndexer but NOT by the
@@ -1091,8 +1152,15 @@ async def test_background_progress_spans_both_real_indexers_end_to_end(settings)
     provoked, keeping the test hermetic. background_progress() must see that
     canon lag (and only it), then read zero again once the drain catches up."""
     from novelizer.canon.events import ThreadPlanted
+    from novelizer.store.embeddings import EmbeddingStore
+    from tests.conftest import FakeEmbeddingFunction
 
-    rt = Runtime(settings, runners=_all_fake_runners())
+    # Inject the deterministic embedding function (the store's documented CI
+    # seam): draining the backlog now requires really embedding the record, and
+    # no live embed endpoint is available here. Both indexers stay real.
+    rt = Runtime(settings, runners=_all_fake_runners(),
+                 embedding_store=EmbeddingStore(str(tmp_path / "emb"),
+                                                embedding_function=FakeEmbeddingFunction()))
     await rt.start()
     try:
         # Fresh, fully-drained room: nothing pending on either side.
@@ -1103,6 +1171,11 @@ async def test_background_progress_spans_both_real_indexers_end_to_end(settings)
         # Raise canon index lag without touching the KG projector or its LLM.
         await rt.events.append(EventType.THREAD_PLANTED, "t1",
                                ThreadPlanted(id="t1", name="The Ledger"))
+        # Project it too: the indexer embeds the CURRENT record from the read
+        # store, so an unprojected event is not indexable yet and its cursor
+        # deliberately refuses to advance (ProjectionNotReady). Without this the
+        # drain below could only "catch up" by losing the event.
+        await rt.projector.catch_up()
         p = await rt.background_progress()
         assert p.index_lag > 0
         assert p.kg_lag == 0, "THREAD_PLANTED is not a KG-indexed event; kg lag stays 0"
