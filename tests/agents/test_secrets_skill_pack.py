@@ -25,7 +25,7 @@ import pytest
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.middleware.skills import _alist_skills_with_errors
 
-from novelizer.canon_fs.backend import CanonBackend
+from novelizer.canon_fs.backend import CanonBackend, IRONY_LEDGER_PATH
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS, build_skills_backend
 from tests.agents.tooled_builders import TOOLED_BUILDERS
 
@@ -132,9 +132,17 @@ def test_pack_has_a_reference_file_like_its_siblings():
 def test_pack_teaches_the_irony_ledger_by_path_and_by_field():
     """Naming the file is not teaching it. `live_chapters` is the field that
     turns the ledger from a report into an instrument, so the pack must name
-    it."""
+    it.
+
+    The path is asserted against IRONY_LEDGER_PATH rather than a literal: a
+    hardcoded copy would keep this test green while the ledger moved and the
+    pack taught a dead path. That bites harder here than in ordinary test
+    drift, because this file is agent-visible material -- a stale path would
+    not just fail a check, it would send every tooled agent to read a file the
+    backend does not serve.
+    """
     text = _skill_text()
-    assert "/secrets/_dramatic-irony.md" in text
+    assert IRONY_LEDGER_PATH in text
     assert "live_chapters" in text
 
 
