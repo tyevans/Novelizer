@@ -300,7 +300,15 @@ class Runtime:
                 "/workspace/": StateBackend(),
             },
         )
-        tools = [build_search_canon_tool(self.embeddings, self.read, self.kg_store)]
+        # settings_provider, not settings: this toolkit is built once in
+        # start() and cached, so the tool has to read the live settings on
+        # every call or a reload would never reach it. callbacks matter too --
+        # the summarizer's LLM calls are real spend and belong in the Engine
+        # Room and the shared rate-limit pool like every other call.
+        tools = [build_search_canon_tool(
+            self.embeddings, self.read, self.kg_store,
+            backend=backend, settings_provider=lambda: self.settings,
+            callbacks=self._llm_callbacks)]
         return backend, tools
 
     def _tooled(self, builder, enabled: bool, subagent_enabled: bool = False,
