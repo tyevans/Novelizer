@@ -262,11 +262,18 @@ class NovelizerApp(App):
                 # a KG-endpoint stall -- an unexplained freeze. background_progress()
                 # sums both and never raises (see Runtime.background_progress).
                 progress = await self.runtime.background_progress()
+                # The index's SIZE beside its staleness, because lag alone
+                # cannot show a dead index: when embedding fails the drain
+                # abandons each aggregate and jumps the cursor past it, after
+                # which lag reads 0 forever while search_canon answers every
+                # query with a confident miss. Never raises; None = unknown.
+                docs = await self.runtime.index_document_count()
                 await self.query_one("#brain", BrainPanel).refresh_from(
                     self.runtime.read,
                     threshold=self.runtime.settings.staleness_threshold_chapters,
                     delta=self.runtime.settings.sag_spike_delta,
                     lag=progress.total,
+                    docs=docs,
                 )
             except Exception as e:
                 self._report_worker_error("brain", e)

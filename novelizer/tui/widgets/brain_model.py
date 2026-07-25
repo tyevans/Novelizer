@@ -671,20 +671,56 @@ def arcs_tab(
     return ArcsTab(lines, len(findings))
 
 
+# A document count is never negative, so -1 marks "no count was passed at all"
+# (call sites predating this readout) -- distinct from None, which means the
+# count WAS asked for and could not be read.
+DOCS_UNREPORTED = -1
+
+
+def index_segment(docs: int | None = DOCS_UNREPORTED, lag: int = 0) -> Text:
+    """The 'Index …' tail of the alarm strip: the semantic index's size, then
+    its staleness. Three honest states for the size -- 'Index 1284' (dim: it
+    holds documents), 'Index ⚠empty' (alarm: zero documents, so every
+    search_canon answers a confident miss and agents read that as canon being
+    empty), 'Index ?' (dim: unknown). Unknown is never drawn as empty:
+    manufacturing a false alarm is the mirror of the bug this readout exists
+    to expose.
+
+    The size is what makes a DEAD index visible, because `lag` cannot: when
+    embedding fails the drain abandons each aggregate and jumps the cursor
+    past it, after which lag() reads 0 forever and actively reassures.
+
+    Empty Text when there is nothing to say (no count passed AND the index is
+    caught up), keeping the quiet strip unchanged."""
+    if docs == DOCS_UNREPORTED and not lag:
+        return Text()
+    segment = Text("Index", style=DIM)
+    if docs is None:
+        segment.append(" ?", style=DIM)
+    elif docs == 0:
+        segment.append(" ⚠empty", style=ALARM_STYLE)
+    elif docs > 0:
+        segment.append(f" {docs}", style=DIM)
+    if lag:
+        segment.append(f" ⚠{lag} behind", style=ALARM_STYLE)
+    return segment
+
+
 def alarm_strip(
-    shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int, lag: int = 0
+    shape: int, threads: int, secrets: int, cause: int, outline: int, arcs: int, lag: int = 0,
+    docs: int | None = DOCS_UNREPORTED,
 ) -> Text:
     """The panel's persistent one-line summary of every tab's alarm state,
     so nothing is missed while another tab is open:
     'Shape ⚠1 · Threads ⚠2 · Secrets · Cause ⚠1 · Outline · Arcs'.
 
     `lag` is the canon embedding index's staleness (CanonIndexer.lag()) --
-    how many indexable events haven't been embedded yet. It is not one of
-    the six per-tab counts (there is no Index tab), so it renders as a
-    trailing 'Index ⚠N behind' segment only when nonzero, keeping the quiet
-    state ('Shape · Threads · ... · Arcs') unchanged when the index is
-    caught up -- an embed-endpoint outage must never again be silently
-    invisible in the UI."""
+    how many indexable events haven't been embedded yet -- and `docs` its
+    size (Runtime.index_document_count(); None for unknown). Neither is one
+    of the six per-tab counts (there is no Index tab), so both render through
+    index_segment as one trailing 'Index …' segment, and the quiet state
+    ('Shape · Threads · ... · Arcs') is unchanged when nothing is passed --
+    an embed-endpoint outage must never again be silently invisible in the UI."""
     strip = Text()
     for i, (label, count) in enumerate(
         [
@@ -697,8 +733,8 @@ def alarm_strip(
         strip.append(label, style=DIM)
         if count:
             strip.append(f" ⚠{count}", style=ALARM_STYLE)
-    if lag:
+    segment = index_segment(docs, lag)
+    if segment.plain:
         strip.append(" · ", style=DIM)
-        strip.append("Index", style=DIM)
-        strip.append(f" ⚠{lag} behind", style=ALARM_STYLE)
+        strip.append_text(segment)
     return strip
