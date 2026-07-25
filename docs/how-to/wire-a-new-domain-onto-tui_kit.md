@@ -66,11 +66,11 @@ IDENTITIES: dict[str, AgentIdentity] = {
 
 **Spell colors as hex, not as Rich color names.** `style()` is consumed by two
 different renderers: Rich (`rich.Text` — vitals, roster, feed) *and* Textual
-(`Content.styled` — the engine room's per-agent tab titles). Textual's parser
-only knows CSS color names, so a Rich 256-color name like `gold3` or
-`dark_cyan` raises there and the style is dropped **silently** — the tab
-renders colorless while everything Rich draws looks right. Hex parses
-identically in both. Assert it in your tests:
+(`Content.styled` — the engine room's stream block headers and filter chips).
+Textual's parser only knows CSS color names, so a Rich 256-color name like
+`gold3` or `dark_cyan` raises there and the style is dropped **silently** —
+the block header or chip renders colorless while everything Rich draws looks
+right. Hex parses identically in both. Assert it in your tests:
 
 ```python
 def test_styles_parse_under_both_renderers():
@@ -188,6 +188,7 @@ one-to-one:
 | `AGENT_RUN_FAILED` | `RunFailed(run_id, agent_name, error_type, error_message)` |
 | `AGENT_RUN_CANCELLED` | `RunFailed(run_id, agent_name, "CancelledError", "run cancelled")` — the run model has no cancelled status, and a terminal event that maps to nothing leaves the run reading as still running |
 | `AGENT_RUN_TRUNCATED` | *(none)* — the tool-call budget landed the run early. Deliberately unmapped: the run is still going and emits its own terminal event afterwards, so closing the live block here would hide the rest of it. It shows in the durable trace instead |
+| `LLM_OUTPUT_SEGMENT` | `TokenDelta(run_id, agent_name, text, kind)` — a stored, coalesced segment (payload `LlmOutputSegment`) reconstructs prose the same way live streaming did, so replay/paged history renders identically to what the live view showed token-by-token |
 | `LLM_CALL_STARTED` | `LLMCallStarted(run_id, agent_name, call_index, model, prompt)` |
 | `LLM_CALL_FINISHED` | `LLMCallFinished(run_id, agent_name, call_index, duration_s, output_tokens)` |
 | `TOOL_CALL_STARTED` | `ToolCallStarted(run_id, agent_name, tool_name, input_summary, delegate)` |
@@ -200,11 +201,17 @@ to attach each result to the block that made that exact call. Omit it and
 results fall back to closing the *last* running block with that tool name,
 which scrambles call/result pairing under parallelism.
 
-`TokenDelta` and `ToolSummaryReady` don't come from `StoredEvent` at all in
-novelizer — they're bus-only, high-frequency items (`NovelizerTokenDelta`,
-`NovelizerToolSummaryReady` from `novelizer.telemetry.events`) that are
-never persisted to the durable log, so they're checked with `isinstance`
-before the `StoredEvent` branch even runs.
+`ToolSummaryReady`, and per-token `TokenDelta` streamed live, don't come from
+`StoredEvent` at all in novelizer — they're bus-only, high-frequency items
+(`NovelizerTokenDelta`, `NovelizerToolSummaryReady` from
+`novelizer.telemetry.events`) that are never persisted to the durable log, so
+they're checked with `isinstance` before the `StoredEvent` branch even runs.
+What *is* persisted is coarser: the recorder coalesces runs of same-kind
+output into `LlmOutputSegment` events (flushed on a kind change, a tool call,
+call end, or a size threshold) and appends those as `LLM_OUTPUT_SEGMENT`
+`StoredEvent`s, which the adapter's `StoredEvent` branch turns back into the
+same `contracts.TokenDelta` shape — so scrollback and replay show the prose
+that streamed live, just not at per-token granularity.
 
 ### Returning None for events tui_kit's run model doesn't render (e.g. scheduler-only events)
 

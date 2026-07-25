@@ -307,9 +307,9 @@ agents run in **pull mode** — the prompt hands them a compact chapter index an
 trusts them to go read what they need. That division of labor assumes the model can
 actually drive tools. Many local models can't, or can't reliably. The telltale
 symptoms: an agent alarms with `GraphRecursionError: Recursion limit of 200
-reached`, its Engine Room pane shows canon reads looping without ever producing an
-answer, or runs die on malformed-output errors because the model mangled the
-tool-call JSON.
+reached`, its slice of the Engine Room stream (filter to that agent's chip) shows
+canon reads looping without ever producing an answer, or runs die on
+malformed-output errors because the model mangled the tool-call JSON.
 
 The escape hatch is per-agent: each agent has its own `*_tools_enabled` flag, all
 defaulting to `true`. Turning one off builds that agent's runner without the canon
@@ -511,11 +511,13 @@ targets your last-opened story; to name one explicitly, the `--story` flag goes
 $ novelizer seed "A lighthouse keeper who taxes the tide."
 ```
 
-Back in the app, press `e` to open the **Engine Room**: each agent pane shows a live
-token stream and vitals while that agent runs. Tokens streaming in an agent pane are
-the proof that `POST /chat/completions` works under the app's real settings, cap, and
-tool flags — not just under curl. Failures are equally visible: every failed agent
-run posts one alarm line to THE ROOM feed in the form
+Back in the app, press `e` to open the **Engine Room**: a single chronological
+stream shows every agent's live token stream and vitals, each block tagged with
+that agent's glyph and colour, so you can watch several agents run at once (click
+an agent's filter chip above the stream to narrow it to just that one). Tokens
+streaming in are the proof that `POST /chat/completions` works under the app's
+real settings, cap, and tool flags — not just under curl. Failures are equally
+visible: every failed agent run posts one alarm line to THE ROOM feed in the form
 `⚠ scheduler error: author: <cause>`, and repeats it once per failed run, so a
 connection that dies under load (Step 4) shows up here even after a passing curl.
 Within a few agent cycles a drafted chapter should exist — confirm from the second
@@ -628,8 +630,8 @@ next entry: thinking tokens count toward the same wall-clock budget.
 **Thinking streams in the Engine Room, but the prose is empty or truncated.** A
 reasoning model (vLLM's `reasoning_content`, or the `reasoning` key some proxies
 use) is spending the `llm_max_tokens` budget thinking — Novelizer surfaces those
-deltas as the dim italic "thinking" stream in the agent's pane, but they count as
-generated output on the server. Prefer disabling or shortening reasoning **on the
+deltas as the dim italic "thinking" stream in that agent's blocks, but they count
+as generated output on the server. Prefer disabling or shortening reasoning **on the
 server** (llama.cpp, Ollama, and vLLM each have their own switch) over raising the
 cap past your timeout budget.
 
