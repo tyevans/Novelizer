@@ -80,8 +80,14 @@ import pytest
 from pydantic import BaseModel
 
 # Packages swept for candidate models. A package list, not a model list: adding
-# a model to any of these is covered without touching this file.
-MODEL_PACKAGES = ("novelizer.agents", "novelizer.store", "novelizer.canon", "novelizer.brain")
+# a model to any of these is covered without touching this file. `novelizer.chat`
+# is here because ChatReply (chat/schemas.py) carries intent fields the packs
+# name; leaving it out made a chat-only field resolve as unknown, which is a
+# phantom failure waiting for the first pack to mention one.
+MODEL_PACKAGES = (
+    "novelizer.agents", "novelizer.store", "novelizer.canon", "novelizer.brain",
+    "novelizer.chat",
+)
 
 _HIDDEN = {"__pycache__"}
 
