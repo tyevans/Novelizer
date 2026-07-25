@@ -53,6 +53,13 @@ class TestRetrievalNote:
             for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
                 assert directory in note
 
+    def test_points_at_the_derived_dramatic_irony_ledger(self):
+        """The ledger is the one canon file no record's title leads to, so an
+        agent that only slugs titles into paths would never find it."""
+        from novelizer.canon_fs.backend import IRONY_LEDGER_PATH
+        for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
+            assert IRONY_LEDGER_PATH in note
+
     def test_disowns_the_canon_prefix_hallucination(self):
         for note in (RETRIEVAL_NOTE, RETRIEVAL_NOTE_BASE):
             assert "no /canon" in note

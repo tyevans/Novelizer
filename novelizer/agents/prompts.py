@@ -28,7 +28,12 @@ _RETRIEVAL_NOTE_PREFIX = (
     "articles kept — 'The Mourning Courts of Vael' is world/the-mourning-courts-of-vael.md. "
     "Chapter files add an ordinal prefix and are never named by chapter number: "
     "`chapters/001-the-salt-road.md`, not `chapters/ch01.md` or `chapters/ch1.md`; use "
-    "`chapters/*.md` to list them all. Never guess a path from memory — if a read misses, "
+    "`chapters/*.md` to list them all. One file is DERIVED rather than slugged from a "
+    "record's title, so no title leads to it: `/secrets/_dramatic-irony.md` is the "
+    "dramatic-irony ledger — what the reader already knows versus what each character on "
+    "the page still doesn't, per secret, in chapter order. Read it when you want a scene "
+    "to play its irony on purpose; it says so plainly when the story has no gaps yet. "
+    "Never guess a path from memory — if a read misses, "
     "ls or glob the directory and use a path listed there. "
 )
 

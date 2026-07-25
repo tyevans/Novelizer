@@ -279,6 +279,22 @@ class SecretReferenceRecord(BaseModel):
     note: str = ""
 
 
+class SecretKnowledgeRecord(BaseModel):
+    """Read-side row for one secret_knowledge join-table entry — the WHEN
+    that ReadStore.knowledge_matrix() drops. The matrix answers "does this
+    character know at all" (a set of ids); this record keeps the chapter the
+    learning happened in, which novelizer/brain/irony.py needs to place a
+    knowledge gap on the story's timeline. Idempotent by (secret, character):
+    the join table's primary key means at most one row per pair, so the
+    chapter here is the FIRST learning, not the latest.
+    """
+
+    secret_id: str
+    character_id: str
+    chapter_id: str = ""
+    note: str = ""
+
+
 class StructureScore(BaseModel):
     """Read-side row for one chapter's narrative-structure score, built by
     the Projector from annotation.structure_scored events (see

@@ -5,7 +5,8 @@ from novelizer.canon import db
 from novelizer.store.models import (
     Chapter, WorldEntry, Character, DirectorSignal, Flag, ThreadRecord, StructureScore,
     ChapterSummary,
-    SecretRecord, CausalEdgeRecord, SecretReferenceRecord, ThemeRecord, ChatMessageRecord,
+    SecretRecord, CausalEdgeRecord, SecretKnowledgeRecord, SecretReferenceRecord,
+    ThemeRecord, ChatMessageRecord,
     InspirationHandRecord, InspirationUptakeRecord, PromiseRecord,
     BlueprintRecord, BeatRecord, ChapterBriefRecord, ArcRecord,
 )
@@ -243,6 +244,25 @@ class ReadStore:
         cur = await self._conn.execute(query, params)
         return [
             SecretReferenceRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
+            for r in await cur.fetchall()
+        ]
+
+    async def list_secret_knowledge(self, secret_id: Optional[str] = None) -> list[SecretKnowledgeRecord]:
+        """Every secret_knowledge row, chapter included. knowledge_matrix()
+        collapses these to a set of character ids per secret; callers that
+        need WHEN a character learned (novelizer/brain/irony.py) read them
+        here instead. Same shape and filter contract as
+        list_secret_references.
+        """
+        query = "SELECT secret_id, character_id, chapter_id, note FROM secret_knowledge"
+        params: tuple = ()
+        if secret_id is not None:
+            query += " WHERE secret_id=?"
+            params = (secret_id,)
+        query += " ORDER BY rowid"
+        cur = await self._conn.execute(query, params)
+        return [
+            SecretKnowledgeRecord(secret_id=r[0], character_id=r[1], chapter_id=r[2], note=r[3])
             for r in await cur.fetchall()
         ]
 

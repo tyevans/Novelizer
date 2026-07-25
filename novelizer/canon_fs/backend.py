@@ -17,11 +17,12 @@ from deepagents.backends.protocol import (
 )
 from wcmatch import glob as wcglob
 
+from novelizer.brain.irony import build_irony_ledger
 from novelizer.canon_fs.paths import build_path_index
 from novelizer.canon_fs.reads import sliced_read
 from novelizer.canon_fs.render import (
-    render_chapter, render_character, render_secret, render_theme,
-    render_thread, render_world_entry,
+    render_chapter, render_character, render_irony_ledger, render_secret,
+    render_theme, render_thread, render_world_entry,
 )
 
 READ_ONLY_ERROR = (
@@ -30,6 +31,19 @@ READ_ONLY_ERROR = (
 )
 
 KIND_DIRS = ("chapters", "characters", "world", "threads", "secrets", "themes")
+
+# The dramatic-irony ledger (novelizer/brain/irony.py) is derived wholly from
+# secret canon, so it lives in /secrets beside its source rather than claiming a
+# seventh top-level directory it would be the only occupant of -- a new root
+# would read as a new canon aggregate, which it is not.
+#
+# The leading underscore is what makes it collision-proof: novelizer.slug's rule
+# trims non-alphanumerics from both ends, so no secret title can ever slug to a
+# name starting with "_" and take this path first. It also sorts ahead of every
+# secret file, so an agent that ls-es /secrets meets the ledger before the rows
+# it summarizes.
+IRONY_LEDGER_PATH = "/secrets/_dramatic-irony.md"
+_IRONY_LEDGER_KIND = "irony_ledger"
 
 
 @dataclass
@@ -44,6 +58,7 @@ class _Snapshot:
     secrets: dict
     themes: dict
     matrix: dict
+    irony: list
 
 
 class CanonBackend(BackendProtocol):
@@ -98,8 +113,20 @@ class CanonBackend(BackendProtocol):
         secrets = await self._read.list_secrets()
         themes = await self._read.list_themes()
         matrix = await self._read.knowledge_matrix()
+        irony = build_irony_ledger(
+            secrets=secrets,
+            references=await self._read.list_secret_references(),
+            knowledge=await self._read.list_secret_knowledge(),
+            chapters=chapters,
+            matrix=matrix,
+        )
+        index = build_path_index(chapters, characters, world, threads, secrets, themes)
+        # Added here rather than inside build_path_index: the ledger is a
+        # singleton derived file with no record id, and the index is also built
+        # by canon_fs/search.py purely to map record ids to paths.
+        index[IRONY_LEDGER_PATH] = (_IRONY_LEDGER_KIND, "")
         return _Snapshot(
-            index=build_path_index(chapters, characters, world, threads, secrets, themes),
+            index=index,
             chapters={r.id: r for r in chapters},
             characters={r.id: r for r in characters},
             world={r.id: r for r in world},
@@ -107,9 +134,12 @@ class CanonBackend(BackendProtocol):
             secrets={r.id: r for r in secrets},
             themes={r.id: r for r in themes},
             matrix=matrix,
+            irony=irony,
         )
 
     def _render(self, snap: _Snapshot, kind: str, record_id: str) -> str:
+        if kind == _IRONY_LEDGER_KIND:
+            return render_irony_ledger(snap.irony, list(snap.chapters.values()))
         if kind == "chapter":
             return render_chapter(snap.chapters[record_id])
         if kind == "character":
