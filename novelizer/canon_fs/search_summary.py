@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import logging
 
+from agent_kit import build_chat_model
 from deepagents.backends.utils import file_data_to_string
+from langchain_core.messages import HumanMessage
 
 from novelizer.canon_fs.reads import TRUNCATION_MARKER
 
@@ -76,3 +78,49 @@ async def gather_excerpts(hits, backend, path_by_id, entity_lines) -> list[str]:
             continue
         blocks.append(f"{header}\n{body}")
     return blocks
+
+
+_PROMPT = """You are answering a question about a novel's canon using ONLY the \
+excerpts below.
+
+The agent searched for: {query}
+They are asking because: {purpose}
+
+EXCERPTS
+{excerpts}
+
+Write at most 120 words answering what canon says, as it bears on why they are \
+asking. Rules:
+- Assert nothing that is not in the excerpts above. No inference beyond what \
+the text states.
+- If the excerpts do not answer the purpose, say so plainly in one sentence. \
+That is a useful answer, not a failure.
+- Refer to records by their titles and ids as shown.
+- Plain prose. No markdown, no headings, no bullet list.
+"""
+
+
+async def summarize(query, purpose, excerpts, settings, callbacks=None) -> str:
+    """A short grounded synthesis of `excerpts`, or "" if anything goes wrong.
+
+    Never raises. The caller treats "" as "send the hit lines alone", so a
+    summarizer outage costs the agent a nicety and nothing else.
+    """
+    if not excerpts:
+        return ""
+    prompt = _PROMPT.format(
+        query=query, purpose=purpose, excerpts="\n\n".join(excerpts))
+    try:
+        model = build_chat_model(
+            settings.agent_model, settings.llm_base_url, settings.llm_api_key,
+            temperature=0.0,
+            max_tokens=min(SUMMARY_MAX_TOKENS, settings.llm_max_tokens),
+            callbacks=callbacks,
+        )
+        response = await model.ainvoke([HumanMessage(content=prompt)])
+    except Exception:
+        # Debug, not warning: a degraded summary is invisible to the agent by
+        # design, and this can fire on every search during an outage.
+        logger.debug("search summary: model call failed", exc_info=True)
+        return ""
+    return str(response.content).strip()

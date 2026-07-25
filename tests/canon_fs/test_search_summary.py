@@ -104,3 +104,78 @@ async def test_drops_the_truncation_notice():
     out = await gather_excerpts(hits, backend, {"ch1": "/chapters/1.md"}, {})
     assert "real content" in out[0]
     assert TRUNCATION_MARKER not in out[0]
+
+
+import novelizer.canon_fs.search_summary as summary_mod
+from novelizer.canon_fs.search_summary import summarize
+
+
+class _Settings:
+    agent_model = "m"
+    llm_base_url = "http://x"
+    llm_api_key = "k"
+    llm_max_tokens = 4096
+    search_summarize = True
+
+
+class _Response:
+    def __init__(self, content):
+        self.content = content
+
+
+class _Model:
+    """Captures the prompt; optionally raises."""
+
+    def __init__(self, reply="canon says the debt stands.", boom=None):
+        self.reply, self.boom, self.prompts = reply, boom, []
+
+    async def ainvoke(self, messages):
+        self.prompts.append(messages[-1].content)
+        if self.boom:
+            raise self.boom
+        return _Response(self.reply)
+
+
+def _patch_model(monkeypatch, model):
+    monkeypatch.setattr(
+        summary_mod, "build_chat_model", lambda *a, **k: model)
+    return model
+
+
+async def test_returns_the_models_summary(monkeypatch):
+    model = _patch_model(monkeypatch, _Model())
+    out = await summarize("the debt", "deciding ch12", ["--- excerpt"], _Settings())
+    assert out == "canon says the debt stands."
+
+
+async def test_prompt_carries_both_query_and_purpose(monkeypatch):
+    model = _patch_model(monkeypatch, _Model())
+    await summarize("the debt Mateo owes", "checking if it is repaid",
+                    ["--- excerpt"], _Settings())
+    prompt = model.prompts[0]
+    assert "the debt Mateo owes" in prompt
+    assert "checking if it is repaid" in prompt
+
+
+async def test_prompt_carries_the_excerpts(monkeypatch):
+    model = _patch_model(monkeypatch, _Model())
+    await summarize("q", "p", ["--- (secret) 'The note'\nIlse holds it."],
+                    _Settings())
+    assert "Ilse holds it." in model.prompts[0]
+
+
+async def test_model_failure_returns_empty_not_an_error_string(monkeypatch):
+    # The search itself succeeded. Its results must still reach the agent.
+    _patch_model(monkeypatch, _Model(boom=RuntimeError("502")))
+    assert await summarize("q", "p", ["--- e"], _Settings()) == ""
+
+
+async def test_empty_reply_returns_empty(monkeypatch):
+    _patch_model(monkeypatch, _Model(reply="   \n  "))
+    assert await summarize("q", "p", ["--- e"], _Settings()) == ""
+
+
+async def test_no_excerpts_makes_no_model_call(monkeypatch):
+    model = _patch_model(monkeypatch, _Model())
+    assert await summarize("q", "p", [], _Settings()) == ""
+    assert model.prompts == []
