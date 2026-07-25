@@ -57,6 +57,14 @@ def build_search_canon_tool(embedding_store, read_store, kg_store,
         vaguer the purpose the less useful the synthesis. Pass
         summarize=False to skip it and get the raw hit list alone.
 
+        `purpose` must be the decision you are making, NOT a restatement of
+        the query. "deciding whether Mateo's debt is still open before
+        drafting ch12" is a purpose; "Mateo's debt" is not — it just echoes
+        the query and gets a useless synthesis back.
+
+        The RESULTS block below CONTEXT is the source of truth for citation:
+        ids and paths come from there, never from the prose summary.
+
         Example: search_canon("the debt Mateo owes", purpose="deciding whether
         Mateo can repay in ch12", kinds=["thread", "secret"])
         """

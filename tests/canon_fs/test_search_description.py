@@ -68,6 +68,22 @@ class TestDescription:
     def test_documents_the_kinds_filter(self):
         assert "kinds=" in _tool([]).description
 
+    def test_documents_the_purpose_argument(self):
+        desc = _tool([]).description
+        assert "purpose" in desc
+
+    def test_says_purpose_is_the_decision_not_the_query(self):
+        """An agent that echoes the query into purpose gets a useless summary."""
+        desc = _tool([]).description.lower()
+        assert "restate" in desc or "not a restatement" in desc
+
+    def test_documents_the_summarize_opt_out(self):
+        assert "summarize=False" in _tool([]).description
+
+    def test_says_results_is_the_citation_source_of_truth(self):
+        desc = _tool([]).description
+        assert "RESULTS" in desc and "CONTEXT" in desc
+
 
 class TestResponseCap:
     async def test_caps_results_and_says_so(self):
