@@ -1,5 +1,5 @@
 import pytest
-from novelizer.canon_fs.backend import READ_ONLY_ERROR, CanonBackend
+from novelizer.canon_fs.backend import IRONY_LEDGER_PATH, READ_ONLY_ERROR, CanonBackend
 
 
 def test_write_and_edit_refuse_with_intent_message():
@@ -207,7 +207,8 @@ async def test_aglob_absolute_and_relative(stack):
     absolute = await backend.aglob("/chapters/*.md")
     assert [m["path"] for m in absolute.matches] == ["/chapters/001-the-drowned-bell.md"]
     relative = await backend.aglob("*.md", path="/secrets")
-    assert [m["path"] for m in relative.matches] == ["/secrets/the-scar.md"]
+    # the derived irony ledger sits in /secrets and sorts ahead of the records
+    assert [m["path"] for m in relative.matches] == [IRONY_LEDGER_PATH, "/secrets/the-scar.md"]
 
 
 async def test_aglob_globstar_spans_directories(stack):
@@ -215,7 +216,7 @@ async def test_aglob_globstar_spans_directories(stack):
     await seed_canon(events, proj)
     backend = CanonBackend(read)
     result = await backend.aglob("**/*.md")
-    assert len(result.matches) == 6  # every canon file
+    assert len(result.matches) == 7  # six canon records + the derived irony ledger
     assert result.matches == sorted(result.matches, key=lambda m: m["path"])
 
 
@@ -245,7 +246,7 @@ async def test_agrep_path_scopes_and_glob_filters(stack):
     scoped = await backend.agrep("Mara", path="/characters")
     assert {m["path"] for m in scoped.matches} == {"/characters/mara.md"}
     filtered = await backend.agrep("id:", glob="secrets/*.md")
-    assert {m["path"] for m in filtered.matches} == {"/secrets/the-scar.md"}
+    assert {m["path"] for m in filtered.matches} == {IRONY_LEDGER_PATH, "/secrets/the-scar.md"}
 
 
 async def test_agrep_is_literal_not_regex(stack):
@@ -264,6 +265,7 @@ async def test_agrep_basename_glob_filters_by_filename(stack):
     assert {m["path"] for m in result.matches} == {
         "/chapters/001-the-drowned-bell.md", "/characters/mara.md", "/world/bell-cult.md",
         "/threads/bell-s-curse.md", "/secrets/the-scar.md", "/themes/drowning-as-memory.md",
+        IRONY_LEDGER_PATH,
     }
     scoped = await backend.agrep("id:", glob="mara.md")
     assert {m["path"] for m in scoped.matches} == {"/characters/mara.md"}
@@ -282,4 +284,4 @@ async def test_aglob_brace_expansion(stack):
     await seed_canon(events, proj)
     backend = CanonBackend(read)
     result = await backend.aglob("/secrets/*.{md,txt}")
-    assert [m["path"] for m in result.matches] == ["/secrets/the-scar.md"]
+    assert [m["path"] for m in result.matches] == [IRONY_LEDGER_PATH, "/secrets/the-scar.md"]

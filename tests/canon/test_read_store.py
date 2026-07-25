@@ -194,3 +194,19 @@ async def test_list_secret_references_filters_by_secret_id(stack):
     filtered = await read.list_secret_references(secret_id="the-heir-lives")
     assert {r.character_id for r in filtered} == {"mara", "ren"}
     assert await read.list_secret_references(secret_id="missing") == []
+
+
+async def test_list_secret_knowledge_carries_the_learning_chapter(stack):
+    from novelizer.canon.events import SecretCreated, SecretLearned
+    events, proj, read = stack
+    await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="tomas", chapter_id="c7", note="the ledger"))
+    await events.append(EventType.SECRET_LEARNED, "the-heir-lives", SecretLearned(id="the-heir-lives", character_id="mara", chapter_id="c9"))
+    await proj.catch_up()
+    rows = await read.list_secret_knowledge()
+    assert [(r.character_id, r.chapter_id, r.note) for r in rows] == [
+        ("tomas", "c7", "the ledger"), ("mara", "c9", ""),
+    ]
+    filtered = await read.list_secret_knowledge(secret_id="the-heir-lives")
+    assert len(filtered) == 2
+    assert await read.list_secret_knowledge(secret_id="missing") == []
