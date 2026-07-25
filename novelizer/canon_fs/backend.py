@@ -18,6 +18,7 @@ from deepagents.backends.protocol import (
 from wcmatch import glob as wcglob
 
 from novelizer.brain.irony import build_irony_ledger
+from novelizer.canon_fs.generation import GenerationCache
 from novelizer.canon_fs.paths import build_path_index
 from novelizer.canon_fs.reads import sliced_read
 from novelizer.canon_fs.render import (
@@ -73,6 +74,7 @@ class CanonBackend(BackendProtocol):
 
     def __init__(self, read_store) -> None:
         self._read = read_store
+        self._snapshot_cache = GenerationCache(read_store, self._build_snapshot)
 
     # -- writes: refused (sync impls; inherited awrite/aedit wrap them) --
 
@@ -106,6 +108,16 @@ class CanonBackend(BackendProtocol):
         raise NotImplementedError("CanonBackend is async-only; use aglob")
 
     async def _snapshot(self) -> _Snapshot:
+        """The consistent view every call in this generation shares.
+
+        Cached on the projection generation rather than rebuilt per call: the
+        seven queries plus the path index cost 0.8ms on an idle copy of the live
+        story but show a 100ms median and 1.3s p90 in its telemetry, where the
+        projector is writing and thirteen agents are reading the same file.
+        """
+        return await self._snapshot_cache.get()
+
+    async def _build_snapshot(self) -> _Snapshot:
         chapters = await self._read.list_chapters()
         characters = await self._read.list_characters()
         world = await self._read.list_world_entries()
