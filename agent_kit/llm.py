@@ -40,6 +40,24 @@ TOOL_CALL_HARD_MARGIN = 10
 # the pass instead of restarting it.
 LLM_MAX_RETRIES = 10
 
+# Default generation cap for the light path. Light calls are labels, one-line
+# summaries, and short syntheses -- work whose correct output is short. The cap
+# is deliberately far below llm_max_tokens: a light call that wants thousands of
+# tokens is not a light call, and the cap failing loudly is better than a
+# "cheap" pass quietly costing as much as a full one.
+LIGHT_MAX_TOKENS = 512
+
+# The chat-template variable that reasoning-capable templates read to decide
+# whether to open a thinking block. llama-server's `--reasoning on|off` sets
+# exactly this key in default_template_kwargs, and accepts the same key per
+# request via chat_template_kwargs; vLLM follows the same convention.
+#
+# This is a *template* variable, not a sampler parameter: it only bites if the
+# loaded model's chat template actually branches on it (Qwen3-style). Against a
+# template that ignores it the flag is inert -- harmless, but not a guarantee,
+# so treat "reasoning off" as a request rather than an enforcement.
+THINKING_TEMPLATE_KEY = "enable_thinking"
+
 
 class _ReasoningAwareChatOpenAI(ChatOpenAI):
     """ChatOpenAI, plus surfacing provider-specific reasoning/thinking deltas
@@ -69,11 +87,29 @@ class _ReasoningAwareChatOpenAI(ChatOpenAI):
         return generation_chunk
 
 
+def _with_thinking(extra_body: dict | None, reasoning: bool | None) -> dict | None:
+    """Merge the thinking flag into extra_body without disturbing it.
+
+    reasoning=None leaves the body untouched, which is what every caller that
+    has no opinion gets: the served model keeps doing whatever it does today.
+    Both the outer dict and the nested chat_template_kwargs are copied rather
+    than mutated -- callers pass literals and shared dicts alike.
+    """
+    if reasoning is None:
+        return extra_body
+    merged = dict(extra_body or {})
+    template_kwargs = dict(merged.get("chat_template_kwargs") or {})
+    template_kwargs[THINKING_TEMPLATE_KEY] = bool(reasoning)
+    merged["chat_template_kwargs"] = template_kwargs
+    return merged
+
+
 def build_chat_model(
     model: str, base_url: str, api_key: str, temperature: float = 0.8,
     max_tokens: int | None = None, callbacks=None, streaming=None,
     context_window_tokens: int = CONTEXT_WINDOW_TOKENS,
     max_retries: int = LLM_MAX_RETRIES,
+    reasoning: bool | None = None, extra_body: dict | None = None,
 ):
     """Build a LangChain chat model bound to an OpenAI-compatible endpoint.
 
@@ -84,6 +120,11 @@ def build_chat_model(
     callbacks (telemetry handlers) imply streaming=True by default — token-
     by-token delivery is what makes on_llm_new_token fire. Pass `streaming`
     explicitly to decouple the two.
+
+    reasoning asks the server to enable (True) or suppress (False) the model's
+    thinking block; None — the default — sends nothing and inherits whatever
+    the endpoint was started with. See THINKING_TEMPLATE_KEY for why this is a
+    request rather than a guarantee.
     """
     if streaming is None:
         streaming = callbacks is not None
@@ -96,8 +137,64 @@ def build_chat_model(
         callbacks=callbacks,
         streaming=streaming,
         max_retries=max_retries,
+        extra_body=_with_thinking(extra_body, reasoning),
         profile={"max_input_tokens": context_window_tokens},
     )
+
+
+def build_light_model(
+    model: str, base_url: str, api_key: str, *,
+    max_tokens: int = LIGHT_MAX_TOKENS, callbacks=None, **kwargs,
+):
+    """The one definition of a cheap call: cold, capped, and not thinking.
+
+    Labelling, one-line summaries, and short extractive syntheses are the same
+    kind of work — deterministic formatting over text someone else already
+    wrote — and were each hand-tuned to their own temperature and token cap
+    before this existed. Consolidating them means the reasoning flag (and the
+    next such lever) lands in one place rather than five.
+
+    Everything else, notably the retry budget, is inherited from
+    build_chat_model: cheap must not mean fragile, since a light pass dropped
+    to a 429 loses real work just like an expensive one.
+    """
+    return build_chat_model(
+        model, base_url, api_key, temperature=0.0, max_tokens=max_tokens,
+        callbacks=callbacks, reasoning=False, **kwargs,
+    )
+
+
+class _SimpleRunner:
+    """A Runner that is one structured model call — no graph, no tool loop.
+
+    Satisfies the same protocol as a deepagents graph (`ainvoke(inputs) ->
+    dict` carrying "structured_response"), so a toolless agent switches paths
+    without touching its poll/work/commit code.
+
+    A graph exists to let a model choose tools and iterate. An agent with no
+    tools has nothing to choose and nowhere to iterate, so the graph around it
+    is pure overhead: middleware, a recursion limit, and a state machine
+    wrapped around a single request.
+    """
+
+    def __init__(self, model, system_prompt: str, response_format) -> None:
+        self._model = model.with_structured_output(response_format)
+        self._system_prompt = system_prompt
+
+    async def ainvoke(self, inputs: dict) -> dict:
+        messages = [{"role": "system", "content": self._system_prompt},
+                    *inputs.get("messages", [])]
+        # A refusal or unparseable reply surfaces as structured_response=None,
+        # the same shape callers already handle when a graph fails to fill one.
+        # Raising something different here would make the light path need its
+        # own error handling at every call site.
+        result = await self._model.ainvoke(messages)
+        return {"structured_response": result}
+
+
+def build_simple_runner(*, model, system_prompt: str, response_format):
+    """Graph-free counterpart to build_agent_runner, for toolless agents."""
+    return _SimpleRunner(model, system_prompt, response_format)
 
 
 def build_agent_runner(
