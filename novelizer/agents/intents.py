@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import uuid
+from typing import Optional, Protocol, runtime_checkable
 from novelizer.canon.ids import normalize_id
 from novelizer.canon.events import (
     EventType, ThreadPlanted, ThreadTouched, ThreadPaidOff, ThreadAbandoned,
@@ -20,7 +21,7 @@ from novelizer.agents.schemas import (
     ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
     BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
-from novelizer.store.models import Flag, FlagStatus, ChapterBriefRecord
+from novelizer.store.models import Flag, FlagStatus, ChapterBriefRecord, ThemeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,26 @@ async def commit_thread_intents(
         await committer.commit(agent_name, event_type, thread_id, payload)
 
 
+@runtime_checkable
+class ThemeSimilarityReadStore(Protocol):
+    """The read-store surface the theme near-duplicate path needs, stated once
+    instead of probed call by call.
+
+    Both methods are needed by the SAME branch: get_theme names the existing
+    theme in the flag's description, list_flags dedupes against the open
+    thematic queue. `novelizer.canon.ReadStore` satisfies it, and it is the
+    only read store production ever passes here -- the interface exists to let
+    the branch below rely on that fact rather than re-derive it per call.
+    """
+
+    async def get_theme(self, theme_id: str) -> Optional[ThemeRecord]: ...
+
+    async def list_flags(
+        self, category: Optional[str] = None, status: Optional[str] = None,
+        escalated: Optional[bool] = None,
+    ) -> list[Flag]: ...
+
+
 async def commit_theme_intents(
     committer,
     agent_name: str,
@@ -132,7 +153,7 @@ async def commit_theme_intents(
     chapter_id: str = "",
     source: str = "declared",
     embedding_store=None,
-    read_store=None,
+    read_store: ThemeSimilarityReadStore | None = None,
 ) -> None:
     """Turn agent-declared ThemeIntent entries into theme.* commits.
 
@@ -153,6 +174,12 @@ async def commit_theme_intents(
     Editor's voice-drift flags). When `embedding_store` is None (the
     default, and every existing call site that predates this), this is
     a complete no-op -- behavior is unchanged.
+
+    `read_store` must satisfy `ThemeSimilarityReadStore` for the duplicate
+    check to run at all; one that does not is logged and skips the check
+    entirely (the theme still commits and still enters the embedding
+    collection). Either the theme event and its similarity flag both land,
+    or the check never happened -- the event never lands alone.
     """
     for intent in intents:
         if intent.action == "introduce":
@@ -184,9 +211,23 @@ async def commit_theme_intents(
                 from novelizer.brain.theme_similarity import (
                     THEME_SIMILARITY_SOURCE_TAG, suggest_near_duplicate_theme,
                 )
-                from novelizer.store.models import ThemeRecord as _ThemeRecord
-                new_theme = _ThemeRecord(id=theme_id, title=intent.title)
-                duplicate_id = await suggest_near_duplicate_theme(embedding_store, new_theme)
+                new_theme = ThemeRecord(id=theme_id, title=intent.title)
+                # The duplicate branch commits a flag, so it is decided BEFORE
+                # theme.introduced lands: a read store that cannot serve the
+                # whole ThemeSimilarityReadStore contract used to raise only
+                # after the event was already permanent, leaving canon holding
+                # an event whose companion flag never arrived. Not attempting
+                # the check is a state the invariant allows (nothing was
+                # promised); attempting half of it is not.
+                duplicate_id = None
+                if isinstance(read_store, ThemeSimilarityReadStore):
+                    duplicate_id = await suggest_near_duplicate_theme(embedding_store, new_theme)
+                else:
+                    logger.warning(
+                        "%s: theme similarity check skipped for %r -- read_store %s does not "
+                        "satisfy ThemeSimilarityReadStore (needs get_theme and list_flags)",
+                        agent_name, theme_id, type(read_store).__name__,
+                    )
             await committer.commit(
                 agent_name, EventType.THEME_INTRODUCED, theme_id,
                 ThemeIntroduced(id=theme_id, title=intent.title, chapter_id=chapter_id, note=intent.note, source=source),
@@ -194,10 +235,7 @@ async def commit_theme_intents(
             if embedding_store is not None:
                 await embedding_store.upsert_theme(new_theme)
                 if duplicate_id is not None:
-                    existing = None
-                    get_theme = getattr(read_store, "get_theme", None)
-                    if get_theme is not None:
-                        existing = await get_theme(duplicate_id)
+                    existing = await read_store.get_theme(duplicate_id)
                     existing_title = existing.title if existing is not None else duplicate_id
                     description = (
                         f"{THEME_SIMILARITY_SOURCE_TAG} theme '{theme_id}' ('{intent.title}') "

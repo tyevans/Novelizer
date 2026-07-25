@@ -736,3 +736,66 @@ async def test_knowledge_plant_and_reveal_unaffected_by_character_roster():
         active_secret_ids={"s1"}, character_ids=set(),
     )
     assert [x[1] for x in c.commits] == [EventType.SECRET_CREATED, EventType.SECRET_REVEALED]
+
+
+class FakeThemeEmbeddingStore:
+    """The minimum embedding-store surface the theme near-duplicate path uses."""
+
+    def __init__(self, near_duplicate_id):
+        self._near_duplicate_id = near_duplicate_id
+        self.upserted = []
+
+    async def query_themes(self, title, n=1):
+        if self._near_duplicate_id is None:
+            return []
+        return [(self._near_duplicate_id, 0.1)]
+
+    async def upsert_theme(self, theme):
+        self.upserted.append(theme)
+
+
+class HalfReadStore:
+    """A read store that answers get_theme but not list_flags -- exactly the
+    shape the old getattr guard tolerated on one call and not the other."""
+
+    async def get_theme(self, theme_id):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_theme_introduce_never_lands_an_event_whose_similarity_flag_cannot_be_filed(caplog):
+    """A theme introduce lands BOTH the theme event and its similarity flag,
+    or neither -- never the event alone. A read store that cannot serve the
+    flag path used to raise AttributeError only AFTER theme.introduced had
+    been committed: the event was permanent, the flag it was supposed to
+    arrive with never landed, and the caller saw an exception."""
+    c = FakeCommitter()
+    embeddings = FakeThemeEmbeddingStore("loss")
+    await commit_theme_intents(
+        c, "author", [ThemeIntent(action="introduce", title="The Price of Ambition")],
+        active_theme_ids={"loss"},
+        embedding_store=embeddings, read_store=HalfReadStore(),
+    )
+    assert [x[1] for x in c.commits] == [EventType.THEME_INTRODUCED]
+    # The theme still enters the embedding collection: only the flag-filing
+    # half of the similarity path is unavailable, and skipping the upsert too
+    # would blind every future duplicate check.
+    assert [t.id for t in embeddings.upserted] == ["the-price-of-ambition"]
+    assert any("list_flags" in r.message or "similarity" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_theme_introduce_files_the_similarity_flag_with_a_complete_read_store():
+    """The happy path is untouched: a read store satisfying the whole
+    contract still gets the theme event and its flag, in that order."""
+    class FullReadStore(HalfReadStore):
+        async def list_flags(self, category=None, status=None, escalated=None):
+            return []
+
+    c = FakeCommitter()
+    await commit_theme_intents(
+        c, "author", [ThemeIntent(action="introduce", title="The Price of Ambition")],
+        active_theme_ids={"loss"},
+        embedding_store=FakeThemeEmbeddingStore("loss"), read_store=FullReadStore(),
+    )
+    assert [x[1] for x in c.commits] == [EventType.THEME_INTRODUCED, EventType.FLAG_CREATED]
