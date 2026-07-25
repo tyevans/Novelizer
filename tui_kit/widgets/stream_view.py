@@ -5,6 +5,7 @@ one thing this view exists to show -- who is running at the same time as
 whom.
 """
 from __future__ import annotations
+from dataclasses import replace
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -90,6 +91,32 @@ class StreamView(Vertical):
 
     def append_blocks(self, blocks: tuple[StreamBlock, ...]) -> None:
         self._state = trim_window(on_new_blocks(self._state, blocks))
+        self._reconcile()
+        if self._state.follow:
+            self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
+        self._refresh_follow_bar()
+
+    def sync_tail(self, blocks: tuple[StreamBlock, ...], replacing: int) -> None:
+        """Replace the trailing `replacing` blocks with `blocks`.
+
+        A caller that re-sends the whole current run on every tick (which is
+        what EngineRoom.render_live does -- it is driven by a bus item *and*
+        a refresh timer, each carrying the full state) cannot use
+        append_blocks: it would duplicate. Nor can it append only the new
+        tail, because blocks mutate in place -- a prose block grows with
+        every token, a tool block goes running -> done, a summary arrives
+        for a block several positions back. So the run's whole block list
+        is re-stated each time and the widgets it already owns are updated
+        rather than re-mounted; anything before `replacing` (earlier runs,
+        paged-in history) is left alone.
+        """
+        replacing = max(0, min(replacing, len(self._state.blocks)))
+        kept = self._state.blocks[:len(self._state.blocks) - replacing]
+        added = max(0, len(blocks) - replacing)
+        state = replace(self._state, blocks=kept + tuple(blocks))
+        if not state.follow and added:
+            state = replace(state, unseen=state.unseen + added)
+        self._state = trim_window(state)
         self._reconcile()
         if self._state.follow:
             self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)

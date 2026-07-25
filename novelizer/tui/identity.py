@@ -79,9 +79,10 @@ def identity_for(agent_name: str) -> AgentIdentity:
 # agent-construction import chain.
 #
 # "Keep in sync" as a comment did not hold: this drifted to 9 of 13 agents, and
-# because novelizer/tui/app.py gates render_agent_live() on `agent in
-# AGENT_NAMES`, the four missing ones (curator, summarizer, triage, flaglabeler)
-# had no Engine Room lane and were never drawn live -- they worked invisibly.
+# the four missing ones (curator, summarizer, triage, flaglabeler) had no Engine
+# Room lane and were never drawn live -- they worked invisibly. This tuple is
+# now the roster handed to the Engine Room's StreamView.set_agents(), so a
+# missing name means an agent with no filter chip.
 # tests/tui/test_identity_registry_parity.py now asserts this equals the
 # registry, so the next added agent fails a test instead of vanishing.
 AGENT_NAMES = (

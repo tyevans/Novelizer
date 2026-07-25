@@ -22,10 +22,15 @@
 #body.engine #engine_room { display: block; height: 1fr; border: round $primary; }
 #body.engine #feed, #body.engine #proposals_banner,
 #body.engine #brain { display: none; }
-#er_tabs TabPane { padding: 0 1; }
 .er-vitals { height: 1; background: $boost; padding: 0 1; }
-.er-stream-scroll { height: 2fr; }
-.er-stream { height: auto; }
+.er-stream { height: 2fr; }
+.sv-filter { height: 1; }
+.sv-chip { height: 1; min-width: 4; border: none; padding: 0 1; margin-right: 1;
+           background: $boost; color: $text-muted; }
+.sv-chip-on { background: $primary; color: $text; }
+.sv-window { height: 1fr; }
+.sv-window Static, .sv-window Collapsible { height: auto; }
+.sv-follow { height: 1; background: $warning; color: $text; padding: 0 1; }
 #er_prompt { height: auto; max-height: 12; border: round $secondary; padding: 0 1; }
 #er_trace { height: 1fr; }
 #er_detail { height: auto; max-height: 14; border: round $secondary; padding: 0 1; }

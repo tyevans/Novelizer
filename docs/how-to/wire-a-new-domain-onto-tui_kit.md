@@ -231,14 +231,24 @@ future event types nobody has taught the adapter about yet.
 
 ### Passing theme= into LiveStreamPanel, EngineRoom, ActivityStrip
 
-All three widgets take the module-level theme instance and (for
-`EngineRoom`) the static agent roster:
+All three widgets take the module-level theme instance; `EngineRoom` also
+takes a `StreamSource` (how the unified stream pages back through history
+and fetches a tool call's full output on demand):
 
 ```python
 yield LiveStreamPanel(theme=NOVELIZER_AGENT_THEME, id="chat_live")          # chat_screen.py
-yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
-                 id="engine_room")                                          # app.py
+yield EngineRoom(theme=NOVELIZER_AGENT_THEME,                               # app.py
+                 source=EventStoreStreamSource(self.runtime.telemetry_store,
+                                               to_contract_event),
+                 id="engine_room")
 yield ActivityStrip("idle", theme=NOVELIZER_AGENT_THEME, id="activity_strip")  # app.py
+```
+
+The agent roster is *not* a constructor argument. It arrives as data, after
+mount:
+
+```python
+self.query_one("#engine_room", EngineRoom).set_agents(list(AGENT_NAMES))    # on_mount
 ```
 
 ### Feeding live bus items through to_contract_event(item) into apply_bus_item/LiveRunState (chat_screen.py pattern)
@@ -259,9 +269,9 @@ if contract_item is not None:
 `(state, item, now) -> state` reducer), so the screen's only job is to
 translate, guard on `None`, replace its `LiveRunState`, and re-render the
 widget. `app.py`'s `_telemetry_bus_loop` follows the identical
-translate-guard-apply-render sequence, just against two states at once (a
-global `self._live_state` and a per-agent `self._agent_live_states[agent]`,
-routed via `tui_kit.run_model.route_agent(contract_item)`).
+translate-guard-apply-render sequence against one global `self._live_state`,
+which it hands whole to `EngineRoom.render_live` — the Engine Room works out
+which of those blocks its stream already owns.
 
 ### Seeding history/replay on restart: mapping recent stored events through the adapter before applying (app.py contract_recent pattern)
 
@@ -274,10 +284,9 @@ recent = await self.runtime.telemetry_store.events_tail(200)
 now = time.monotonic()
 contract_recent = [c for c in (to_contract_event(e) for e in recent[-50:]) if c is not None]
 self._live_state = seed_state(contract_recent, now)
-self._agent_live_states = seed_states(contract_recent, now)
 ```
 
-`seed_state`/`seed_states` (also in `tui_kit.run_model`) replay a list of
+`seed_state` (also in `tui_kit.run_model`) replays a list of
 already-translated contract events to reconstruct a `LiveRunState` as of
 "now" — the same adapter function used for the live loop is reused here,
 just mapped over a batch instead of called per-item. Only a domain with a
@@ -290,14 +299,12 @@ live loop with `LiveRunState()` as the initial state.
 mirroring `AGENT_REGISTRY`'s scheduling order in
 `novelizer/agents/registry.py` — kept as a tuple rather than imported from
 the registry so `identity.py` stays free of the heavy agent-construction
-import chain. `EngineRoom` needs this roster up front (`agent_names=`) to
-draw one row per known agent even before any events have arrived for it;
-`app.py` also uses `agent in AGENT_NAMES` as a guard before calling
-`engine_room.render_agent_live(...)`, so an unrecognized agent name doesn't
-try to render into a row that doesn't exist. If your domain's roster can
-change at runtime, keep this list in sync manually (as the comment in
-`identity.py` notes) or derive it from your own registry directly — just be
-aware of the import-cost tradeoff novelizer chose to avoid.
+import chain. `EngineRoom.set_agents(...)` turns it into one filter chip per
+agent, so a name missing from it means an agent whose output cannot be
+isolated in the stream. Because the roster is data rather than structure,
+you may call `set_agents` again whenever your domain's roster changes; an
+agent name the roster does not know still streams, it just falls back to
+`identity_for`'s unknown-agent identity and has no chip.
 
 ## Step 4 (optional): Domain-specific trace rendering
 
@@ -389,11 +396,14 @@ novelizer's `identity_for` fallback is documented and tested to do.
 
 - `tui_kit/contracts.py` — the full `AgentTheme` protocol and event
   dataclass definitions.
-- `tui_kit/run_model.py` — `LiveRunState`, `apply_bus_item`, `seed_state`,
-  `seed_states`, `route_agent`, `normalize_input_summary`.
+- `tui_kit/run_model.py` — `LiveRunState`, the stream block types,
+  `apply_bus_item`, `seed_state`, `seed_states`, `route_agent`,
+  `normalize_input_summary`.
+- `tui_kit/widgets/stream_view.py` — the unified stream; `tui_kit/stream_source.py`
+  for the `StreamSource` protocol `EngineRoom` requires.
 - `novelizer/tui/identity.py` — `NovelizerAgentTheme`, `IDENTITIES`,
   `AGENT_NAMES`, `identity_for`.
 - `novelizer/tui/telemetry_adapter.py` — `to_contract_event`, `trace_line`,
   `trace_detail`.
 - `novelizer/tui/chat_screen.py` and `novelizer/tui/app.py` — the two
-  worked wiring sites (single-state live loop vs. seeded + per-agent loop).
+  worked wiring sites (bus-only live loop vs. durable-log-seeded loop).

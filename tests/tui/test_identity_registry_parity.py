@@ -5,9 +5,15 @@ importing AGENT_REGISTRY, so the TUI stays free of the agent-construction import
 chain. That is a reasonable trade, but "keep in sync" in a comment is not a
 mechanism: AGENT_NAMES had drifted to 9 of 13 agents, so Curator, Summarizer,
 Triage and FlagLabeler got no Engine Room lane and were never rendered live
-(novelizer/tui/app.py gates render_agent_live on `agent in AGENT_NAMES`), and
-three of them had no identity at all and fell back to the dim unknown-agent
-style in the feed.
+(app.py used to gate per-agent rendering on `agent in AGENT_NAMES`), and three
+of them had no identity at all and fell back to the dim unknown-agent style in
+the feed.
+
+That gate is gone -- the Engine Room now shows one unified stream rather than a
+tab per agent -- but AGENT_NAMES did not stop mattering: it is the roster handed
+to StreamView.set_agents(), so a name missing from it gets no filter chip and
+becomes unfilterable, and a name whose theme cannot answer glyph/label/style/verb
+draws a blank or colourless chip.
 
 These tests are the mechanism. They import both sides -- which a test may do
 freely -- and fail the moment an agent is added to the registry without being
@@ -16,15 +22,32 @@ given a place in the interface.
 from __future__ import annotations
 
 from novelizer.agents.registry import AGENT_REGISTRY
-from novelizer.tui.identity import AGENT_NAMES, IDENTITIES, SPEAKER_WIDTH, identity_for
+from novelizer.tui.identity import (
+    AGENT_NAMES, IDENTITIES, NOVELIZER_AGENT_THEME, SPEAKER_WIDTH, identity_for,
+)
 
 
 def test_agent_names_covers_the_registry_in_scheduling_order():
     assert list(AGENT_NAMES) == [spec.name for spec in AGENT_REGISTRY], (
         "AGENT_NAMES must mirror AGENT_REGISTRY exactly, in scheduling order -- "
-        "a missing name means that agent has no Engine Room lane and is never "
-        "rendered live"
+        "a missing name means that agent gets no Engine Room filter chip and "
+        "its output cannot be isolated in the stream"
     )
+
+
+def test_every_agent_name_resolves_through_the_theme_the_chips_use():
+    """StreamView builds each filter chip from theme.glyph()/label() and
+    styles the stream gutter from theme.style(); the vitals line uses
+    theme.verb(). All four must answer for every agent on the roster, with
+    non-empty values -- a chip whose glyph or label is blank is a chip the
+    reader cannot aim at."""
+    theme = NOVELIZER_AGENT_THEME
+    for name in AGENT_NAMES:
+        for attr in ("glyph", "label", "style", "verb"):
+            value = getattr(theme, attr)(name)
+            assert isinstance(value, str) and value.strip(), (
+                f"{name} has no theme {attr} -- its filter chip renders blank"
+            )
 
 
 def test_every_registry_agent_has_its_own_identity():
@@ -35,7 +58,8 @@ def test_every_registry_agent_has_its_own_identity():
 
 
 def test_every_agent_identity_is_visually_distinct():
-    """The Engine Room reads as lanes only if each agent owns a colour."""
+    """One interleaved stream is only readable if each agent owns a colour --
+    the gutter glyph is the only thing separating two concurrent agents."""
     colours = {name: IDENTITIES[name].style for name in AGENT_NAMES}
     assert len(set(colours.values())) == len(AGENT_NAMES), colours
     letters = {name: IDENTITIES[name].fallback for name in AGENT_NAMES}

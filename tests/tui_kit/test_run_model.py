@@ -6,8 +6,8 @@ from tui_kit.contracts import (
 from tui_kit.run_model import (
     ProseBlock, ThinkingBlock, CallBlock, ToolBlock, LiveRunState, TEXT_CAP,
     apply_bus_item, route_agent, seed_state, seed_states, strip_line,
-    stream_line_kind, vitals_line, live_body, normalize_input_summary,
-    styled_vitals, styled_body, block_key, block_agent,
+    vitals_line, normalize_input_summary,
+    styled_vitals, block_key, block_agent,
 )
 
 
@@ -219,7 +219,6 @@ def test_seed_state_of_a_finished_run_is_not_stuck_running():
 def test_seed_state_marks_stream_not_attached_when_still_running():
     s = seed_state([RunStarted(run_id="r1", agent_name="author")], now=10.0)
     assert s.status == "running" and s.stream_attached is False
-    assert "stream not attached" in live_body(s)
 
 
 def test_seed_states_keeps_concurrent_agents_isolated():
@@ -267,39 +266,12 @@ def test_vitals_line_running_and_finished_forms():
     assert "author" in fline and "finished" in fline and "42s" in fline and "2.5k tok" in fline
 
 
-def test_live_body_renders_a_tool_block_as_a_grouped_multiline_unit():
-    s = LiveRunState(status="running", run_id="r1", agent_name="author")
-    s = apply_bus_item(s, ToolCallStarted(run_id="r1", agent_name="author",
-                                          tool_name="search_web", input_summary="dragons"), now=1.0)
-    s = apply_bus_item(s, ToolCallFinished(run_id="r1", agent_name="author",
-                                           tool_name="search_web", duration_s=1.2), now=2.0)
-    body = live_body(s)
-    assert "⚒ search_web(dragons)" in body and "done in 1.2s" in body
-
-
-def test_live_body_indents_delegated_tool_calls():
-    s = LiveRunState(status="running", run_id="r1", agent_name="character_keeper",
-                     blocks=(ToolBlock(tool_name="read_file",
-                                   input_summary="/chapters/ch-0012.md",
-                                   status="running", delegate="researcher"),))
-    body = live_body(s)
-    assert "    ⚒ ↳ researcher: read_file(/chapters/ch-0012.md)" in body
-
-
 def test_text_is_still_tail_capped_via_prose_blocks():
     long_prose = "x" * TEXT_CAP
     s = LiveRunState(status="running", run_id="r1", blocks=(ProseBlock(text=long_prose),))
     s = apply_bus_item(s, TokenDelta(run_id="r1", agent_name="author", text="END"), now=1.0)
     assert s.blocks[-1].text.endswith("END")
     assert len(s.blocks[-1].text) <= TEXT_CAP + 3
-
-
-def test_stream_line_kind_classifies_marker_lines():
-    assert stream_line_kind("⚒ search_web(dragons)") == "tool"
-    assert stream_line_kind("   ↳ done in 1.2s") == "call"
-    assert stream_line_kind("▸ call 1 (qwen)") == "call"
-    assert stream_line_kind("💭 thinking about it") == "thinking"
-    assert stream_line_kind("Once upon a time") == "prose"
 
 
 def test_normalize_input_summary_replaces_newlines_and_caps_length():
@@ -321,22 +293,11 @@ def test_tool_summary_ready_matches_a_multiline_over_120_char_input_summary():
     assert s.blocks[0].summary == "found three articles"
 
 
-def test_styled_vitals_includes_glyph_from_theme():
+def test_styled_vitals_includes_glyph_and_agent_name():
     state = LiveRunState(status="running", agent_name="author", started_at=0.0,
                          model="m", call_index=1, tokens=5)
     text = styled_vitals(state, now=2.0, theme=THEME)
     assert "author" in text.plain and "@" in text.plain
-
-
-def test_styled_body_applies_tool_style_to_tool_lines():
-    text = styled_body("\n⚒ search_canon(query)\n")
-    styles = [span.style for span in text.spans]
-    assert "bold cyan" in styles
-
-
-def test_styled_body_leaves_prose_unstyled():
-    text = styled_body("plain prose line")
-    assert text.spans == []
 
 
 # --- the idle vitals line says why ------------------------------------------

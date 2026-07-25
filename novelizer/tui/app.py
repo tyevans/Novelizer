@@ -33,12 +33,11 @@ from novelizer.tui.widgets.feed_model import (
     worker_error_line,
 )
 from tui_kit.widgets.activity_strip import ActivityStrip
-from tui_kit.widgets.roster import hold_phrase
 from tui_kit.widgets.engine_room import EngineRoom
 from tui_kit.run_model import (
-    LiveRunState, apply_bus_item, route_agent, seed_state, seed_states,
-    normalize_input_summary,
+    LiveRunState, apply_bus_item, seed_state, normalize_input_summary,
 )
+from novelizer.tui.event_store_stream_source import EventStoreStreamSource
 from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
 from novelizer.tui.telemetry_adapter import to_contract_event, trace_line, trace_detail
 
@@ -94,7 +93,6 @@ class NovelizerApp(App):
         self._chapter_count = 0
         self.messages: list[str] = []
         self._live_state = LiveRunState()
-        self._agent_live_states: dict[str, LiveRunState] = {}
         self._trace_events: deque = deque(maxlen=200)
         self._paused_by_toggle: list[str] | None = None
 
@@ -111,8 +109,11 @@ class NovelizerApp(App):
                 brain = BrainPanel(id="brain")
                 brain.border_title = "STORY BRAIN"
                 yield brain
-                yield EngineRoom(agent_names=list(AGENT_NAMES), theme=NOVELIZER_AGENT_THEME,
-                                 id="engine_room")
+                yield EngineRoom(
+                    theme=NOVELIZER_AGENT_THEME,
+                    source=EventStoreStreamSource(self.runtime.telemetry_store,
+                                                  to_contract_event),
+                    id="engine_room")
             with Vertical(id="right"):
                 browser = StoryBrowser("Story", id="browser")
                 browser.border_title = "STORY"
@@ -132,6 +133,9 @@ class NovelizerApp(App):
         yield Footer()
 
     async def on_mount(self) -> None:
+        # The roster is data now, not structure: the Engine Room's stream has
+        # one filter chip per agent instead of one tab per agent.
+        self.query_one("#engine_room", EngineRoom).set_agents(list(AGENT_NAMES))
         self.run_worker(self._projector_loop(), exclusive=False)
         self.run_worker(self._scheduler_loop(), exclusive=False)
         self.run_worker(self._feed_loop(), exclusive=False)
@@ -331,16 +335,6 @@ class NovelizerApp(App):
         except Exception:
             return ""
 
-    def _holds(self) -> dict[str, str]:
-        """Per-agent "why it is not producing", polled from the scheduler: a
-        pool wait, a fail-ladder backoff, or a wait for story progress. The
-        Engine Room's panes caption themselves with this, so an overnight
-        watcher can tell a rate-limited fleet from a wedged one at a glance."""
-        try:
-            return {r["name"]: hold_phrase(r) for r in self.runtime.scheduler.status()}
-        except Exception:
-            return {}
-
     def _refresh_strip(self) -> None:
         strip = self.query_one("#activity_strip", ActivityStrip)
         strip.render_state(self._live_state, time.monotonic(), self._next_hint())
@@ -348,15 +342,6 @@ class NovelizerApp(App):
     def _refresh_trace(self) -> None:
         rows = [(ev.id, trace_line(ev)) for ev in reversed(self._trace_events)]
         self.query_one("#engine_room", EngineRoom).set_trace_rows(rows)
-
-    def _render_agent_panes(self, engine_room: EngineRoom, now: float) -> None:
-        """Every agent's pane, not just the ones with live state: an agent that
-        has not run yet is exactly the one whose silence needs explaining."""
-        holds = self._holds()
-        for agent in AGENT_NAMES:
-            engine_room.render_agent_live(
-                agent, self._agent_live_states.get(agent, LiveRunState()), now,
-                holds.get(agent, ""))
 
     async def _telemetry_bus_loop(self) -> None:
         # Seed from the durable log first so a restart never shows a blank view.
@@ -366,11 +351,8 @@ class NovelizerApp(App):
             now = time.monotonic()
             contract_recent = [c for c in (to_contract_event(e) for e in recent[-50:]) if c is not None]
             self._live_state = seed_state(contract_recent, now)
-            self._agent_live_states = seed_states(contract_recent, now)
             self._refresh_strip()
-            engine_room = self.query_one("#engine_room", EngineRoom)
-            engine_room.render_live(self._live_state)
-            self._render_agent_panes(engine_room, now)
+            self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
@@ -380,13 +362,8 @@ class NovelizerApp(App):
                 item = await q.get()
                 now = time.monotonic()
                 contract_item = to_contract_event(item)
-                agent = None
                 if contract_item is not None:
                     self._live_state = apply_bus_item(self._live_state, contract_item, now)
-                    agent = route_agent(contract_item)
-                    if agent:
-                        self._agent_live_states[agent] = apply_bus_item(
-                            self._agent_live_states.get(agent, LiveRunState()), contract_item, now)
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()
@@ -394,12 +371,7 @@ class NovelizerApp(App):
                         TelemetryEventType.TOOL_CALL_FINISHED, TelemetryEventType.TOOL_CALL_FAILED):
                     self.run_worker(self._summarize_tool_call(item), exclusive=False, group="tool-summary")
                 self._refresh_strip()
-                engine_room = self.query_one("#engine_room", EngineRoom)
-                engine_room.render_live(self._live_state)
-                if agent in AGENT_NAMES:
-                    engine_room.render_agent_live(
-                        agent, self._agent_live_states[agent], now,
-                        self._holds().get(agent, ""))
+                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             except Exception as e:
                 self._report_worker_error("telemetry", e)
 
@@ -432,9 +404,7 @@ class NovelizerApp(App):
         while True:
             try:
                 self._refresh_strip()
-                engine_room = self.query_one("#engine_room", EngineRoom)
-                engine_room.render_live(self._live_state)
-                self._render_agent_panes(engine_room, time.monotonic())
+                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)
