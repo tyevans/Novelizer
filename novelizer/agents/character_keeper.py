@@ -19,6 +19,20 @@ from novelizer.muse.prompts import NAME_UPTAKE_HAND_WINDOW, name_uptake_matches
 
 logger = logging.getLogger(__name__)
 
+# Guided, but framed as boundedness rather than speed: this agent's central
+# instruction ("de-duplication is the job") is the kind of open-ended-sounding
+# duty that invites unlimited checking, when the check itself is finite -- the
+# cast list and the aliases either hold that person or they do not.
+DECISIVENESS_NOTE = """
+
+## The de-duplication check has an end
+Proving a character is new is a bounded check, not an open question: the cast list and every
+character's aliases either contain that person under some label or they do not, and once you have
+looked at both you have your answer — emit it. A sheet update settles the same way; the prose you
+read either shows the change or it does not. A file you have already read this pass has not changed
+since you read it, so re-reading it in place of emitting is how a pass ends with a cast nobody
+updated. Rigour here means checking the aliases once, properly, not checking them repeatedly."""
+
 SYSTEM_PROMPT = """You are the Character Keeper for a living fictional world. You maintain the
 canonical cast: you discover the characters the prose introduces, keep each sheet true to what
 recent chapters show, tend their arcs, and record when a character learns a secret. You work from
@@ -61,7 +75,7 @@ existing person under a new label is the failure mode to avoid.
 Return new_characters, updated_characters (id + revised arc_status, plus any corrected
 traits/motivations/backstory/voice), retcon_requests, arc intents, and knowledge intents (learn
 only). You may be shown retcon requests already filed and still open: do not re-report those, even
-reworded.""" + PASS_PROMPT_INSTRUCTION
+reworded.""" + DECISIVENESS_NOTE + PASS_PROMPT_INSTRUCTION
 
 # Appended only in the tooled build: the base retrieval note assumes a pushed
 # summary is enough, which is exactly what starved discovery here.

@@ -21,6 +21,20 @@ from novelizer.store.models import Flag, SignalKind
 
 logger = logging.getLogger(__name__)
 
+# Generative lane, with a cost asymmetry worth stating outright: this agent's
+# own supersede-don't-contradict rule already makes a committed plan cheap to
+# change, which is exactly the argument against agonizing over it.
+DECISIVENESS_NOTE = """
+
+## Deciding IS your output
+You emit judgments rather than prose, so an unmade judgment is an empty pass — and an empty pass
+here means the Author drafts blind. Your own rule makes this safe: you revise briefs freely and
+supersede rather than contradict, so committing to a shape you may later retarget costs one
+supersede, while withholding it costs a chapter written without a spine. Once you can name the
+framework, the target length, and the next brief's goal, threads and value shift, emit them.
+Choose among the options the premise and the canon actually put in front of you; do not audit every
+shape the story could have taken."""
+
 PLOTTER_SYSTEM_PROMPT = """You are the Plotter — the writers' room's showrunner. You do not write prose.
 You keep the story aimed at a shape: propose a blueprint from the premise before any prose or
 world exists — you go first; pick a framework and target length that fit the premise, genre and
@@ -31,7 +45,7 @@ windows for threads and secret reveals, and plant or re-window promises. Revise 
 supersede rather than contradict. Cite every id exactly as shown. Prefer steering the story
 toward overdue payoffs and dark threads over introducing new material. If the story clearly
 needs more or fewer chapters than the active blueprint assumes, retarget it rather than
-forcing the remaining beats into the wrong-sized frame."""
+forcing the remaining beats into the wrong-sized frame.""" + DECISIVENESS_NOTE
 
 _READINESS_BRIEF_RUNWAY = 2
 _READINESS_BRIEF_LOOKAHEAD = 3

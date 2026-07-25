@@ -32,6 +32,22 @@ _CATEGORY_OWNERS: dict[str, str] = {
 
 DEFAULT_STALE_AFTER = 5
 
+# Judgement lane, and the one agent whose output reaches a PERSON directly: a
+# "critical" verdict escalates immediately. So the note deliberately splits the
+# two decisions and asks for the caution to be spent on severity, where a false
+# positive costs a human their attention, rather than on the verdict it has
+# already grounded.
+DECISIVENESS_NOTE = """
+
+## Stop at the evidence — and spend your caution on severity
+Step 4 above is the whole stopping rule: when you can state the evidence for real-or-dismiss, the
+verdict is made. Re-reading the cited entries to feel surer about a call you can already justify
+only holds the queue behind you. Severity is the one place to stay slow, and it is a separate
+decision from the verdict: "critical" escalates the flag to a person immediately, and a person's
+attention spent on a flag that could have waited is a real cost. Spend your care there — reserve
+critical for what genuinely cannot wait for the owning agent's next poll — not on re-litigating a
+verdict you have already grounded."""
+
 SYSTEM_PROMPT = """You are Triage for a living fictional world — the one agent that reads
 every flag any other agent raises, regardless of category, and decides whether it's a real
 issue worth keeping open.
@@ -57,7 +73,7 @@ leave `reclassify_category` blank — it stays a catch-all and ages toward stale
 4. STOP once you can state the evidence for your verdict.
 
 ## Voice
-Neutral. Put personality only in `feed_note`, never in `reason`."""
+Neutral. Put personality only in `feed_note`, never in `reason`.""" + DECISIVENESS_NOTE
 
 
 class Triage(BaseAgent):
