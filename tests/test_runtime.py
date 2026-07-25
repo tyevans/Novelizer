@@ -16,6 +16,7 @@ from novelizer.canon.committer import GatingCommitter
 from novelizer.canon.policy import AutonomyPolicy
 from novelizer.canon.proposal_service import ProposalService
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
+from novelizer.agents.registry import AGENT_REGISTRY
 
 
 class FakeRunner:
@@ -257,18 +258,19 @@ async def test_scheduler_drives_full_retcon_loop_end_to_end(settings):
             proposed_resolution="there is only one sun",
         )
     ])
-    runners = {
-        "world_architect": ScriptedRunner(WorldEntriesDraft(entries=[])),
-        "author": ScriptedRunner(ChapterDraft(title="", prose="")),
-        "character_keeper": ScriptedRunner(KeeperOutput()),
-        "editor": ScriptedRunner(EditorVerdict(verdict="approve", notes="")),
-        "continuity_checker": ScriptedContinuityRunner(retcon, ContinuityOutput()),
-        "retconner": ScriptedRunner(RetconAmendments(amended_entries=[
+    # Every registered agent gets a fake; the scripted ones below are the
+    # subject of the test. Any agent left out would fall back to a real,
+    # network-bound runner (see _all_fake_runners).
+    runners = _all_fake_runners(
+        world_architect=ScriptedRunner(WorldEntriesDraft(entries=[])),
+        author=ScriptedRunner(ChapterDraft(title="", prose="")),
+        character_keeper=ScriptedRunner(KeeperOutput()),
+        editor=ScriptedRunner(EditorVerdict(verdict="approve", notes="")),
+        continuity_checker=ScriptedContinuityRunner(retcon, ContinuityOutput()),
+        retconner=ScriptedRunner(RetconAmendments(amended_entries=[
             WorldEntryDraft(title="Suns", body="One sun.", supersedes_id=known_world_entry_id)
         ])),
-        "structure_analyst": _FakeAgentRunner(),
-        "summarizer": _FakeAgentRunner(),
-    }
+    )
     rt = Runtime(settings, runners=runners)
     await rt.start()
     try:
@@ -340,15 +342,22 @@ class _FakeAgentRunner:
         return {"structured_response": None}
 
 
-def _all_fake_runners():
-    return {
-        name: _FakeAgentRunner()
-        for name in (
-            "author", "world_architect", "character_keeper", "editor",
-            "continuity_checker", "retconner", "structure_analyst", "plotter",
-            "summarizer",
-        )
-    }
+def _all_fake_runners(**overrides):
+    """A fake runner for EVERY registered agent, plus any caller overrides.
+
+    Derived from AGENT_REGISTRY rather than a hand-written name list. Runtime's
+    `_runner_for` falls back to BUILDING THE REAL RUNNER for any name a test did
+    not inject, and a real runner talks to the LLM endpoint -- which no test has
+    -- so each miss costs a full connect-and-retry ladder before failing. A
+    hardcoded list silently acquires those misses as agents are registered: this
+    list had drifted to 9 of 13 (muse, plotter, curator, triage, flaglabeler
+    unfaked), and one scheduler test that ticks them ran for 143s of the suite's
+    480s. Deriving the fleet from the registry makes a newly-registered agent
+    faked by construction instead of quietly slow.
+    """
+    runners = {spec.name: _FakeAgentRunner() for spec in AGENT_REGISTRY}
+    runners.update(overrides)
+    return runners
 
 
 async def test_runtime_wires_structure_analyst_as_a_seventh_agent():
