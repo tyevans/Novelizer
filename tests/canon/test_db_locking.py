@@ -87,7 +87,7 @@ async def test_projector_applies_each_event_in_immediate_transaction(db_path):
         await projector.catch_up()
 
         chapter_write = next(
-            i for i, s in enumerate(statements) if s.startswith("INSERT OR REPLACE INTO CHAPTERS")
+            i for i, s in enumerate(statements) if s.startswith("INSERT INTO CHAPTERS")
         )
         assert any(
             s.startswith("BEGIN IMMEDIATE") for s in statements[:chapter_write]

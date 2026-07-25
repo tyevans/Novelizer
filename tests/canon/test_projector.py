@@ -1107,3 +1107,55 @@ async def test_retired_entry_never_active_regardless_of_history(retired):
         assert ("w1" in active_ids) == (not retired)
     finally:
         await read.close(); await proj.close(); await events.close(); os.unlink(path)
+
+
+async def test_revising_an_early_chapter_keeps_authored_order(wired):
+    """A revision must not move a chapter to the end of list_chapters()."""
+    events, proj, path = wired
+    for i in (1, 2, 3):
+        await events.append(EventType.CHAPTER_CREATED, f"c{i}",
+                            Chapter(id=f"c{i}", title=f"Ch{i}", prose="p"))
+    await proj.catch_up()
+    await events.append(EventType.CHAPTER_REVISED, "c1",
+                        ChapterRevised(chapter_id="c1", prose="revised"))
+    await proj.catch_up()
+    read = ReadStore(path)
+    await read.init()
+    try:
+        assert [c.id for c in await read.list_chapters()] == ["c1", "c2", "c3"]
+    finally:
+        await read.close()
+
+
+@hyp_settings(deadline=None, max_examples=25)
+@given(revisions=st.lists(st.integers(min_value=0, max_value=4), min_size=0, max_size=8))
+def test_chapter_order_is_invariant_under_any_revision_sequence(revisions):
+    """Property: list_chapters() order is always creation order, whatever
+    revisions/status changes land afterwards (rowid must be stable on upsert)."""
+    async def scenario():
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        events = EventStore(path)
+        await events.init()
+        proj = Projector(events, path)
+        await proj.init()
+        read = ReadStore(path)
+        await read.init()
+        try:
+            ids = [f"c{i}" for i in range(5)]
+            for cid in ids:
+                await events.append(EventType.CHAPTER_CREATED, cid,
+                                    Chapter(id=cid, title=cid, prose="prose"))
+            await proj.catch_up()
+            for i in revisions:
+                await events.append(EventType.CHAPTER_REVISED, ids[i],
+                                    ChapterRevised(chapter_id=ids[i], prose="prose again"))
+                await proj.catch_up()
+                assert [c.id for c in await read.list_chapters()] == ids
+        finally:
+            await read.close()
+            await proj.close()
+            await events.close()
+            os.unlink(path)
+
+    asyncio.run(scenario())

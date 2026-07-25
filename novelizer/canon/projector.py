@@ -23,6 +23,24 @@ logger = logging.getLogger(__name__)
 # truth) -- see Locked decision 10's escape hatch.
 _REVISION_LENGTH_SANITY_MULTIPLE = 4
 
+
+def _upsert(table: str, columns: str, values: str) -> str:
+    """Build an upsert that preserves the row's rowid.
+
+    INSERT OR REPLACE deletes the conflicting row and inserts a new one, which
+    hands that row a fresh (max+1) rowid. Every projection read recovers
+    authored order from rowid (see ReadStore.list_chapters), so a REPLACE moved
+    any updated row to the end -- revising chapter 1 relocated it to the back of
+    the book, and with it the chapter_order that paradox detection, staleness,
+    context indexes and export all derive. ON CONFLICT DO UPDATE mutates the row
+    in place, so insertion order is stable for the row's whole life.
+    """
+    sets = ", ".join(
+        f"{c}=excluded.{c}" for c in (c.strip() for c in columns.split(",")) if c != "id"
+    )
+    return f"INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT(id) DO UPDATE SET {sets}"
+
+
 _CREATE = """
 CREATE TABLE IF NOT EXISTS chapters (
     id TEXT PRIMARY KEY, data TEXT NOT NULL, editorial_status TEXT NOT NULL, supersedes_id TEXT
@@ -201,7 +219,7 @@ class Projector:
         t = ev.event_type
         if t == EventType.CHAPTER_CREATED or t == EventType.CHAPTER_STATUS_CHANGED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO chapters (id, data, editorial_status, supersedes_id) VALUES (?,?,?,?)",
+                _upsert("chapters", "id, data, editorial_status, supersedes_id", "?,?,?,?"),
                 (p["id"], data, p.get("editorial_status", "draft"), p.get("supersedes_id")),
             )
         elif t == EventType.CHAPTER_REVISED:
@@ -227,12 +245,12 @@ class Projector:
                     "revision_count": existing.revision_count + 1,
                 })
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO chapters (id, data, editorial_status, supersedes_id) VALUES (?,?,?,?)",
+                    _upsert("chapters", "id, data, editorial_status, supersedes_id", "?,?,?,?"),
                     (revised.id, revised.model_dump_json(), EditorialStatus.draft.value, revised.supersedes_id),
                 )
         elif t == EventType.WORLD_ENTRY_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO world_entries (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",
+                _upsert("world_entries", "id, data, canon_status, supersedes_id", "?,?,?,?"),
                 (p["id"], data, p.get("canon_status", "active"), p.get("supersedes_id")),
             )
         elif t == EventType.WORLD_ENTRY_SUPERSEDED:
@@ -241,7 +259,7 @@ class Projector:
                     "UPDATE world_entries SET canon_status='superseded' WHERE id=?", (p["supersedes_id"],)
                 )
             await self._conn.execute(
-                "INSERT OR REPLACE INTO world_entries (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",
+                _upsert("world_entries", "id, data, canon_status, supersedes_id", "?,?,?,?"),
                 (p["id"], data, p.get("canon_status", "active"), p.get("supersedes_id")),
             )
         elif t == EventType.WORLD_ENTRY_RETIRED:
@@ -253,12 +271,12 @@ class Projector:
             )
         elif t == EventType.CHARACTER_CREATED or t == EventType.CHARACTER_UPDATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO characters (id, data, canon_status, supersedes_id) VALUES (?,?,?,?)",
+                _upsert("characters", "id, data, canon_status, supersedes_id", "?,?,?,?"),
                 (p["id"], data, p.get("canon_status", "active"), p.get("supersedes_id")),
             )
         elif t == EventType.DIRECTOR_SIGNAL_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO director_signals (id, data, consumed) VALUES (?,?,?)",
+                _upsert("director_signals", "id, data, consumed", "?,?,?"),
                 (p["id"], data, 1 if p.get("consumed") else 0),
             )
         elif t == EventType.DIRECTOR_SIGNAL_CONSUMED:
@@ -267,25 +285,25 @@ class Projector:
             )
         elif t == EventType.FLAG_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                _upsert("flags", "id, data, status, category, escalated", "?,?,?,?,?"),
                 (p["id"], data, p.get("status", "open"), p.get("category", ""),
                  int(p.get("escalated", False))),
             )
         elif t == EventType.FLAG_RESOLVED or t == EventType.FLAG_REJECTED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                _upsert("flags", "id, data, status, category, escalated", "?,?,?,?,?"),
                 (p["id"], data,
                  p.get("status", "resolved" if t == EventType.FLAG_RESOLVED else "rejected"),
                  p.get("category", ""), int(p.get("escalated", False))),
             )
         elif t == EventType.FLAG_ESCALATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,1)",
+                _upsert("flags", "id, data, status, category, escalated", "?,?,?,?,1"),
                 (p["id"], data, p.get("status", "open"), p.get("category", "")),
             )
         elif t == EventType.FLAG_ESCALATION_CLEARED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,0)",
+                _upsert("flags", "id, data, status, category, escalated", "?,?,?,?,0"),
                 (p["id"], data, p.get("status", "open"), p.get("category", "")),
             )
         elif t == EventType.FLAG_LABELED:
@@ -318,13 +336,13 @@ class Projector:
             aliased.setdefault("filed_by", "")
             aliased.setdefault("triage_passes", 0)
             await self._conn.execute(
-                "INSERT OR REPLACE INTO flags (id, data, status, category, escalated) VALUES (?,?,?,?,?)",
+                _upsert("flags", "id, data, status, category, escalated", "?,?,?,?,?"),
                 (aliased["id"], json.dumps(aliased), legacy_status, "contradiction",
                  int(aliased.get("escalated", False))),
             )
         elif t == EventType.PROPOSAL_CREATED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO proposals (id, data, status, proposing_agent) VALUES (?,?,?,?)",
+                _upsert("proposals", "id, data, status, proposing_agent", "?,?,?,?"),
                 (p["id"], data, p.get("status", "open"), p["proposing_agent"]),
             )
         elif t == EventType.PROPOSAL_APPROVED or t == EventType.PROPOSAL_REJECTED:
@@ -341,7 +359,7 @@ class Projector:
                     last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                    _upsert("threads", "id, data, state", "?,?,?"),
                     (record.id, record.model_dump_json(), record.state.value),
                 )
             # else: a thread id is minted exactly once. A second thread.planted
@@ -368,7 +386,7 @@ class Projector:
                         "last_chapter_id": p.get("chapter_id", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                        _upsert("threads", "id, data, state", "?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.state.value),
                     )
                 # else: absorbing terminal state — the event is a fact in the log,
@@ -387,7 +405,7 @@ class Projector:
                     last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO promises (id, data, state) VALUES (?,?,?)",
+                    _upsert("promises", "id, data, state", "?,?,?"),
                     (record.id, record.model_dump_json(), record.state.value),
                 )
             # else: a promise id is minted exactly once -- first-make-wins.
@@ -409,7 +427,7 @@ class Projector:
                         "last_chapter_id": p.get("chapter_id", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO promises (id, data, state) VALUES (?,?,?)",
+                        _upsert("promises", "id, data, state", "?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.state.value),
                     )
                 # else: paid/released are absorbing -- the event is a fact in
@@ -426,7 +444,7 @@ class Projector:
                         "planned_payoff_note": p.get("planned_payoff_note", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO threads (id, data, state) VALUES (?,?,?)",
+                        _upsert("threads", "id, data, state", "?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.state.value),
                     )
                 # else: no-op on a terminal thread.
@@ -442,7 +460,7 @@ class Projector:
                         "reveal_window_hi": p.get("window_hi", 0),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                        _upsert("secrets", "id, data", "?,?"),
                         (updated.id, updated.model_dump_json()),
                     )
                 # else: no-op once revealed.
@@ -453,7 +471,7 @@ class Projector:
             if existing is None:
                 record = SecretRecord(id=p["id"], title=p["title"], revealed=False)
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                    _upsert("secrets", "id, data", "?,?"),
                     (record.id, record.model_dump_json()),
                 )
             # else: a secret id is minted exactly once. A second secret.created
@@ -478,7 +496,7 @@ class Projector:
                 if not record.revealed:
                     updated = record.model_copy(update={"revealed": True})
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO secrets (id, data) VALUES (?,?)",
+                        _upsert("secrets", "id, data", "?,?"),
                         (updated.id, updated.model_dump_json()),
                     )
                 # else: set-once — already revealed, event is a fact in the
@@ -494,7 +512,7 @@ class Projector:
                     last_note=p.get("note", ""), last_chapter_id=p.get("chapter_id", ""),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO themes (id, data) VALUES (?,?)",
+                    _upsert("themes", "id, data", "?,?"),
                     (record.id, record.model_dump_json()),
                 )
             # else: a theme id is minted exactly once. A second theme.introduced
@@ -511,7 +529,7 @@ class Projector:
                     "last_chapter_id": p.get("chapter_id", ""),
                 })
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO themes (id, data) VALUES (?,?)",
+                    _upsert("themes", "id, data", "?,?"),
                     (updated.id, updated.model_dump_json()),
                 )
             # else: no row for this id yet (shouldn't happen under correct agent
@@ -524,12 +542,12 @@ class Projector:
             )
         elif t == EventType.ANNOTATION_STRUCTURE_SCORED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO structure_scores (id, data) VALUES (?,?)",
+                _upsert("structure_scores", "id, data", "?,?"),
                 (p["chapter_id"], data),
             )
         elif t == EventType.CHAPTER_SUMMARIZED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO chapter_summaries (id, data) VALUES (?,?)",
+                _upsert("chapter_summaries", "id, data", "?,?"),
                 (p["chapter_id"], data),
             )
         elif t == EventType.CHAT_USER_MESSAGED or t == EventType.CHAT_AGENT_REPLIED:
@@ -548,7 +566,7 @@ class Projector:
                     settings=p.get("settings", []), beats=p.get("beats", []),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                    _upsert("inspiration_hands", "id, data, status", "?,?,?"),
                     (record.id, record.model_dump_json(), record.status.value),
                 )
             # else: a hand id is minted exactly once — first-mint-wins, same
@@ -567,7 +585,7 @@ class Projector:
                     else:
                         updated = record.model_copy(update={"status": HandStatus.superseded})
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO inspiration_hands (id, data, status) VALUES (?,?,?)",
+                        _upsert("inspiration_hands", "id, data, status", "?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.status.value),
                     )
                 # else: consumed/superseded are absorbing — the event is a fact
@@ -581,7 +599,7 @@ class Projector:
             )
         elif t == EventType.AUTONOMY_CHANGED:
             await self._conn.execute(
-                "INSERT OR REPLACE INTO autonomy_state (id, data) VALUES ('singleton', ?)", (data,)
+                _upsert("autonomy_state", "id, data", "'singleton', ?"), (data,)
             )
         elif t == EventType.BLUEPRINT_ADOPTED:
             # Adoption supersedes any prior active blueprint: fold active=False
@@ -605,7 +623,7 @@ class Projector:
                 obligatory_scenes=p.get("obligatory_scenes", []), active=True, note=p.get("note", ""),
             )
             await self._conn.execute(
-                "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                _upsert("blueprints", "id, data, active", "?,?,?"),
                 (record.id, record.model_dump_json(), 1),
             )
             for spec in p.get("beats", []):
@@ -615,7 +633,7 @@ class Projector:
                     expected_polarity=spec.get("expected_polarity", ""),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO beats (id, data) VALUES (?,?)",
+                    _upsert("beats", "id, data", "?,?"),
                     (beat.id, beat.model_dump_json()),
                 )
         elif t == EventType.BLUEPRINT_RETARGETED:
@@ -625,7 +643,7 @@ class Projector:
                 record = BlueprintRecord.model_validate_json(row[0])
                 updated = record.model_copy(update={"target_chapter_count": p["target_chapter_count"]})
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                    _upsert("blueprints", "id, data, active", "?,?,?"),
                     (updated.id, updated.model_dump_json(), 1),
                 )
             # else: unknown or superseded blueprint id -- no-op, no error raised.
@@ -647,7 +665,7 @@ class Projector:
                         "completed_note": p.get("note", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO blueprints (id, data, active) VALUES (?,?,?)",
+                        _upsert("blueprints", "id, data, active", "?,?,?"),
                         (updated.id, updated.model_dump_json(), 1),
                     )
                 # else: already completed -- repeat is a projection no-op.
@@ -662,7 +680,7 @@ class Projector:
                     "note": p.get("note", ""),
                 })
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO beats (id, data) VALUES (?,?)",
+                    _upsert("beats", "id, data", "?,?"),
                     (updated.id, updated.model_dump_json()),
                 )
             # else: unknown beat id -- no-op, no error raised.
@@ -679,7 +697,7 @@ class Projector:
                     synopsis=p.get("synopsis", ""),
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO chapter_briefs (id, data, status) VALUES (?,?,?)",
+                    _upsert("chapter_briefs", "id, data, status", "?,?,?"),
                     (record.id, record.model_dump_json(), record.status.value),
                 )
             # else: a brief id is minted exactly once -- first-draft-wins.
@@ -700,7 +718,7 @@ class Projector:
                             "fulfilled_by_chapter_id": p.get("chapter_id", ""),
                         })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO chapter_briefs (id, data, status) VALUES (?,?,?)",
+                        _upsert("chapter_briefs", "id, data, status", "?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.status.value),
                     )
                 # else: superseded/fulfilled are absorbing -- the event is a
@@ -737,7 +755,7 @@ class Projector:
                     want=p.get("want", ""), need=p.get("need", ""), active=True,
                 )
                 await self._conn.execute(
-                    "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                    _upsert("arcs", "id, data, character_id, active", "?,?,?,?"),
                     (record.id, record.model_dump_json(), record.character_id, 1),
                 )
         elif t == EventType.ARC_PIVOT_PLANNED:
@@ -756,7 +774,7 @@ class Projector:
                         pivots.append(new_pivot)
                     updated = record.model_copy(update={"pivots": pivots})
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        _upsert("arcs", "id, data, character_id, active", "?,?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
                     )
                 # else: no-op on a resolved arc.
@@ -773,7 +791,7 @@ class Projector:
                         "last_chapter_id": p.get("chapter_id", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        _upsert("arcs", "id, data, character_id, active", "?,?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
                     )
                 # else: no-op on a resolved arc.
@@ -790,7 +808,7 @@ class Projector:
                         "resolved_chapter_id": p.get("chapter_id", ""),
                     })
                     await self._conn.execute(
-                        "INSERT OR REPLACE INTO arcs (id, data, character_id, active) VALUES (?,?,?,?)",
+                        _upsert("arcs", "id, data, character_id, active", "?,?,?,?"),
                         (updated.id, updated.model_dump_json(), updated.character_id, 1 if updated.active else 0),
                     )
                 # else: resolved is absorbing -- the event is a fact in the
