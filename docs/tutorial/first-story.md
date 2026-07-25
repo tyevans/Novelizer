@@ -202,8 +202,8 @@ right below the button:
 press **Test connection** again. A connection refused means nothing is listening at
 that address; an HTTP 401 means the endpoint wants a real API key.
 
-**3. Pick your three models.** A successful test unlocks the three dropdowns beneath
-the result line, each filled with the models your server just reported:
+**3. Pick your three models.** A successful test unlocks the dropdowns beneath the
+result line, each filled with the models your server just reported:
 
 - **author model** — writes the actual chapter prose. Give this your strongest chat
   model.
@@ -215,6 +215,22 @@ the result line, each filled with the models your server just reported:
 
 Each dropdown defaults to the first model in the list, so if your server serves only
 one chat model and one embedder, correct the embedding pick and you're done.
+
+**If the embedding dropdown has no embedding model in it,** your endpoint doesn't serve
+one. This is the normal case for hosted chat routers: **OpenRouter has no embedding
+models at all**, so no amount of scrolling that list will turn one up. Novelizer handles
+this with a second, independent endpoint:
+
+- Put an embedding provider's URL in **Embedding base URL** — Ollama running locally is
+  the easiest (`http://localhost:11434/v1` after `ollama pull nomic-embed-text`), and
+  OpenAI's `https://api.openai.com/v1` with `text-embedding-3-small` also works.
+- Put that provider's key (if any) in **Embedding API key**. Your LLM key is never sent
+  to this endpoint — it's a different provider, so the credential stays separate.
+- Press **Test embedding connection**. The embedding dropdown refills from *that*
+  endpoint's models, leaving your author and agent picks untouched.
+
+Leave the embedding URL blank whenever one endpoint serves both — a local Ollama or
+llama.cpp setup needs nothing extra here.
 
 **4. Press "Save & continue."** The wizard writes your choices to
 `~/.config/novelizer/config.toml` and moves on. Any field you left blank is simply

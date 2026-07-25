@@ -48,10 +48,10 @@ Before you start, you need:
 - **A local model server that speaks the OpenAI API** — llama.cpp's `llama-server`,
   Ollama, vLLM, LM Studio, or similar. The server must answer two routes under your
   base URL: `GET {base_url}/models` (the exact request the wizard's connection test
-  sends) and `POST {base_url}/chat/completions` (generation). If you want semantic
-  retrieval to work, the same server must also serve `POST {base_url}/embeddings` —
-  Novelizer embeds against the same `llm_base_url` it chats against, using
-  `embed_model` (see the
+  sends) and `POST {base_url}/chat/completions` (generation). Semantic retrieval also
+  needs `POST {base_url}/embeddings` — by default Novelizer embeds against the same
+  `llm_base_url` it chats against, using `embed_model`. If your chat endpoint serves no
+  embedding models, point `embed_base_url` at one that does instead (see the
   [configuration reference](../reference/configuration.md)).
 - **Model weights already downloaded** for that server. Choosing and fetching models is
   your server's concern; this guide only covers wiring Novelizer to it. Step 1 notes
@@ -91,8 +91,9 @@ Notes per server:
   port, so if this is your server the wizard's pre-filled value in Step 2 already
   points at it. If you also want semantic retrieval, remember that one `llama-server`
   process serves one model — to expose a chat model *and* an embedding model under a
-  single base URL you need a router in front (for example `llama-swap`), because
-  Novelizer sends chat and embedding requests to the same `llm_base_url`.
+  single base URL you need a router in front (for example `llama-swap`). The simpler
+  alternative is to leave `llama-server` for chat and set `embed_base_url` to a second
+  endpoint that handles embeddings (a local Ollama, say).
 - **Ollama** — serves every pulled model under one base URL and answers all three
   routes Novelizer uses, which makes it the simplest way to get chat and embeddings
   from a single endpoint. Pull your models first (`ollama pull <model>`,
@@ -189,10 +190,19 @@ map to three settings keys with distinct jobs:
   [how the room works](../explanation/how-the-room-works.md) for who these agents
   are.)
 - **embedding model** (`embed_model`) — used for semantic retrieval via
-  `POST {llm_base_url}/embeddings`. This must be a genuine embedding model (for
+  `POST {embedding endpoint}/embeddings`. This must be a genuine embedding model (for
   example `nomic-embed-text` on Ollama). The wizard does not filter the list — chat
   models appear in this dropdown too — so it's on you to pick one that actually
   answers the embeddings route.
+
+If your endpoint's `/models` list contains no embedding model at all, it can't do this
+job. That's expected of hosted chat routers — **OpenRouter serves no embedding models
+whatsoever** — so use the wizard's separate **Embedding base URL** field (written as
+`embed_base_url`) to name a provider that does, press **Test embedding connection**, and
+pick from *its* list. A local `ollama pull nomic-embed-text` at
+`http://localhost:11434/v1` is the cheapest option; OpenAI's `text-embedding-3-small`
+also works. Any key you enter there goes to `embed_api_key` and is used only for that
+endpoint — your chat key is never forwarded to it.
 
 Picking the same model for author and agent is fine. If a model you want isn't
 offered, it wasn't in the server's `/models` response — go back to Step 1, load it,
@@ -402,9 +412,10 @@ checker_tools_enabled = false        # and a push-mode Continuity Checker
 
 The model picks (`author_model`, `agent_model`, `embed_model`), temperatures, and all
 the Step 5 tool/subagent flags are story-overridable. The endpoint settings are
-deliberately not: `llm_base_url` and `llm_max_tokens` are global-only and are
-**ignored with a logged warning** if you put them in a `story.toml`, and `llm_api_key`
-there is a hard error (`StoryConfigError`) — story directories are shareable and must
+deliberately not: `llm_base_url`, `llm_max_tokens`, and `embed_base_url` are
+global-only and are **ignored with a logged warning** if you put them in a
+`story.toml`, while `llm_api_key` and `embed_api_key` there are a hard error
+(`StoryConfigError`) — story directories are shareable and must
 never carry secrets. The authoritative per-key scope table is in the
 [configuration reference](../reference/configuration.md#key-scoping-story-overridable-global-only-and-forbidden-keys).
 
@@ -434,7 +445,8 @@ Nothing is written to disk; unset the variable and the files are back in charge.
   Settings screen's source column if an override doesn't seem to take.
 - The restart rules from Steps 4–5 still apply regardless of layer: the endpoint,
   key, cap, and model settings (`llm_base_url`, `llm_api_key`, `llm_max_tokens`,
-  `author_model`, `agent_model`, `embed_model`) only take effect on the next launch,
+  `author_model`, `agent_model`, `embed_model`, `embed_base_url`, `embed_api_key`)
+  only take effect on the next launch,
   and the Step 5 tool/subagent flags likewise don't re-tool a running room — a live
   reload reports them applied, but agent tooling stays as it was built at startup,
   so restart after changing them too, wherever you set them. Other keys apply live
@@ -529,8 +541,9 @@ $ grep "canon indexing stopped" ~/.config/novelizer/logs/novelizer.log
 No matches — plus a growing `embeddings/` directory next to the story's `world.db` —
 means indexing is healthy. Repeated `canon indexing stopped at seq N (…); will retry`
 lines name the exception and the record it stalled on; the usual causes are an
-`embed_model` that isn't an embedding model or a server that doesn't serve
-`POST {base_url}/embeddings` (Step 1's per-server notes). That log file is also the
+`embed_model` that isn't an embedding model or an endpoint that doesn't serve
+`POST {base_url}/embeddings` at all (Step 1's per-server notes) — in which case set
+`embed_base_url` to one that does. That log file is also the
 first place to look when any of the checks above fails without an obvious on-screen
 cause.
 
@@ -623,8 +636,9 @@ record, and retries every cycle instead of alarming. Run
 `grep "canon indexing stopped" ~/.config/novelizer/logs/novelizer.log` — the line
 names the exception. The usual causes are an `embed_model` that isn't an embedding
 model (the wizard's dropdown doesn't filter chat models out) or a server that
-doesn't answer `POST {base_url}/embeddings` under the same base URL (llama.cpp and
-vLLM need a router for this — Step 1). Fix the model or server and indexing resumes
+doesn't answer `POST {base_url}/embeddings` at all (llama.cpp and vLLM need a router
+for this, and OpenRouter serves no embedding models whatsoever — Step 1). The fix for
+the latter is `embed_base_url`, pointing embeddings at their own endpoint. Fix the model or server and indexing resumes
 from the stalled record on its own; nothing is lost.
 
 **A settings change doesn't take effect.** Four causes, in the order to check:
@@ -637,9 +651,9 @@ from the stalled record on its own; nothing is lost.
    variable. Don't forget a `.env` file in the launch directory.
 3. **Misspelled `NOVELIZER_*` variable** — ignored silently, no warning. Verify the
    spelling against the [configuration reference](../reference/configuration.md).
-4. **Key in the wrong layer** — `llm_base_url` and `llm_max_tokens` in a
-   `story.toml` are ignored with a logged warning; `llm_api_key` there is a hard
-   error.
+4. **Key in the wrong layer** — `llm_base_url`, `llm_max_tokens`, and
+   `embed_base_url` in a `story.toml` are ignored with a logged warning;
+   `llm_api_key` and `embed_api_key` there are a hard error.
 
 **The setup wizard won't reopen.** It only runs when
 `~/.config/novelizer/config.toml` doesn't exist. Edit the file, use the in-app

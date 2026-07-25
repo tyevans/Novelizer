@@ -38,8 +38,8 @@ While the TUI runs with a story open, the current story's `story.toml` and the g
 Every key falls into one of four scopes:
 
 - **Story-overridable** (`STORY_OVERRIDABLE_KEYS` in `novelizer/settings/models.py`) — may appear in `story.toml`, the global config, or the environment. Covers voice (`voice_pack`, `prose_profile`), models (`author_model`, `agent_model`, `embed_model`), temperatures, all configurable agent cadence intervals, context/analysis thresholds, Muse settings, and every per-agent tool/subagent flag except the triage ones (see the [field reference](#field-reference) tables for the per-key scope column). The Settings screen writes edits to these keys into the current story's `story.toml`; submitting an empty value removes the key so the story inherits from the global config or defaults again.
-- **Global-only** — accepted in the global config and the environment, but not in `story.toml`, where they are ignored with a logged warning (`unknown or global-only setting ... ignored`): `llm_base_url`, `llm_max_tokens`, `default_stories_dir`, `last_opened_story`, `suppress_flat_migration_prompt`, `max_concurrent_agents`, `outline_gate_enabled`. For those that appear as Settings-screen rows (`last_opened_story` and `suppress_flat_migration_prompt` are [hidden](#secret-and-hidden-keys)), the Settings screen writes edits into the global config file.
-- **Forbidden in `story.toml`** (`FORBIDDEN_STORY_KEYS` in `novelizer/settings/models.py`) — `llm_api_key`. Its presence in a `story.toml` raises `StoryConfigError` at load time rather than a warning, because story directories are meant to be shareable and must never carry secrets. It is accepted in the global config and the environment.
+- **Global-only** — accepted in the global config and the environment, but not in `story.toml`, where they are ignored with a logged warning (`unknown or global-only setting ... ignored`): `llm_base_url`, `llm_max_tokens`, `embed_base_url`, `default_stories_dir`, `last_opened_story`, `suppress_flat_migration_prompt`, `max_concurrent_agents`, `outline_gate_enabled`. For those that appear as Settings-screen rows (`last_opened_story` and `suppress_flat_migration_prompt` are [hidden](#secret-and-hidden-keys)), the Settings screen writes edits into the global config file.
+- **Forbidden in `story.toml`** (`FORBIDDEN_STORY_KEYS` in `novelizer/settings/models.py`) — `llm_api_key` and `embed_api_key`. Their presence in a `story.toml` raises `StoryConfigError` at load time rather than a warning, because story directories are meant to be shareable and must never carry secrets. It is accepted in the global config and the environment.
 - **Fixed at their defaults** — `triage_interval`, `triage_tools_enabled`, and `triage_subagent_enabled` exist on `EffectiveSettings` but appear in no configuration layer (not even the environment); they always hold their built-in defaults. `db_path` and `chroma_path` are likewise accepted by no layer — they are derived from the story directory (see precedence above).
 
 One key runs the other direction: `title` is accepted only in `story.toml` (it surfaces as `story_title` in effective settings) — the global config and environment cannot set it.
@@ -51,7 +51,8 @@ One key runs the other direction: `title` is accepted only in `story.toml` (it s
 `RESTART_REQUIRED_KEYS` (`novelizer/settings/view_model.py`) is the set of keys whose new values only take effect on the next launch:
 
 ```
-llm_base_url, llm_api_key, llm_max_tokens, author_model, agent_model, embed_model
+llm_base_url, llm_api_key, llm_max_tokens, author_model, agent_model, embed_model,
+embed_base_url, embed_api_key
 ```
 
 These are the endpoint, credential, and model keys — everything wired into agent runners and the embedding index at construction time. Every other key applies live to the running system.
@@ -66,13 +67,13 @@ Two key sets in `novelizer/settings/view_model.py` control what the Settings scr
 
 ### Secret keys (`SECRET_KEYS`)
 
-`SECRET_KEYS` contains one key: `llm_api_key`. Everywhere its value would be displayed, it is replaced with the redaction placeholder `••••••`:
+`SECRET_KEYS` contains two keys: `llm_api_key` and `embed_api_key`. Everywhere either value would be displayed, it is replaced with the redaction placeholder `••••••`:
 
 - **Settings-screen row** — the value column shows `••••••` regardless of the actual value.
 - **Edit confirmations** — the `✓ llm_api_key = •••••• (global) — watcher will apply it` message after an edit shows the placeholder, not what you typed.
 - **Edit field** — selecting the row opens a password-masked input (the input's `password` flag is set for keys in `SECRET_KEYS`), and the field starts empty rather than pre-filled with the current key. (The setup wizard's API-key field is likewise password-masked.)
 
-Redaction is display-only: the real value is still written in plain text to the global `config.toml`, which is why Novelizer always writes that file with mode `0600`. `llm_api_key` is also the one key in `FORBIDDEN_STORY_KEYS` — a hard `StoryConfigError` in `story.toml` (see key scoping above) — and it is restart-required.
+Redaction is display-only: the real values are still written in plain text to the global `config.toml`, which is why Novelizer always writes that file with mode `0600`. Both keys are also exactly the members of `FORBIDDEN_STORY_KEYS` — a hard `StoryConfigError` in `story.toml` (see key scoping above) — and both are restart-required.
 
 ### Hidden keys (`_HIDDEN_KEYS`)
 
@@ -109,6 +110,8 @@ Keys in `RESTART_REQUIRED_KEYS` are marked restart-required in their Notes; ever
 | `db_path` | `stories/world.db` | derived | `<story-directory>/world.db` when a story is open |
 | `chroma_path` | `stories/chroma` | derived | `<story-directory>/chroma` when a story is open |
 | `embed_model` | `nomic-embed-text` | story | Embedding model name; restart-required |
+| `embed_base_url` | `""` (reuse `llm_base_url`) | global | Dedicated OpenAI-compatible embedding endpoint; restart-required |
+| `embed_api_key` | `""` | global | Secret (redacted in the Settings screen); forbidden in `story.toml`; restart-required |
 
 **`db_path` and `chroma_path` are derived, never configured.** No layer accepts them — not `config.toml`, not `story.toml`, not the environment — and they are hidden from the Settings screen. When a story is open, `build_effective` (`novelizer/settings/loader.py`) overwrites both with paths computed from the story directory (`StoryDirectory` in `novelizer/settings/story_dir.py`): `db_path` becomes `<story-directory>/world.db` and `chroma_path` becomes `<story-directory>/chroma`. The built-in defaults above are only in effect when no story directory is given (e.g. settings loaded outside a story context).
 
@@ -116,7 +119,14 @@ Keys in `RESTART_REQUIRED_KEYS` are marked restart-required in their Notes; ever
 
 `chroma_path` is a legacy key: nothing in the runtime reads the effective-settings value — the live vector index is the `embeddings/` directory above, not `chroma_path`. The `<story-directory>/chroma` location matters only to the flat-layout migration (`migrate_flat_layout` in `novelizer/settings/story_dir.py`), which moves a pre-story-directory `stories/chroma/` folder there when converting a legacy flat layout into a story directory.
 
-**`embed_model`** is an ordinary configurable key: story-overridable (settable in `story.toml`, the global config, or `NOVELIZER_EMBED_MODEL`), and in `RESTART_REQUIRED_KEYS` like the other model keys — the embedding store is constructed once at startup. Embeddings are requested from the same OpenAI-compatible endpoint as chat completions: the model name is passed with `llm_base_url` and `llm_api_key` to an OpenAI embedding function (`EmbeddingStore` in `novelizer/store/embeddings.py`), so the endpoint must serve the named embedding model. Changing `embed_model` does not re-embed existing content; vectors already stored were produced by the previous model.
+**`embed_model`** is an ordinary configurable key: story-overridable (settable in `story.toml`, the global config, or `NOVELIZER_EMBED_MODEL`), and in `RESTART_REQUIRED_KEYS` like the other model keys — the embedding store is constructed once at startup. The model name is passed to an OpenAI embedding function (`EmbeddingStore` in `novelizer/store/embeddings.py`) along with the *resolved* embedding endpoint, so that endpoint must serve the named embedding model. Changing `embed_model` does not re-embed existing content; vectors already stored were produced by the previous model.
+
+**`embed_base_url` and `embed_api_key`** decide which endpoint that is. Both are global-only (an installation fact, like `llm_base_url`) and default to empty, meaning *reuse the chat endpoint* — the single-endpoint local setup (Ollama, llama.cpp) needs neither key. Set `embed_base_url` when your chat endpoint serves no embedding models; hosted chat routers typically don't, and **OpenRouter serves none at all**, so an OpenRouter installation must point this at something else (a local Ollama, or OpenAI).
+
+Resolution lives in two `EffectiveSettings` properties (`novelizer/settings/models.py`), which are what `Runtime.start` passes to `EmbeddingStore`:
+
+- `resolved_embed_base_url` — `embed_base_url` when set (whitespace-only counts as unset), else `llm_base_url`.
+- `resolved_embed_api_key` — `embed_api_key` when set. When `embed_base_url` is set but `embed_api_key` is not, this is `not-needed`, **not** `llm_api_key`: a separate embedding endpoint is a different provider, so the chat credential is deliberately never forwarded to it. Only the shared-endpoint case (no `embed_base_url`) falls back to `llm_api_key`.
 
 ### LLM endpoint and models
 
@@ -132,7 +142,7 @@ For pointing Novelizer at an endpoint as a task — llama.cpp, Ollama, LM Studio
 | `author_temperature` | `0.8` | story | Author sampling temperature; applies live |
 | `agent_temperature` | `0.7` | story | Sampling temperature for every other LLM-backed agent and all chat consultations; applies live |
 
-**Endpoint.** Every model call goes through one OpenAI-compatible endpoint (`build_chat_model` in `novelizer/agents/llm.py` builds a chat model from `llm_base_url` + `llm_api_key`). Embeddings use the same endpoint and key (see [Storage paths](#storage-paths)), so the server must serve chat completions and the `embed_model` embedding model. Local servers that don't check credentials work with the default `llm_api_key` of `not-needed`.
+**Endpoint.** Every model call goes through one OpenAI-compatible endpoint (`build_chat_model` in `novelizer/agents/llm.py` builds a chat model from `llm_base_url` + `llm_api_key`). Embeddings default to the same endpoint and key, but can be split onto their own endpoint with `embed_base_url` / `embed_api_key` (see [Storage paths](#storage-paths)) — required when the chat endpoint serves no embedding models, as with OpenRouter. Without that split, the server must serve both chat completions and the `embed_model` embedding model. Local servers that don't check credentials work with the default `llm_api_key` of `not-needed`.
 
 **`llm_max_tokens`** is passed as the per-request `max_tokens` cap on every agent, chat, and research runner Novelizer builds (the Engine Room tool-call summarizer pins its own 40-token cap instead). It exists because an uncapped local model — especially one with server-side reasoning enabled — can generate past a proxy's request timeout, so no request ever completes; the caller sees a hang. Raise it if agents' JSON responses are being truncated mid-output; the Continuity Checker and KG extraction deliberately bound their inputs to keep dense responses under this cap.
 
@@ -142,7 +152,7 @@ For pointing Novelizer at an endpoint as a task — llama.cpp, Ollama, LM Studio
 
 **Restart vs. live.** `llm_base_url`, `llm_api_key`, `llm_max_tokens`, `author_model`, and `agent_model` are in `RESTART_REQUIRED_KEYS` — runners are constructed at startup, so changes wait for the next launch (see [the restart section](#settings-that-require-a-restart-restart_required_keys)). The two temperatures are not: `Runtime.apply_settings` rebuilds the affected agents' runners in place and clears the chat-runner cache when either changes.
 
-Scope note: the endpoint keys are global-only — one endpoint per installation — while the model and temperature keys are story-overridable, so a story can carry its own model choice in `story.toml`. `llm_api_key` in a `story.toml` is a hard `StoryConfigError` (see [key scoping](#key-scoping-story-overridable-global-only-and-forbidden-keys)).
+Scope note: the endpoint keys are global-only — at most one chat endpoint and one embedding endpoint per installation — while the model and temperature keys are story-overridable, so a story can carry its own model choice in `story.toml`. `llm_api_key` and `embed_api_key` in a `story.toml` are a hard `StoryConfigError` (see [key scoping](#key-scoping-story-overridable-global-only-and-forbidden-keys)).
 
 ### Context and analysis thresholds
 
@@ -326,7 +336,7 @@ Unknown keys in either TOML file never block loading — they are dropped from t
 | Global `config.toml` | `<path>: unknown setting '<key>' ignored` |
 | `story.toml` | `<path>: unknown or global-only setting '<key>' ignored` |
 
-"Unknown" is judged against the layer's own field set, which is why the `story.toml` wording says "unknown or global-only": a real key that is global-only (`llm_base_url`, `llm_max_tokens`, `default_stories_dir`, `last_opened_story`, `suppress_flat_migration_prompt`, `max_concurrent_agents`) gets the same ignored-with-warning treatment in `story.toml` as a typo does. The rest of the file still loads — known keys keep their values.
+"Unknown" is judged against the layer's own field set, which is why the `story.toml` wording says "unknown or global-only": a real key that is global-only (`llm_base_url`, `llm_max_tokens`, `embed_base_url`, `default_stories_dir`, `last_opened_story`, `suppress_flat_migration_prompt`, `max_concurrent_agents`) gets the same ignored-with-warning treatment in `story.toml` as a typo does. The rest of the file still loads — known keys keep their values.
 
 Warnings go to the `novelizer.settings` logger, which — like all Novelizer logging — is routed to the rotating log file at `<config dir>/logs/novelizer.log` (`novelizer/logging_setup.py`), never to the terminal, so a misspelled key is easy to miss: check the log if a setting seems not to take.
 
@@ -336,7 +346,7 @@ Unrecognized `NOVELIZER_*` environment variables are the one silent case: `EnvOv
 
 `StoryConfigError` is raised in exactly two places, both about keys that must never be story-scoped:
 
-- **A `FORBIDDEN_STORY_KEYS` key in `story.toml`** — currently just `llm_api_key`. `parse_story` raises before any field is read: `<path>: ['llm_api_key'] must not appear in story.toml — stories are shareable; secrets belong in the global config (<global config path>)`. This is a hard error, not a warning, because story directories are meant to be shared and must never carry secrets; the message names the file the key belongs in.
+- **A `FORBIDDEN_STORY_KEYS` key in `story.toml`** — `llm_api_key` or `embed_api_key`. `parse_story` raises before any field is read: `<path>: ['llm_api_key'] must not appear in story.toml — stories are shareable; secrets belong in the global config (<global config path>)`. This is a hard error, not a warning, because story directories are meant to be shared and must never carry secrets; the message names the file the key belongs in.
 - **A non-story-overridable key passed to `create_story(..., overrides=...)`** (`novelizer/settings/story_dir.py`) — overrides are validated against `STORY_OVERRIDABLE_KEYS` *before* `mkdir`, and the error (`<story.toml path>: ['<key>', ...] are not story-overridable settings`) is raised with nothing on disk, so a bad call leaves no half-created story directory.
 
 At startup, the CLI catches `StoryConfigError` (along with `TOMLFileError`) and exits with the message as a clean error rather than a traceback (`novelizer/director/cli.py`). Mid-session is less forgiving: the settings watcher's reload path catches only `TOMLFileError`, so adding `llm_api_key` to a `story.toml` while the TUI is running escapes the watcher's error handling instead of being reported to the feed — remove the key and restart.
