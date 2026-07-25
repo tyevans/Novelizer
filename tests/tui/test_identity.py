@@ -1,11 +1,11 @@
 from novelizer.tui.identity import IDENTITIES, SPEAKER_WIDTH, identity_for
 
 
-def test_all_seven_agents_plus_director_and_system_present():
+def test_every_fleet_agent_plus_director_and_system_present():
     assert set(IDENTITIES) == {
         "author", "editor", "world_architect", "character_keeper",
         "continuity_checker", "retconner", "structure_analyst", "plotter", "muse",
-        "summarizer", "director", "system",
+        "summarizer", "curator", "triage", "flaglabeler", "director", "system",
     }
 
 
@@ -14,7 +14,8 @@ def test_glyphs_match_spec_table_verbatim():
         "author": "✎", "editor": "§", "world_architect": "⌂",
         "character_keeper": "♥", "continuity_checker": "⚖",
         "retconner": "↺", "structure_analyst": "∿", "plotter": "⌖", "muse": "✦",
-        "summarizer": "≡", "director": "★", "system": "·",
+        "summarizer": "≡", "curator": "❖", "triage": "⑂", "flaglabeler": "⚑",
+        "director": "★", "system": "·",
     }
     assert {k: v.glyph for k, v in IDENTITIES.items()} == expected
 
@@ -24,7 +25,9 @@ def test_labels_keep_existing_feed_names():
         "author": "Author", "editor": "Editor", "world_architect": "Architect",
         "character_keeper": "Keeper", "continuity_checker": "Continuity",
         "retconner": "Retconner", "structure_analyst": "Analyst", "plotter": "Plotter",
-        "muse": "Muse", "summarizer": "Summary", "director": "Director", "system": "System",
+        "muse": "Muse", "summarizer": "Summary", "curator": "Curator",
+        "triage": "Triage", "flaglabeler": "Flags",
+        "director": "Director", "system": "System",
     }
     assert {k: v.label for k, v in IDENTITIES.items()} == expected
 
@@ -85,10 +88,15 @@ from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
 
 
 def test_agent_names_matches_the_scheduler_registry_order():
-    assert AGENT_NAMES == (
-        "world_architect", "character_keeper", "muse", "plotter", "author",
-        "editor", "continuity_checker", "retconner", "structure_analyst",
-    )
+    """Compared against the registry, not a copy of it.
+
+    This test used to restate the tuple literally, so when the fleet grew it
+    agreed with the stale value instead of catching it -- AGENT_NAMES sat at 9
+    of 13 agents and the four missing ones were never drawn in the Engine Room.
+    """
+    from novelizer.agents.registry import AGENT_REGISTRY
+
+    assert AGENT_NAMES == tuple(spec.name for spec in AGENT_REGISTRY)
 
 
 def test_novelizer_agent_theme_satisfies_the_agent_theme_protocol():
@@ -100,4 +108,19 @@ def test_novelizer_agent_theme_satisfies_the_agent_theme_protocol():
 
 def test_novelizer_agent_theme_verb_uses_the_verb_table_with_a_fallback():
     assert NOVELIZER_AGENT_THEME.verb("author") == "drafting"
-    assert NOVELIZER_AGENT_THEME.verb("muse") == "working"
+    assert NOVELIZER_AGENT_THEME.verb("muse") == "drawing inspiration"
+    # The fallback is asserted against a name that will never be in the table;
+    # using a real agent made this pass only for as long as that agent had no
+    # verb, so filling the table in turned a mechanism test red.
+    assert NOVELIZER_AGENT_THEME.verb("not_an_agent") == "working"
+
+
+def test_every_fleet_agent_has_its_own_verb():
+    """A fleet agent showing the generic "working" reads as a stalled lane."""
+    from novelizer.agents.registry import AGENT_REGISTRY
+
+    generic = [
+        spec.name for spec in AGENT_REGISTRY
+        if NOVELIZER_AGENT_THEME.verb(spec.name) == "working"
+    ]
+    assert not generic, generic
