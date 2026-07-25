@@ -1144,6 +1144,56 @@ async def test_index_document_count_is_none_when_unknown(settings):
     assert await rt.index_document_count() is None
 
 
+# "The index is empty" is only an alarm when there is canon that SHOULD have
+# been indexed. The corroborating signal is the count of events the indexer
+# itself consumes (INDEXED_EVENT_TYPES from sequence 0) -- exactly what would
+# have populated the index, rather than a proxy like chapters.
+
+
+async def test_indexable_event_count_is_zero_for_a_fresh_story(settings):
+    rt = Runtime(settings)
+    await rt.events.init()
+    try:
+        assert await rt.indexable_event_count() == 0
+    finally:
+        await rt.events.close()
+
+
+async def test_indexable_event_count_counts_canon_the_indexer_consumes(settings):
+    """A THREAD_PLANTED is indexable but produces no chapter -- which is why
+    chapters would be the wrong signal for 'there is canon to index'."""
+    from novelizer.canon.events import ThreadPlanted
+
+    rt = Runtime(settings)
+    await rt.events.init()
+    try:
+        await rt.events.append(EventType.THREAD_PLANTED, "t1", ThreadPlanted(id="t1", name="T"))
+        assert await rt.indexable_event_count() == 1
+    finally:
+        await rt.events.close()
+
+
+async def test_indexable_event_count_ignores_events_the_indexer_never_embeds(settings):
+    from novelizer.canon.events import AnnotationStructureScored
+
+    rt = Runtime(settings)
+    await rt.events.init()
+    try:
+        await rt.events.append(EventType.ANNOTATION_STRUCTURE_SCORED, "c1",
+                               AnnotationStructureScored(chapter_id="c1", tension=0.5,
+                                                         pacing_label=""))
+        assert await rt.indexable_event_count() == 0
+    finally:
+        await rt.events.close()
+
+
+async def test_indexable_event_count_is_none_when_unknown(settings):
+    """A locked/unreadable log is UNKNOWN, never 0: reading it as 0 would
+    suppress the empty-index alarm in exactly the state it exists for."""
+    rt = Runtime(settings)  # never connected -- the count cannot be read
+    assert await rt.indexable_event_count() is None
+
+
 async def test_background_progress_spans_both_real_indexers_end_to_end(settings, tmp_path):
     """End to end against the REAL wired indexers, mirroring
     test_pending_index_lag_holds_every_agent_then_releases_on_catch_up. A

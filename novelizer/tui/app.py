@@ -267,13 +267,17 @@ class NovelizerApp(App):
                 # abandons each aggregate and jumps the cursor past it, after
                 # which lag reads 0 forever while search_canon answers every
                 # query with a confident miss. Never raises; None = unknown.
+                # The indexable-canon count corroborates it, so a brand-new
+                # story's legitimately empty index is not an alarm.
                 docs = await self.runtime.index_document_count()
+                indexable = await self.runtime.indexable_event_count()
                 await self.query_one("#brain", BrainPanel).refresh_from(
                     self.runtime.read,
                     threshold=self.runtime.settings.staleness_threshold_chapters,
                     delta=self.runtime.settings.sag_spike_delta,
                     lag=progress.total,
                     docs=docs,
+                    indexable=indexable,
                 )
             except Exception as e:
                 self._report_worker_error("brain", e)

@@ -28,7 +28,7 @@ from novelizer.voices.loader import load_voice_pack
 from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
 from novelizer.store.embeddings import EmbedProbe, EmbeddingStore, EmbedProbeFailure
-from novelizer.store.indexer import CanonIndexer
+from novelizer.store.indexer import INDEXED_EVENT_TYPES, CanonIndexer
 from novelizer.store.kg_store import KGStore
 from novelizer.store.kg_projector import KGProjector
 
@@ -720,6 +720,30 @@ class Runtime:
             return await self.embeddings.document_count()
         except Exception as e:
             logger.warning("semantic index size probe failed (%s: %s); reporting unknown",
+                           type(e).__name__, e)
+            return None
+
+    async def indexable_event_count(self) -> int | None:
+        """How many events the semantic index SHOULD hold documents for -- every
+        INDEXED_EVENT_TYPES event ever appended -- or None if that is unknown.
+
+        The corroborating half of index_document_count(): an empty index is only
+        wrong when there is canon that should have populated it, and a brand-new
+        story has neither. Counting the indexer's own event set (rather than
+        chapters, which the indexer is only one of ten aggregates for) is what
+        makes "should have been indexed" exact.
+
+        Not indexer.lag(): that counts from the CURSOR, which is precisely what
+        goes to zero in the failure this exists to expose. This counts from
+        sequence 0.
+
+        Unknown is None, not 0, and never raises: reading a locked log as 0
+        would suppress the alarm in exactly the state it is for.
+        """
+        try:
+            return await self.events.count_since(0, event_types=list(INDEXED_EVENT_TYPES))
+        except Exception as e:
+            logger.warning("indexable canon probe failed (%s: %s); reporting unknown",
                            type(e).__name__, e)
             return None
 

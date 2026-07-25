@@ -89,11 +89,7 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert str(app.query_one("#outline_body", Static).renderable) == OUTLINE_EMPTY
             assert str(app.query_one("#arcs_body", Static).renderable) == ARCS_EMPTY
             assert not app.query("#shape_spark")   # the widget is gone entirely
-            # Quiet across all six tabs; the index segment is not one of them
-            # and a fresh story's index really does hold nothing yet.
-            assert str(app.query_one("#brain_strip", Static).renderable) == (
-                "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty"
-            )
+            assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause · Outline · Arcs"
     finally:
         await rt.close(); os.unlink(path)
 
@@ -114,6 +110,27 @@ async def test_strip_reports_the_semantic_index_size_from_the_runtime():
         async with app.run_test() as pilot:
             await pilot.pause(0.5)
             assert "Index 1284" in str(app.query_one("#brain_strip", Static).renderable)
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_strip_alarms_when_canon_exists_and_the_index_is_empty():
+    """The state this readout exists for, end to end through the real runtime:
+    canon in the log, nothing in the index. lag() cannot show it once the drain
+    has abandoned the backlog, so the size must -- and the suppression that
+    keeps a fresh story quiet must not reach this far."""
+    from textual.widgets import Static
+    from novelizer.canon.events import EventType, ThreadPlanted
+
+    app, rt, path = await _app()
+    try:
+        await rt.events.append(EventType.THREAD_PLANTED, "the-ledger",
+                               ThreadPlanted(id="the-ledger", name="The Ledger"))
+        assert await rt.index_document_count() == 0     # the dead index
+        async with app.run_test() as pilot:
+            await pilot.pause(0.5)
+            assert "Index ⚠empty" in str(app.query_one("#brain_strip", Static).renderable)
     finally:
         await rt.close(); os.unlink(path)
 
