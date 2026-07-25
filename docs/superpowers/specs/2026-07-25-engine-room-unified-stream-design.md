@@ -32,9 +32,17 @@ The common root: the stream body is a single string rendered into a single
 `Markdown` widget, or a per-agent gutter, and re-rendering the whole string
 on every token is what makes unconditional scroll-to-bottom feel mandatory.
 
-A fifth defect surfaced while scoping: tool output is truncated to 1000
-characters at `novelizer/tui/app.py:417` before it ever reaches the
-display, so rich-rendering it would mostly render an ellipsis.
+A fifth defect surfaced while scoping: `Block.output` holds each tool
+call's **full, uncapped** output in memory for the life of the run.
+`novelizer/telemetry/callbacks.py:162` emits `output_summary=str(output)`
+with no truncation, and `run_model.py:150` copies it straight into the
+block. Reading six chapters means six chapters resident per agent, times
+13 agents.
+
+Note for implementers: the `[:1000]` at `novelizer/tui/app.py:417` is
+**not** a display cap and must be left alone. It bounds only the text fed
+to the cheap-LLM tool-call summarizer prompt; the display path never sees
+it.
 
 ## Decisions
 
@@ -48,7 +56,7 @@ them:
 | Scroll behaviour | Auto-detach on scroll-up, reattach at bottom, with a "N new" jump bar |
 | Fold policy | Tool calls collapsed by default; failures auto-expand |
 | Stream layout | One unified chronological stream with an agent filter; tabs removed |
-| Output cap | Remove the 1000-char cap; do not hold full output in memory |
+| Output retention | Do not hold full output in memory; read it from the store on expand. Leave `app.py:417`'s summarizer-prompt cap alone |
 | Prose durability | Persist `TokenDelta` as coalesced segments |
 
 ## Architecture
@@ -60,10 +68,10 @@ separate from the domain log — see `novelizer/telemetry/events.py:16-20`).
 Every `tool.call_finished` event already carries `output_summary` and a
 monotonic `sequence`. That is the disk layer; we do not add another.
 
-Three changes:
+Full tool output is already persisted uncapped
+(`callbacks.py:162`), so nothing needs to change to make it durable. Two
+changes:
 
-- **Remove the 1000-char truncation** at `novelizer/tui/app.py:417`. Full
-  tool output persists.
 - **`Block` stops carrying output.** It keeps a short preview for the
   collapsed summary line plus the originating event `sequence`. Expanding a
   fold reads the full payload from the store on demand. Per-call memory
@@ -197,7 +205,7 @@ structure, fold state, and follow-state transitions.
 ## Scope
 
 **In:** the live stream pane, `run_model`'s block model and formatters,
-the output cap, prose segment persistence, `events_before`, and the
+output retention, prose segment persistence, `events_before`, and the
 `EngineRoom` call sites in `novelizer/tui/app.py` (three collapse to one).
 
 **Out, deliberately:** the trace `DataTable`, the roster, vitals-bar
