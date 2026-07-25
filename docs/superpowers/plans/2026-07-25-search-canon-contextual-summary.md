@@ -637,7 +637,7 @@ async def test_summarize_false_is_byte_identical_to_the_bare_hit_list(store, mon
     await store.upsert_chapter(ch)
     read = FakeReadStore(chapters=[ch])
     monkeypatch.setattr(
-        search_mod, "summarize", _boom_summarize)  # must never be called
+        search_mod.search_summary, "summarize", _boom_summarize)  # must never be called
     tool = build_search_canon_tool(
         store, read, None, backend=_NullBackend(),
         settings_provider=lambda: _SummarySettings())
@@ -653,7 +653,7 @@ async def _boom_summarize(*a, **k):
 async def test_kill_switch_off_skips_summarization(store, monkeypatch):
     ch = Chapter(id="ch1", title="One", prose="alpha")
     await store.upsert_chapter(ch)
-    monkeypatch.setattr(search_mod, "summarize", _boom_summarize)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _boom_summarize)
 
     class _Off(_SummarySettings):
         search_summarize = False
@@ -668,7 +668,7 @@ async def test_kill_switch_off_skips_summarization(store, monkeypatch):
 async def test_no_settings_provider_skips_summarization(store, monkeypatch):
     ch = Chapter(id="ch1", title="One", prose="alpha")
     await store.upsert_chapter(ch)
-    monkeypatch.setattr(search_mod, "summarize", _boom_summarize)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _boom_summarize)
     tool = build_search_canon_tool(store, FakeReadStore(chapters=[ch]), None)
     out = await tool.ainvoke({"query": "alpha", "purpose": "p"})
     assert not out.startswith("CONTEXT")
@@ -682,7 +682,7 @@ async def test_summary_is_prepended_and_hit_lines_survive_verbatim(store, monkey
     async def _fake_summarize(query, purpose, excerpts, settings, callbacks=None):
         return "The bell tolled at dusk."
 
-    monkeypatch.setattr(search_mod, "summarize", _fake_summarize)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _fake_summarize)
     tool = build_search_canon_tool(
         store, read, None, backend=_NullBackend(),
         settings_provider=lambda: _SummarySettings())
@@ -701,7 +701,7 @@ async def test_summarizer_failure_degrades_to_the_bare_hit_list(store, monkeypat
     async def _empty(query, purpose, excerpts, settings, callbacks=None):
         return ""
 
-    monkeypatch.setattr(search_mod, "summarize", _empty)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _empty)
     tool = build_search_canon_tool(
         store, FakeReadStore(chapters=[ch]), None, backend=_NullBackend(),
         settings_provider=lambda: _SummarySettings())
@@ -712,7 +712,7 @@ async def test_summarizer_failure_degrades_to_the_bare_hit_list(store, monkeypat
 
 async def test_early_returns_never_reach_the_summarizer(store, monkeypatch):
     """Empty index, no results, and store errors all short-circuit."""
-    monkeypatch.setattr(search_mod, "summarize", _boom_summarize)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _boom_summarize)
     tool = build_search_canon_tool(
         store, FakeReadStore(), None, backend=_NullBackend(),
         settings_provider=lambda: _SummarySettings())
@@ -729,7 +729,7 @@ async def test_kill_switch_is_read_at_call_time_not_construction(store, monkeypa
     async def _fake_summarize(query, purpose, excerpts, settings, callbacks=None):
         return "summary"
 
-    monkeypatch.setattr(search_mod, "summarize", _fake_summarize)
+    monkeypatch.setattr(search_mod.search_summary, "summarize", _fake_summarize)
     live = _SummarySettings()
     tool = build_search_canon_tool(
         store, FakeReadStore(chapters=[ch]), None, backend=_NullBackend(),
@@ -750,11 +750,15 @@ Expected: FAIL — `build_search_canon_tool() got an unexpected keyword argument
 In `novelizer/canon_fs/search.py`, add to the imports:
 
 ```python
-from novelizer.canon_fs.search_summary import gather_excerpts, summarize
+from novelizer.canon_fs import search_summary
 ```
 
-Import `summarize` by name at module scope so tests can monkeypatch
-`search_mod.summarize`.
+**Import the module, not the names.** The tool's own boolean parameter is
+called `summarize`, which would shadow a bare `from … import summarize`
+inside the tool body. Call both functions through the module —
+`search_summary.gather_excerpts(...)` and `search_summary.summarize(...)` —
+so there is no collision and tests can monkeypatch
+`search_mod.search_summary`.
 
 Change the factory signature (line 13) to:
 
@@ -782,21 +786,6 @@ Change the tool signature (line 18) to:
                            summarize: bool = True) -> str:
 ```
 
-Note the local parameter `summarize` shadows the imported `summarize`
-function inside the tool body. Import the function under an alias to avoid
-the collision:
-
-```python
-from novelizer.canon_fs.search_summary import gather_excerpts
-from novelizer.canon_fs import search_summary
-```
-
-and call it as `search_summary.summarize(...)`. Tests then monkeypatch
-`search_mod.search_summary.summarize`. **Update the test file's monkeypatch
-targets accordingly** — use
-`monkeypatch.setattr(search_mod.search_summary, "summarize", ...)` in every
-test from Step 1.
-
 Then, replacing the current `return "\n".join(lines)` at line 97:
 
 ```python
@@ -809,7 +798,7 @@ Then, replacing the current `return "\n".join(lines)` at line 97:
             h.id: line for h, line in zip(hits[:SEARCH_RESULT_CAP], lines)
             if h.kind == "entity"
         }
-        excerpts = await gather_excerpts(
+        excerpts = await search_summary.gather_excerpts(
             hits[:SEARCH_RESULT_CAP], backend, path_by_id, entity_lines)
         text = await search_summary.summarize(
             query, purpose, excerpts, settings, callbacks=callbacks)
