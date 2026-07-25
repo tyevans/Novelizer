@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from tui_kit.run_model import ProseBlock, ThinkingBlock, CallBlock, ToolBlock
 from tui_kit.stream_source import InMemoryStreamSource
 from tui_kit.widgets.stream_view import StreamView
-from textual.widgets import Collapsible, Markdown
+from textual.widgets import Collapsible, Markdown, Static
 
 
 class _Theme:
@@ -129,3 +129,72 @@ async def test_output_is_fetched_once_not_on_every_toggle():
             c.collapsed = collapsed
             await pilot.pause()
         assert _CountingSource.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_view_follows_the_tail():
+    async with _App().run_test() as pilot:
+        assert pilot.app.query_one("#stream", StreamView).is_following() is True
+
+
+@pytest.mark.asyncio
+async def test_scrolling_away_from_the_bottom_detaches():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks(tuple(ProseBlock(text=f"line {i}", agent_name="author")
+                                 for i in range(200)))
+        await pilot.pause()
+        view.notify_scroll(at_bottom=False)
+        assert view.is_following() is False
+
+
+@pytest.mark.asyncio
+async def test_returning_to_the_bottom_reattaches():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.notify_scroll(at_bottom=False)
+        view.notify_scroll(at_bottom=True)
+        assert view.is_following() is True
+
+
+@pytest.mark.asyncio
+async def test_detached_view_shows_the_backlog_count_and_hides_it_when_following():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.notify_scroll(at_bottom=False)
+        view.append_blocks((ProseBlock(text="x", agent_name="author"),
+                            ProseBlock(text="y", agent_name="author")))
+        await pilot.pause()
+        bar = pilot.app.query_one("#sv_follow", Static)
+        assert bar.display is True
+        assert "2" in str(bar.renderable)
+        view.action_follow_end()
+        await pilot.pause()
+        assert bar.display is False
+
+
+@pytest.mark.asyncio
+async def test_end_reattaches_and_clears_the_backlog():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.notify_scroll(at_bottom=False)
+        view.append_blocks((ProseBlock(text="x", agent_name="author"),))
+        view.action_follow_end()
+        assert view.is_following() is True
+
+
+@pytest.mark.asyncio
+async def test_appending_while_detached_does_not_scroll_the_window():
+    """The whole bug: a new token must not yank the reader back down."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks(tuple(ProseBlock(text=f"l{i}", agent_name="author")
+                                 for i in range(200)))
+        await pilot.pause()
+        window = pilot.app.query_one("#sv_window")
+        window.scroll_to(y=0, animate=False)
+        await pilot.pause()
+        view.notify_scroll(at_bottom=False)
+        view.append_blocks((ProseBlock(text="new", agent_name="author"),))
+        await pilot.pause()
+        assert window.scroll_offset.y == 0

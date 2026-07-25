@@ -7,6 +7,7 @@ whom.
 from __future__ import annotations
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Collapsible, Static
 from tui_kit.contracts import AgentTheme
@@ -14,14 +15,20 @@ from tui_kit.output_renderer import pick_renderer
 from tui_kit.run_model import (
     CallBlock, ProseBlock, StreamBlock, ThinkingBlock, ToolBlock, block_key,
 )
-from tui_kit.stream_model import StreamState, on_new_blocks, trim_window, visible_blocks
+from tui_kit.stream_model import StreamState, on_new_blocks, on_scroll, trim_window, visible_blocks
 from tui_kit.stream_source import StreamSource
+
+# How close to the bottom still counts as "at the bottom". A couple of
+# lines of slack: demanding an exact match makes reattaching feel broken.
+SCROLL_EPSILON = 2
 
 
 class StreamView(Vertical):
     DEFAULT_CSS = """
     .sv-tool { border: round $panel; }
     """
+
+    BINDINGS = [Binding("end", "follow_end", "Follow", show=True)]
 
     def __init__(self, theme: AgentTheme, source: StreamSource, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -32,12 +39,54 @@ class StreamView(Vertical):
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="sv_window", classes="sv-window")
+        yield Static("", id="sv_follow", classes="sv-follow", markup=False)
+
+    def on_mount(self) -> None:
+        self.query_one("#sv_follow", Static).display = False
+        # The real Textual hook: watch the child's reactive scroll_y so we
+        # learn about scrolling however it happens -- wheel, drag, keys,
+        # or programmatic scroll_to -- not just the two-message guesses
+        # (on_scroll_up/on_scroll_down) that only cover discrete key/wheel
+        # steps.
+        window = self.query_one("#sv_window", VerticalScroll)
+        self.watch(window, "scroll_y", self._on_window_scroll_y, init=False)
+
+    def _on_window_scroll_y(self, old_value: float, new_value: float) -> None:
+        self.notify_scroll(self._at_bottom())
 
     # -- public API ----------------------------------------------------------
+
+    def is_following(self) -> bool:
+        return self._state.follow
+
+    def notify_scroll(self, at_bottom: bool) -> None:
+        self._state = on_scroll(self._state, at_bottom)
+        self._refresh_follow_bar()
+
+    def _at_bottom(self) -> bool:
+        window = self.query_one("#sv_window", VerticalScroll)
+        return window.scroll_offset.y >= window.max_scroll_y - SCROLL_EPSILON
+
+    def action_follow_end(self) -> None:
+        self._state = on_scroll(self._state, at_bottom=True)
+        self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
+        self._refresh_follow_bar()
+
+    def _refresh_follow_bar(self) -> None:
+        bar = self.query_one("#sv_follow", Static)
+        if self._state.follow:
+            bar.display = False
+            return
+        n = self._state.unseen
+        bar.update(f"↓ detached · {n} new · End to follow")
+        bar.display = True
 
     def append_blocks(self, blocks: tuple[StreamBlock, ...]) -> None:
         self._state = trim_window(on_new_blocks(self._state, blocks))
         self._reconcile()
+        if self._state.follow:
+            self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
+        self._refresh_follow_bar()
 
     def mounted_keys(self) -> list[str]:
         return list(self._mounted)
