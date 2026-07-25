@@ -397,3 +397,145 @@ async def test_seeding_tolerates_events_with_no_contract_mapping(rt):
         await pilot.pause(0.8)
         assert not any("telemetry" in m and "error" in m for m in app.messages)
         assert "editor" in str(app.query_one("#er_vitals").renderable)
+
+
+# -- end to end: real StoredEvents -> adapter -> fold -> widgets ---------------
+#
+# Every widget-level test hand-constructs blocks (ToolBlock(sequence=42) and
+# friends), so the seam between the telemetry adapter and the fold was
+# untested in both directions. These drive the whole path from the bus.
+
+
+async def test_two_agents_streaming_concurrently_both_keep_advancing(rt):
+    """The redesign exists to show that two agents run at once. Folding every
+    agent into ONE LiveRunState discards each event whose run_id is not the
+    most recently started run's -- so the moment the editor starts, the
+    author's prose freezes mid-sentence."""
+    from tui_kit.widgets.engine_room import EngineRoom
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="the sea "))
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                                AgentRunStarted(run_id="r2", agent_name="editor"))
+        rt.telemetry.publish_token(TokenDelta(run_id="r2", agent_name="editor",
+                                              text="looks good"))
+        # The author is still running: its next token must still land.
+        rt.telemetry.publish_token(TokenDelta(run_id="r1", agent_name="author",
+                                              text="rose over the wall"))
+        await pilot.pause(0.8)
+
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "the sea rose over the wall" in body
+        assert "looks good" in body
+        assert not any("telemetry error" in m for m in app.messages)
+
+
+async def test_both_concurrent_agents_appear_in_the_vitals_line(rt):
+    from novelizer.telemetry.events import LlmCallStarted
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        for run, agent in (("r1", "author"), ("r2", "editor")):
+            await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, run,
+                                    AgentRunStarted(run_id=run, agent_name=agent))
+            await rt.telemetry.emit(TelemetryEventType.LLM_CALL_STARTED, run,
+                                    LlmCallStarted(run_id=run, agent_name=agent,
+                                                   call_index=1, model="qwen", prompt="go"))
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "author" in vitals and "editor" in vitals
+
+
+async def test_a_finished_tool_call_carries_its_store_sequence_to_the_widget(rt):
+    """The lazy full-output fetch keys off the store sequence. It is not in
+    the payload, so it can only reach the widget if the adapter reads it off
+    the StoredEvent."""
+    from textual.widgets import Collapsible
+    from novelizer.telemetry.events import ToolCallStarted, ToolCallFinished
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_STARTED, "r1",
+                                ToolCallStarted(run_id="r1", agent_name="author",
+                                                tool_name="read_file",
+                                                input_summary="/characters/death.md"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_FINISHED, "r1",
+                                ToolCallFinished(run_id="r1", agent_name="author",
+                                                 tool_name="read_file", duration_s=0.4,
+                                                 output_chars=6, output_summary="# Death",
+                                                 input_summary="/characters/death.md"))
+        await pilot.pause(0.8)
+        collapsible = app.query_one(Collapsible)
+        assert collapsible._sv_sequence > 0
+
+
+async def test_a_failed_tool_call_carries_its_store_sequence_to_the_widget(rt):
+    """Failed blocks open on arrival, so a missing sequence means they open
+    into an empty box."""
+    from textual.widgets import Collapsible
+    from novelizer.telemetry.events import ToolCallStarted, ToolCallFailed
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                                AgentRunStarted(run_id="r1", agent_name="author"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_STARTED, "r1",
+                                ToolCallStarted(run_id="r1", agent_name="author",
+                                                tool_name="read_file",
+                                                input_summary="/world/nope.md"))
+        await rt.telemetry.emit(TelemetryEventType.TOOL_CALL_FAILED, "r1",
+                                ToolCallFailed(run_id="r1", agent_name="author",
+                                               tool_name="read_file", duration_s=0.2,
+                                               error_type="FileNotFoundError",
+                                               error_message="nope",
+                                               input_summary="/world/nope.md"))
+        await pilot.pause(0.8)
+        collapsible = app.query_one(Collapsible)
+        assert collapsible._sv_sequence > 0
+        assert collapsible.collapsed is False
+
+
+async def test_restart_seeding_restores_every_agent_not_just_the_latest_run(rt):
+    """Seeding folds the replayed log per agent. One shared fold would keep
+    only the last run started."""
+    from tui_kit.widgets.engine_room import EngineRoom
+    from novelizer.telemetry.events import LlmOutputSegment
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r1",
+                            AgentRunStarted(run_id="r1", agent_name="author"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_OUTPUT_SEGMENT, "r1",
+                            LlmOutputSegment(run_id="r1", agent_name="author",
+                                             text="the sea rose", kind="text"))
+    await rt.telemetry.emit(TelemetryEventType.AGENT_RUN_STARTED, "r2",
+                            AgentRunStarted(run_id="r2", agent_name="editor"))
+    await rt.telemetry.emit(TelemetryEventType.LLM_OUTPUT_SEGMENT, "r2",
+                            LlmOutputSegment(run_id="r2", agent_name="editor",
+                                             text="looks good", kind="text"))
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        body = app.query_one("#engine_room", EngineRoom).stream_text()
+        assert "the sea rose" in body and "looks good" in body
+
+
+async def test_vitals_captions_why_an_idle_fleet_is_not_producing(rt):
+    """Without a hold caption a rate-limited fleet, a crash loop and a
+    converged agent look identical to someone watching an overnight run."""
+    app = NovelizerApp(rt)
+    async with app.run_test(size=(120, 40)) as pilot:
+        app.set_focus(None)
+        await pilot.press("e")
+        await pilot.pause(0.8)
+        vitals = str(app.query_one("#er_vitals").renderable)
+        assert "paused" in vitals  # the fixture pauses every agent

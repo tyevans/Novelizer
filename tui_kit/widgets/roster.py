@@ -63,6 +63,24 @@ def hold_phrase(s: dict) -> str:
     return "ready · waiting for a dispatch slot"
 
 
+def fleet_hold_summary(status: list, limit: int = 3) -> str:
+    """Every hold in the fleet, grouped by reason: "2× paused · waiting on LLM
+    pool permit". "" when everything is producing.
+
+    The per-agent panes that used to caption each idle agent are gone, so one
+    line has to carry this for the whole fleet. Without it a rate-limited
+    fleet, a crash loop and a converged fleet all look like the same silence
+    to someone glancing at an overnight run.
+    """
+    counts: dict[str, int] = {}
+    for s in status:
+        phrase = hold_phrase(s)
+        if phrase:
+            counts[phrase] = counts.get(phrase, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
+    return " · ".join(f"{n}× {p}" if n > 1 else p for p, n in ranked)
+
+
 def roster_glyphs(status: list, theme: AgentTheme) -> Text:
     """The cast as a glyph strip — '✎⠋ §· ⌂· ♥· ⚖· ↺· ∿·'. Glyph in the
     agent's theme color; mark carries state. Status fields the strip does

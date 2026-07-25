@@ -34,9 +34,11 @@ from novelizer.tui.widgets.feed_model import (
 )
 from tui_kit.widgets.activity_strip import ActivityStrip
 from tui_kit.widgets.engine_room import EngineRoom
-from tui_kit.run_model import (
-    LiveRunState, apply_bus_item, seed_state, normalize_input_summary,
+from tui_kit.fleet_model import (
+    FleetState, apply_fleet, primary_state, seed_fleet,
 )
+from tui_kit.run_model import normalize_input_summary
+from tui_kit.widgets.roster import fleet_hold_summary
 from novelizer.tui.event_store_stream_source import EventStoreStreamSource
 from novelizer.tui.identity import AGENT_NAMES, NOVELIZER_AGENT_THEME
 from novelizer.tui.telemetry_adapter import to_contract_event, trace_line, trace_detail
@@ -92,7 +94,10 @@ class NovelizerApp(App):
         self._last_seq = 0
         self._chapter_count = 0
         self.messages: list[str] = []
-        self._live_state = LiveRunState()
+        # One fold per agent, merged into one chronological stream. A single
+        # shared fold would drop every event of every agent but the most
+        # recently started run -- see tui_kit.fleet_model.
+        self._fleet = FleetState()
         self._trace_events: deque = deque(maxlen=200)
         self._paused_by_toggle: list[str] | None = None
 
@@ -337,7 +342,16 @@ class NovelizerApp(App):
 
     def _refresh_strip(self) -> None:
         strip = self.query_one("#activity_strip", ActivityStrip)
-        strip.render_state(self._live_state, time.monotonic(), self._next_hint())
+        strip.render_state(primary_state(self._fleet), time.monotonic(), self._next_hint())
+
+    def _holds(self) -> str:
+        """Why the fleet is not producing, in one phrase per distinct reason.
+        The per-agent panes that used to caption this are gone; the Engine
+        Room's vitals line is the surface now."""
+        try:
+            return fleet_hold_summary(self.runtime.scheduler.status())
+        except Exception:
+            return ""
 
     def _refresh_trace(self) -> None:
         rows = [(ev.id, trace_line(ev)) for ev in reversed(self._trace_events)]
@@ -350,9 +364,9 @@ class NovelizerApp(App):
             self._trace_events.extend(recent)
             now = time.monotonic()
             contract_recent = [c for c in (to_contract_event(e) for e in recent[-50:]) if c is not None]
-            self._live_state = seed_state(contract_recent, now)
+            self._fleet = seed_fleet(contract_recent, now)
             self._refresh_strip()
-            self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+            self.query_one("#engine_room", EngineRoom).render_live(self._fleet, holds=self._holds())
             self._refresh_trace()
         except Exception as e:
             self._report_worker_error("telemetry-seed", e)
@@ -363,7 +377,7 @@ class NovelizerApp(App):
                 now = time.monotonic()
                 contract_item = to_contract_event(item)
                 if contract_item is not None:
-                    self._live_state = apply_bus_item(self._live_state, contract_item, now)
+                    self._fleet = apply_fleet(self._fleet, contract_item, now)
                 if isinstance(item, StoredEvent):
                     self._trace_events.append(item)
                     self._refresh_trace()
@@ -371,7 +385,7 @@ class NovelizerApp(App):
                         TelemetryEventType.TOOL_CALL_FINISHED, TelemetryEventType.TOOL_CALL_FAILED):
                     self.run_worker(self._summarize_tool_call(item), exclusive=False, group="tool-summary")
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                self.query_one("#engine_room", EngineRoom).render_live(self._fleet, holds=self._holds())
             except Exception as e:
                 self._report_worker_error("telemetry", e)
 
@@ -404,7 +418,7 @@ class NovelizerApp(App):
         while True:
             try:
                 self._refresh_strip()
-                self.query_one("#engine_room", EngineRoom).render_live(self._live_state)
+                self.query_one("#engine_room", EngineRoom).render_live(self._fleet, holds=self._holds())
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
             await asyncio.sleep(0.5)

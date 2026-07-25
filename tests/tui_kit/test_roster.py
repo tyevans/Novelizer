@@ -158,3 +158,28 @@ def test_unheld_agent_is_waiting_for_a_dispatch_slot():
 
 def test_hold_phrase_tolerates_a_status_row_without_the_hold_fields():
     assert hold_phrase(_row("author")) == "ready · waiting for a dispatch slot"
+
+
+# --- fleet_hold_summary: the whole fleet's holds in one line -----------------
+#
+# The per-agent panes are gone, so there is no longer a per-agent surface for
+# the hold phrase. One vitals line has to carry it for everyone: a
+# rate-limited fleet, a crash loop and a converged fleet must not look alike.
+
+def test_fleet_hold_summary_is_empty_when_everyone_is_running():
+    from tui_kit.widgets.roster import fleet_hold_summary
+    assert fleet_hold_summary([_held("author", running=True),
+                               _held("editor", running=True)]) == ""
+
+
+def test_fleet_hold_summary_counts_agents_sharing_a_reason():
+    from tui_kit.widgets.roster import fleet_hold_summary
+    out = fleet_hold_summary([_held("author", paused=True), _held("editor", paused=True),
+                              _held("plotter", waiting_on_pool=True)])
+    assert "2× paused" in out
+    assert "waiting on LLM pool permit" in out
+
+
+def test_fleet_hold_summary_of_an_empty_roster_is_empty():
+    from tui_kit.widgets.roster import fleet_hold_summary
+    assert fleet_hold_summary([]) == ""

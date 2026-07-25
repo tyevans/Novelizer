@@ -10,6 +10,7 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.content import Content
 from textual.widgets import Button, Collapsible, Static
 from tui_kit.contracts import AgentTheme
 from tui_kit.output_renderer import pick_renderer
@@ -25,6 +26,9 @@ from tui_kit.stream_source import StreamSource
 # How close to the bottom still counts as "at the bottom". A couple of
 # lines of slack: demanding an exact match makes reattaching feel broken.
 SCROLL_EPSILON = 2
+
+# How much of a tool call's output preview fits on the folded title line.
+TITLE_PREVIEW_CAP = 80
 
 
 class StreamView(Vertical):
@@ -108,6 +112,38 @@ class StreamView(Vertical):
             self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
         self._refresh_follow_bar()
 
+    def _total(self) -> int:
+        """Length of the whole stream so far, including what trimming dropped
+        off the head. Offsets have to be expressed against this, never against
+        the window: the window stops growing at WINDOW_CAP, the stream does
+        not."""
+        return self._base + len(self._state.blocks)
+
+    def _sync_from(self, blocks: tuple[StreamBlock, ...], start: int) -> None:
+        """Re-state the stream from absolute index `start` onward."""
+        blocks = tuple(blocks)
+        if start < self._base:
+            # The head of `blocks` has already been trimmed out of the window.
+            # Drop it rather than clamping the offset: clamping would shift
+            # every remaining block into its neighbour's widget.
+            blocks = blocks[self._base - start:]
+            start = self._base
+        keep = start - self._base
+        if keep > len(self._state.blocks):
+            raise ValueError(
+                f"sync gap: start={start} is past the end of the window "
+                f"(base={self._base}, len={len(self._state.blocks)})")
+        before = self._total()
+        state = replace(self._state, blocks=self._state.blocks[:keep] + blocks)
+        added = max(0, (self._base + len(state.blocks)) - before)
+        if not state.follow and added:
+            state = replace(state, unseen=state.unseen + added)
+        self._state = self._trim(state)
+        self._reconcile()
+        if self._state.follow:
+            self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
+        self._refresh_follow_bar()
+
     def sync_tail(self, blocks: tuple[StreamBlock, ...], replacing: int) -> None:
         """Replace the trailing `replacing` blocks with `blocks`.
 
@@ -121,18 +157,12 @@ class StreamView(Vertical):
         is re-stated each time and the widgets it already owns are updated
         rather than re-mounted; anything before `replacing` (earlier runs,
         paged-in history) is left alone.
+
+        `replacing` counts back from the end of the WHOLE stream, not of the
+        window. Once a run outgrows WINDOW_CAP the two differ, and measuring
+        against the window would put every block one place out.
         """
-        replacing = max(0, min(replacing, len(self._state.blocks)))
-        kept = self._state.blocks[:len(self._state.blocks) - replacing]
-        added = max(0, len(blocks) - replacing)
-        state = replace(self._state, blocks=kept + tuple(blocks))
-        if not state.follow and added:
-            state = replace(state, unseen=state.unseen + added)
-        self._state = self._trim(state)
-        self._reconcile()
-        if self._state.follow:
-            self.query_one("#sv_window", VerticalScroll).scroll_end(animate=False)
-        self._refresh_follow_bar()
+        self._sync_from(blocks, max(0, self._total() - max(0, replacing)))
 
     def mounted_keys(self) -> list[str]:
         return list(self._mounted)
@@ -212,7 +242,15 @@ class StreamView(Vertical):
                 self._mounted[key] = widget
                 continue
             if isinstance(widget, Collapsible):
-                widget.title = self._tool_summary_line(block)
+                widget.title = self._tool_title(block)
+                # A tool block mounts while it is still running and only learns
+                # its store sequence when the result lands, so the cached
+                # handle has to be refreshed or the lazy fetch asks for 0.
+                widget._sv_sequence = block.sequence
+                widget._sv_path = block.input_summary
+                if block.status == "failed" and not widget._sv_opened_on_failure:
+                    widget._sv_opened_on_failure = True
+                    widget.collapsed = False
             else:
                 widget.update(self._line_for(block))
         # Blocks that fell out of the head (trim) or off the tail (a shorter
@@ -235,13 +273,14 @@ class StreamView(Vertical):
             return widget
         # Failures open on arrival: an error the reader has to click for is
         # an error they will miss.
-        collapsible = Collapsible(title=self._tool_summary_line(block),
+        collapsible = Collapsible(title=self._tool_title(block),
                                   collapsed=block.status != "failed",
                                   classes="sv-tool")
         collapsible._sv_key = key
         collapsible._sv_sequence = block.sequence
         collapsible._sv_path = block.input_summary
         collapsible._sv_loaded = False
+        collapsible._sv_opened_on_failure = block.status == "failed"
         window.mount(collapsible)
         if block.status == "failed":
             self._load_output(collapsible)
@@ -286,6 +325,19 @@ class StreamView(Vertical):
             return gutter + Text(f"▸ call {block.call_index} ({block.model}){tail}", style="dim")
         return gutter + Text(self._tool_summary_line(block), style="bold cyan")
 
+    def _tool_title(self, b: ToolBlock) -> Content:
+        """The Collapsible's title, as Content rather than str.
+
+        A str title IS markup-parsed: CollapsibleTitle turns it into
+        Content.from_text(label) with markup on. This line interpolates
+        model-authored tool arguments, error strings and a cheap-LLM summary
+        -- untrusted text where "[b]" silently disappears and "[/]" raises
+        MarkupError. Worse, the title is re-set on every refresh tick, so one
+        hostile tool argument would raise twice a second forever, out through
+        render_live into the caller's telemetry loop. Content is taken as
+        already-parsed, so nothing is interpreted."""
+        return Content(self._tool_summary_line(b))
+
     def _tool_summary_line(self, b: ToolBlock) -> str:
         parts = [f"⚒ {b.tool_name}({b.input_summary})"]
         if b.repeat_count > 1:
@@ -296,4 +348,9 @@ class StreamView(Vertical):
             parts.append(f"· ✗ {b.error}")
         if b.summary:
             parts.append(f"· {b.summary}")
+        elif b.preview:
+            # Until the cheap-LLM summary lands (and for as long as it never
+            # does), the preview is the only hint a folded call gives about
+            # what it actually returned.
+            parts.append(f"· {b.preview[:TITLE_PREVIEW_CAP]}")
         return " ".join(parts)

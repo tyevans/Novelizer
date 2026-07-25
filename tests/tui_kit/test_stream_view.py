@@ -298,7 +298,7 @@ def _rows(view):
     out = []
     for w in window.children:
         if isinstance(w, Collapsible):
-            out.append(("tool", w.title))
+            out.append(("tool", getattr(w.title, "plain", w.title)))
         else:
             out.append(("text", str(w.renderable)))
     return out
@@ -367,4 +367,125 @@ async def test_a_block_mutating_in_place_keeps_its_key_and_its_widget():
         assert view.query_one("#sv_window").children[0] is prose_widget
         assert pilot.app.query_one(Collapsible) is collapsible
         assert str(prose_widget.renderable) == "@ hello"
-        assert "1.5s" in collapsible.title
+        assert "1.5s" in getattr(collapsible.title, "plain", collapsible.title)
+
+
+# -- untrusted content must never reach a markup parser ----------------------
+#
+# A Collapsible's title is markup-parsed (CollapsibleTitle.validate_label ->
+# Content.from_text(label, markup=True) for a plain str). The tool summary
+# line interpolates model-authored tool arguments, error strings and a
+# cheap-LLM summary, so a plain str title silently swallows "[b]" and RAISES
+# MarkupError on "[/]" -- and since _reconcile re-sets the title on every
+# refresh tick, it would raise twice a second forever.
+
+_HOSTILE_TOOL = ToolBlock(tool_name="read_file",
+                          input_summary='path=[b]ch1.md and an unclosed [/] tag',
+                          status="failed", error="err: [/] bad", agent_name="author",
+                          sequence=3)
+
+
+@pytest.mark.asyncio
+async def test_a_markup_hostile_tool_title_neither_raises_nor_loses_text():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((_HOSTILE_TOOL,))
+        await pilot.pause()
+        title = pilot.app.query_one(Collapsible).title
+        plain = getattr(title, "plain", title)
+        assert "[b]" in plain and "[/]" in plain
+
+
+@pytest.mark.asyncio
+async def test_re_stating_a_markup_hostile_tool_block_does_not_raise():
+    """_reconcile re-sets the title every tick; a MarkupError here propagates
+    all the way out through render_live into the caller's bus loop."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.sync_tail((_HOSTILE_TOOL,), replacing=0)
+        await pilot.pause()
+        view.sync_tail((_HOSTILE_TOOL,), replacing=1)
+        await pilot.pause()
+        title = pilot.app.query_one(Collapsible).title
+        assert "[/]" in getattr(title, "plain", title)
+
+
+# -- sync_tail past the window cap -------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sync_tail_past_the_window_cap_does_not_remount_the_world():
+    """One run longer than WINDOW_CAP: `replacing` exceeds the number of
+    blocks still in the window. Clamping it to the window length silently
+    discards the offset, so every key misses and all 400 widgets unmount and
+    remount on every tick -- losing fold and scroll state permanently."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        run = tuple(ProseBlock(text=f"l{i}", agent_name="author")
+                    for i in range(WINDOW_CAP + 50))
+        view.sync_tail(run, replacing=0)
+        await pilot.pause()
+        keys = view.mounted_keys()
+        first_widget = view.query_one("#sv_window").children[0]
+
+        grown = run + (ProseBlock(text="new", agent_name="author"),)
+        view.sync_tail(grown, replacing=len(run))
+        await pilot.pause()
+
+        # One block in, one block out of the head: all but the first key survive.
+        assert keys[1:] == view.mounted_keys()[:-1]
+        assert view.query_one("#sv_window").children[0] is not first_widget
+        assert _rows(view)[-1] == ("text", "@ new")
+
+
+# -- the collapsed line must hint at the content ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_collapsed_tool_line_shows_the_output_preview():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.append_blocks((ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                                      status="done", duration_s=0.4, agent_name="author",
+                                      sequence=42, preview="The sea rose over the wall"),))
+        await pilot.pause()
+        title = pilot.app.query_one(Collapsible).title
+        assert "The sea rose over the wall" in getattr(title, "plain", title)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_block_that_finishes_later_learns_its_store_sequence():
+    """A tool block mounts while it is still running (sequence 0) and only
+    learns its store sequence when the result arrives. The widget caches the
+    sequence at mount time, so without a refresh the lazy fetch asks for 0
+    and renders "(no output recorded)" forever."""
+    async with _MDApp().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.sync_tail((ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                                  status="running", agent_name="author"),), replacing=0)
+        await pilot.pause()
+        view.sync_tail((ToolBlock(tool_name="read_file", input_summary="ch1.md",
+                                  status="done", duration_s=0.4, agent_name="author",
+                                  sequence=42),), replacing=1)
+        await pilot.pause()
+        collapsible = pilot.app.query_one(Collapsible)
+        collapsible.collapsed = False
+        await pilot.pause()
+        assert pilot.app.query(Markdown)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_block_that_fails_later_opens_itself():
+    """Failures open on arrival -- including when the block was mounted as
+    running and only failed on a later tick, which is the live path."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.sync_tail((ToolBlock(tool_name="write_scene", input_summary="ch4",
+                                  status="running", agent_name="author"),), replacing=0)
+        await pilot.pause()
+        assert pilot.app.query_one(Collapsible).collapsed is True
+        view.sync_tail((ToolBlock(tool_name="write_scene", input_summary="ch4",
+                                  status="failed", error="ValidationError",
+                                  agent_name="author", sequence=7),), replacing=1)
+        await pilot.pause()
+        assert pilot.app.query_one(Collapsible).collapsed is False

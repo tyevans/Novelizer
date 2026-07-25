@@ -13,7 +13,10 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import DataTable, Static
 from tui_kit.contracts import AgentTheme
-from tui_kit.run_model import LiveRunState, styled_vitals
+from tui_kit.fleet_model import (
+    FleetState, blocks as fleet_blocks, fleet_vitals, primary_state, set_run_state,
+)
+from tui_kit.run_model import LiveRunState
 from tui_kit.stream_source import StreamSource
 from tui_kit.widgets.stream_view import StreamView
 
@@ -27,11 +30,14 @@ class EngineRoom(Vertical):
         super().__init__(*args, **kwargs)
         self._theme = theme
         self._source = source
-        # render_live is called with the *whole* current run every time, from
-        # both the bus loop and the 0.5s refresh loop. These two track which
-        # run we are mid-forwarding and how many of its blocks the StreamView
-        # already owns, so re-stating the run updates rather than duplicates.
-        self._run_id: str = ""
+        # render_live is called with the whole current fleet every time, from
+        # both the bus loop and the 0.5s refresh loop. _forwarded is how many
+        # merged blocks the StreamView already owns, so re-stating updates
+        # rather than duplicates. Blocks mutate anywhere in the list (a tool
+        # call several agents back finishes), so the whole forwarded span is
+        # re-stated -- _reconcile is the thing that decides what actually
+        # changed.
+        self._fleet = FleetState()
         self._forwarded: int = 0
 
     def compose(self) -> ComposeResult:
@@ -60,17 +66,28 @@ class EngineRoom(Vertical):
         replacing the tabs."""
         self.query_one("#er_stream", StreamView).set_agents(names)
 
-    def render_live(self, state: LiveRunState, now: float | None = None) -> None:
+    def render_live(self, state: FleetState | LiveRunState, now: float | None = None,
+                    holds: str = "") -> None:
+        """`state` is the whole fleet. A single LiveRunState is accepted too
+        and is merged in as that agent's current run -- a new run appends
+        after the previous one rather than replacing it, because the unified
+        stream is a history, not a per-run pane.
+
+        `holds` is the fleet-wide reason nothing is producing; it captions the
+        vitals line only when nothing is running.
+        """
         now = time.monotonic() if now is None else now
-        self.query_one("#er_vitals", Static).update(styled_vitals(state, now, self._theme))
-        if state.run_id != self._run_id:
-            # A new run appends after the previous one rather than replacing
-            # it: the unified stream is a history, not a per-run pane.
-            self._run_id = state.run_id
-            self._forwarded = 0
-        self.query_one("#er_stream", StreamView).sync_tail(state.blocks, self._forwarded)
-        self._forwarded = len(state.blocks)
-        self.query_one("#er_prompt", Static).update(state.prompt or "(no call in flight)")
+        if isinstance(state, LiveRunState):
+            self._fleet = set_run_state(self._fleet, state.agent_name, state)
+        else:
+            self._fleet = state
+        self.query_one("#er_vitals", Static).update(
+            fleet_vitals(self._fleet, now, self._theme, holds))
+        merged = fleet_blocks(self._fleet)
+        self.query_one("#er_stream", StreamView).sync_tail(merged, self._forwarded)
+        self._forwarded = len(merged)
+        prompt = primary_state(self._fleet).prompt
+        self.query_one("#er_prompt", Static).update(prompt or "(no call in flight)")
 
     def stream_text(self) -> str:
         """Plain text of everything currently mounted in the stream window.

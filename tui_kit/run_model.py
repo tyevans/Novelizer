@@ -201,8 +201,10 @@ def apply_bus_item(state: LiveRunState, item, now: float) -> LiveRunState:
                                   preview=make_preview(item.output_summary),
                                   sequence=item.sequence)
             else:
+                # sequence on the failure too: a failed block opens on arrival,
+                # and without the store handle it opens into an empty box.
                 updated = replace(b, status="failed", duration_s=item.duration_s,
-                                  error=item.error_type)
+                                  error=item.error_type, sequence=item.sequence)
             blocks = state.blocks[:i] + (updated,) + state.blocks[i + 1:]
             return replace(state, blocks=blocks)
         return state
