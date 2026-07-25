@@ -57,10 +57,19 @@ index and will do its own reading.
    hit-line block **byte for byte** as today. This is the regression anchor.
 
 4. **Gather excerpts** — for the first `SUMMARY_SOURCE_CAP = 5` hits:
-   - file-backed kinds → `await backend.aread(path, limit=SUMMARY_BODY_LINES)`,
-     with `sliced_read`'s line-number prefixes stripped. Reading through
-     `CanonBackend` (rather than re-rendering from `read_store`) means the
-     summarizer sees exactly the bytes the agent's own `read_file` would show.
+   - file-backed kinds → `await backend.aread(path, limit=SUMMARY_BODY_LINES)`.
+     Reading through `CanonBackend` (rather than re-rendering from `read_store`)
+     means the summarizer sees exactly the bytes the agent's own `read_file`
+     would show. `aread` returns a `ReadResult`; the text is
+     `file_data_to_string(result.file_data)` — there are no line-number prefixes
+     to strip, since `slice_read_response` returns raw text and numbering is
+     applied downstream by middleware.
+   - **Drop the truncation notice.** When the body exceeds
+     `SUMMARY_BODY_LINES`, `sliced_read` appends a `[SYSTEM NOTICE — …
+     TRUNCATED …]` block instructing the *reader* to call `read_file` again.
+     That is an instruction aimed at an agent, not canon content; left in, it
+     invites the summarizer to echo "call read_file again" into the CONTEXT
+     block. Cut everything from the `TRUNCATION_MARKER` line onward.
    - `entity` hits → the already-inline description/relations line.
    - `arc` / `brief` / `promise` hits → title only; they have no readable file.
    - a read error on any one hit → skip that hit, keep the rest.
