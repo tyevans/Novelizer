@@ -20,21 +20,14 @@ import pytest
 
 from novelizer.canon_fs.backend import CanonBackend
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
+from tests.agents.tooled_builders import TOOLED_BUILDERS
 
 # Every builder that accepts a `backend` kwarg -- i.e. every agent that can
 # reach `/skills/` at all. The bare (push-mode) branch of each has no backend,
 # so no skills route, so registering skills there would point at nothing.
-BUILDERS = [
-    ("novelizer.agents.author", "build_author_runner"),
-    ("novelizer.agents.character_keeper", "build_character_keeper_runner"),
-    ("novelizer.agents.plotter", "build_plotter_runner"),
-    ("novelizer.agents.editor", "build_editor_runner"),
-    ("novelizer.agents.retconner", "build_retconner_runner"),
-    ("novelizer.agents.world_architect", "build_world_architect_runner"),
-    ("novelizer.agents.continuity_checker", "build_continuity_checker_runner"),
-    ("novelizer.agents.structure_analyst", "build_structure_analyst_runner"),
-    ("novelizer.agents.triage", "build_triage_runner"),
-]
+# Derived from AGENT_REGISTRY: a hand-maintained copy of this list is how the
+# Curator shipped unswept. See tests/agents/tooled_builders.py.
+BUILDERS = TOOLED_BUILDERS
 
 
 class _FakeSettings:
