@@ -365,7 +365,7 @@ class ContinuityChecker(BaseAgent):
             await self._commit_knowledge_intents(
                 [KnowledgeIntent(action=fact.action, id=fact.id, character_id=fact.character_id, note=fact.note)],
                 active_secret_ids, chapter_id=chapter_id, allowed_actions=frozenset({"learn", "uses"}),
-                source="mined",
+                source="mined", character_ids={c.id for c in ctx["characters"]},
             )
 
         for fact in mined_out.reveal_facts:

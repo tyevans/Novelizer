@@ -671,3 +671,68 @@ async def test_arc_resolve_unknown_arc_dropped(caplog):
     )
     assert len(c.commits) == 0
     assert any("nope" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_learn_drops_unknown_character_id(caplog):
+    """A hallucinated character_id must never reach secret_knowledge: the row
+    would put a phantom id in the knowledge matrix's known_by set while the
+    real character still reads 'unknown', so the LeakDetector would later
+    flag that character's legitimate use as a leak."""
+    c = FakeCommitter()
+    await commit_knowledge_intents(
+        c, "character_keeper",
+        [KnowledgeIntent(action="learn", id="s1", character_id="ghost")],
+        active_secret_ids={"s1"}, character_ids={"c1"},
+    )
+    assert len(c.commits) == 0
+    assert any("ghost" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_knowledge_uses_drops_unknown_character_id():
+    c = FakeCommitter()
+    await commit_knowledge_intents(
+        c, "editor",
+        [KnowledgeIntent(action="uses", id="s1", character_id="ghost")],
+        active_secret_ids={"s1"}, character_ids={"c1"},
+    )
+    assert len(c.commits) == 0
+
+
+@pytest.mark.asyncio
+async def test_knowledge_learn_keeps_known_character_id():
+    c = FakeCommitter()
+    await commit_knowledge_intents(
+        c, "character_keeper",
+        [KnowledgeIntent(action="learn", id="s1", character_id="c1")],
+        active_secret_ids={"s1"}, character_ids={"c1"},
+    )
+    assert len(c.commits) == 1
+    assert c.commits[0][1] == EventType.SECRET_LEARNED
+
+
+@pytest.mark.asyncio
+async def test_knowledge_character_validation_is_opt_in():
+    """character_ids=None means 'caller has no roster to check against' and
+    must behave exactly as before -- plant/reveal carry no character_id at
+    all, so they are never affected either way."""
+    c = FakeCommitter()
+    await commit_knowledge_intents(
+        c, "author",
+        [KnowledgeIntent(action="learn", id="s1", character_id="whoever")],
+        active_secret_ids={"s1"},
+    )
+    assert len(c.commits) == 1
+
+
+@pytest.mark.asyncio
+async def test_knowledge_plant_and_reveal_unaffected_by_character_roster():
+    c = FakeCommitter()
+    await commit_knowledge_intents(
+        c, "author",
+        [KnowledgeIntent(action="plant", title="The Heir Lives"),
+         KnowledgeIntent(action="reveal", id="s1")],
+        active_secret_ids={"s1"}, character_ids=set(),
+    )
+    assert [x[1] for x in c.commits] == [EventType.SECRET_CREATED, EventType.SECRET_REVEALED]

@@ -18,7 +18,8 @@ class _NullRunner:
 
 
 def _empty_ctx() -> dict:
-    return {"threads": [], "secrets": [], "chapters": [], "signals": [], "themes": [], "promises": []}
+    return {"threads": [], "secrets": [], "chapters": [], "signals": [], "themes": [], "promises": [],
+            "characters": []}
 
 
 async def test_commit_stamps_provenance():

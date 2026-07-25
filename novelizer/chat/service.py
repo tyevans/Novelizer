@@ -165,6 +165,7 @@ class ChatService:
                 await commit_knowledge_intents(
                     self._committer, agent_name, reply.knowledge_intents, active_secrets,
                     allowed_actions=persona.knowledge_actions, source="chat",
+                    character_ids={c.id for c in await self._read.list_characters()},
                 )
             else:
                 logger.warning("%s: dropped %d knowledge intents not permitted in chat", agent_name, len(reply.knowledge_intents))

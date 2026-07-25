@@ -317,6 +317,11 @@ async def test_editor_prompt_byte_identical_to_pre_m3_3_shape_when_brain_silent(
 
 async def test_editor_commit_uses_a_known_active_secret(stack):
     events, proj, read, committer = stack
+    # Mara has to exist: a `uses` intent citing a character outside the cast is
+    # dropped at commit time, so seeding only the secret would pass for the
+    # wrong reason.
+    from novelizer.store.models import Character
+    await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await events.append(EventType.CHAPTER_CREATED, "c1", Chapter(id="c1", title="One", prose="p"))
     await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
     await proj.catch_up()
@@ -870,3 +875,15 @@ async def test_editor_commits_promise_intents_with_validation(stack):
 def test_spec_carries_subagent_grant():
     from novelizer.agents.editor import SPEC
     assert SPEC.subagent_grant.enabled_setting == "editor_subagent_enabled"
+
+
+def test_editor_output_contract_does_not_forbid_planting_a_secret():
+    """The contract read "each citing an existing id from the context block",
+    which forbids `plant` -- the one knowledge action that MINTS an id rather
+    than citing one. Combined with a citation aid that is empty until a secret
+    already exists, it left the Editor unable to originate the first secret in
+    a story at all."""
+    from novelizer.agents.editor import SYSTEM_PROMPT
+
+    assert "each citing an existing id from the context block" not in SYSTEM_PROMPT
+    assert "plant" in SYSTEM_PROMPT

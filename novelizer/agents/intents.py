@@ -236,6 +236,7 @@ async def commit_knowledge_intents(
     chapter_id: str = "",
     allowed_actions: frozenset[str] = frozenset({"plant", "learn", "reveal", "uses"}),
     source: str = "declared",
+    character_ids: set[str] | None = None,
 ) -> None:
     """Turn agent-declared KnowledgeIntent entries into secret.* commits.
 
@@ -249,7 +250,15 @@ async def commit_knowledge_intents(
     the safe choice is to drop it, matching how an unknown-id
     learn/reveal/uses intent is dropped below). `learn`/`reveal`/`uses`
     must cite an id present in `active_secret_ids`; `learn`/`uses`
-    additionally require a non-blank `character_id`. `allowed_actions`
+    additionally require a non-blank `character_id`, and -- when the caller
+    supplies a `character_ids` roster -- one that names a real character.
+    A hallucinated character_id must never reach secret_knowledge: the row
+    would seed the knowledge matrix's `known_by` with a phantom id while
+    the character the agent meant still reads "unknown", so the
+    LeakDetector would later flag that character's legitimate use as a
+    leak. `character_ids=None` means "this caller has no roster to check
+    against" and skips the check; `plant`/`reveal` carry no character_id
+    and are never affected either way. `allowed_actions`
     restricts which actions this caller may commit -- CharacterKeeper
     passes frozenset({"learn"}) since minting/revealing a secret is a
     narrative-authoring act reserved for Author/Editor (Locked decision
@@ -286,11 +295,18 @@ async def commit_knowledge_intents(
                 "%s: dropped knowledge %s intent for unknown secret id %r", agent_name, intent.action, intent.id
             )
             continue
-        if intent.action in ("learn", "uses") and not intent.character_id.strip():
-            logger.warning(
-                "%s: dropped knowledge %s intent with empty character_id", agent_name, intent.action
-            )
-            continue
+        if intent.action in ("learn", "uses"):
+            if not intent.character_id.strip():
+                logger.warning(
+                    "%s: dropped knowledge %s intent with empty character_id", agent_name, intent.action
+                )
+                continue
+            if character_ids is not None and _normalize_id(intent.character_id) not in character_ids:
+                logger.warning(
+                    "%s: dropped knowledge %s intent for unknown character id %r",
+                    agent_name, intent.action, intent.character_id,
+                )
+                continue
         _warn_if_ungrounded(agent_name, "knowledge", intent.action, secret_id, intent.evidence)
         event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
         if intent.action == "reveal":
