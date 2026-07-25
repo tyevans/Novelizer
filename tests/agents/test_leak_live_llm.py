@@ -10,7 +10,7 @@ matrix says only Mara has learned it. The room then catches it on its own:
   1. The REAL Editor reviews the draft (its normal poll target). The Editor
      deliberately gets no who-knows-what guardrail note (Locked decision #7:
      that is Author-only); it does see the active-secret id list (a citation
-     aid, so its knowledge_intents can cite a valid id). Honestly annotating
+     aid, so its secret_citations can cite a valid id). Honestly annotating
      the prose, it declares a `uses` intent for Kestrel -> `secret.referenced`.
   2. The deterministic LeakDetector cross-checks that committed reference
      against the knowledge matrix: Kestrel never learned it, not revealed ->

@@ -88,11 +88,11 @@ def test_author_instructions_define_what_a_secret_is():
     instructions are the only place a first secret can come from, and they
     have to say what qualifies -- thread_intents and promise_intents both
     define their subject ("load-bearing promise to the reader", "Chekhov's
-    gun"); knowledge_intents used to name the action without ever defining
+    gun"); the secret slot used to name the action without ever defining
     a secret.
     """
     text = AUTHOR_SYSTEM_PROMPT
-    assert "knowledge_intents" in text
+    assert "secret_plants" in text and "secret_citations" in text
     assert "withheld" in text
     # Names the asymmetry that makes a secret a secret, not just a fact.
     assert "who knows" in text or "knows it" in text

@@ -388,7 +388,7 @@ async def test_m3_done_when_mechanical_chain_stale_thread_to_touched_to_not_stal
     assert "stale" not in thread_line(thread_after, chapters_after).plain
 
 
-from novelizer.agents.schemas import KnowledgeIntent, CausalIntent
+from novelizer.agents.schemas import SecretPlant, SecretCitation, CausalIntent
 from novelizer.canon.events import SecretCreated
 from novelizer.store.models import Chapter
 
@@ -397,7 +397,7 @@ async def test_author_commit_plants_a_secret_from_structured_output(stack):
     events, proj, read, committer = stack
     draft = ChapterDraft(
         title="T", prose="P",
-        knowledge_intents=[KnowledgeIntent(action="plant", title="The Heir Lives")],
+        secret_plants=[SecretPlant(title="The Heir Lives")],
     )
     author = Author(FakeRunner(draft), read, committer)
     await author.run_once()
@@ -417,7 +417,7 @@ async def test_author_commit_uses_a_known_active_secret(stack):
     await proj.catch_up()
     draft = ChapterDraft(
         title="T", prose="P",
-        knowledge_intents=[KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+        secret_citations=[SecretCitation(action="uses", id="the-heir-lives", character_id="mara")],
     )
     author = Author(FakeRunner(draft), read, committer)
     await author.run_once()
@@ -1004,7 +1004,7 @@ async def test_author_commit_drops_knowledge_intent_citing_unknown_character(sta
     await proj.catch_up()
     draft = ChapterDraft(
         title="T", prose="P",
-        knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="phantom")],
+        secret_citations=[SecretCitation(action="learn", id="the-heir-lives", character_id="phantom")],
     )
     author = Author(FakeRunner(draft), read, committer)
     await author.run_once()
@@ -1019,15 +1019,21 @@ async def test_author_commit_drops_knowledge_intent_citing_unknown_character(sta
 def test_author_prompt_defines_what_a_secret_is_not_just_the_action():
     """The prompt contract behind the origination gap (the live observation is
     tests/agents/test_secret_origination_live_llm.py, which does not run in
-    CI). knowledge_intents used to get one bare line naming `plant` while its
-    neighbours got definitional craft guidance -- and over 602 real prompts the
-    model filled the field zero times. This pins that the definition is
-    present and unconditional: it lives in the system prompt, so it reaches the
-    Author in the cold-start state where no secret exists yet and every
-    state-conditional context note is empty. It proves the guidance is THERE,
-    not that a model acts on it -- only the live test observes that."""
+    CI). The merged knowledge_intents slot used to get one bare line naming
+    `plant` while its neighbours got definitional craft guidance -- and over 602
+    real prompts the model filled the field zero times. This pins that the
+    definition is present and unconditional: it lives in the system prompt, so
+    it reaches the Author in the cold-start state where no secret exists yet and
+    every state-conditional context note is empty. It proves the guidance is
+    THERE, not that a model acts on it -- only the live test observes that.
+
+    Also pins that the plant half advertises itself as available with no secret
+    in existence, which is the structural half of the same fix (F6)."""
     from novelizer.agents.author import AUTHOR_SYSTEM_PROMPT
 
-    block = AUTHOR_SYSTEM_PROMPT.split("- knowledge_intents")[1].split("- causal_intents")[0]
-    assert "withheld knowledge" in block
-    assert "who knows it" in block
+    block = AUTHOR_SYSTEM_PROMPT.split("- secret_plants")[1].split("- causal_intents")[0]
+    # The prompt is hard-wrapped, so match on collapsed whitespace.
+    flat = " ".join(block.split())
+    assert "withheld knowledge" in flat
+    assert "who knows it" in flat
+    assert "does not need any secret to exist yet" in flat

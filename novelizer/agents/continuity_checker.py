@@ -4,7 +4,7 @@ from novelizer.agents.base import BaseAgent, Runner
 from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, DEFAULT_PASS_REMARK, PASS_PROMPT_INSTRUCTION
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import (
-    ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, KnowledgeIntent, CausalIntent,
+    ContinuityOutput, MinedFactsOutput, MinedInspirationFact, ThreadIntent, SecretCitation, CausalIntent,
     PromiseIntent,
 )
 from novelizer.brain.context import chapter_map_note, open_retcons_note
@@ -380,8 +380,8 @@ class ContinuityChecker(BaseAgent):
                     self.name, fact.id, fact.character_id, chapter_id,
                 )
                 continue
-            await self._commit_knowledge_intents(
-                [KnowledgeIntent(action=fact.action, id=fact.id, character_id=fact.character_id, note=fact.note)],
+            await self._commit_secret_citations(
+                [SecretCitation(action=fact.action, id=fact.id, character_id=fact.character_id, note=fact.note)],
                 active_secret_ids, chapter_id=chapter_id, allowed_actions=frozenset({"learn", "uses"}),
                 source="mined", character_ids={c.id for c in ctx["characters"]},
             )

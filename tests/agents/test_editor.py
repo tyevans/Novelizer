@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, ThreadPlanted, AnnotationStructureScored, SecretCreated, ThemeIntroduced
 from novelizer.agents.editor import Editor
-from novelizer.agents.schemas import EditorVerdict, ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, VoiceDriftFlag, FlagDraft
+from novelizer.agents.schemas import EditorVerdict, ThreadIntent, SecretPlant, SecretCitation, CausalIntent, ThemeIntent, VoiceDriftFlag, FlagDraft
 from novelizer.store.models import Chapter, EditorialStatus, Character, FlagStatus
 
 
@@ -327,7 +327,7 @@ async def test_editor_commit_uses_a_known_active_secret(stack):
     await proj.catch_up()
     verdict = EditorVerdict(
         verdict="approve", notes="clean",
-        knowledge_intents=[KnowledgeIntent(action="uses", id="the-heir-lives", character_id="mara")],
+        secret_citations=[SecretCitation(action="uses", id="the-heir-lives", character_id="mara")],
     )
     agent = Editor(FakeRunner(verdict), read, committer)
     await agent.run_once()
@@ -358,7 +358,7 @@ async def test_editor_commit_drops_unknown_secret_id(stack):
     await proj.catch_up()
     verdict = EditorVerdict(
         verdict="approve", notes="clean",
-        knowledge_intents=[KnowledgeIntent(action="reveal", id="ghost-secret")],
+        secret_citations=[SecretCitation(action="reveal", id="ghost-secret")],
     )
     agent = Editor(FakeRunner(verdict), read, committer)
     await agent.run_once()

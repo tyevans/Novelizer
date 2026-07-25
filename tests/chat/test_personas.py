@@ -38,5 +38,5 @@ def test_resolve_agent_name_canonical_aliases_and_case():
 
 def test_chat_reply_defaults_are_empty_intents():
     r = ChatReply(reply_text="hi")
-    assert r.thread_intents == [] and r.knowledge_intents == []
+    assert r.thread_intents == [] and r.secret_citations == []
     assert r.causal_intents == [] and r.theme_intents == []

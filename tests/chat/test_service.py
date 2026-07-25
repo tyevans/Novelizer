@@ -6,7 +6,7 @@ from novelizer.runtime import Runtime
 from novelizer.canon.events import EventType, SecretCreated
 from novelizer.canon.autonomy import AutonomyLevel, AutonomyState
 from novelizer.chat.schemas import ChatReply
-from novelizer.agents.schemas import ThreadIntent, KnowledgeIntent
+from novelizer.agents.schemas import ThreadIntent, SecretCitation
 from novelizer.store.models import Chapter
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
@@ -107,7 +107,7 @@ async def test_chat_intents_commit_with_chat_source(db_path):
 
 @pytest.mark.asyncio
 async def test_gated_intent_becomes_proposal(db_path):
-    reply = ChatReply(reply_text="Revealing.", knowledge_intents=[KnowledgeIntent(action="reveal", id="s1")])
+    reply = ChatReply(reply_text="Revealing.", secret_citations=[SecretCitation(action="reveal", id="s1")])
     rt = await _runtime(db_path, {"chat_author": _R(reply)})
     try:
         await rt.events.append(EventType.SECRET_CREATED, "s1", SecretCreated(id="s1", title="The Debt"))
@@ -329,7 +329,7 @@ async def test_chat_knowledge_intent_citing_unknown_character_is_dropped(db_path
 
     reply = ChatReply(
         reply_text="Noted.",
-        knowledge_intents=[KnowledgeIntent(action="learn", id="s1", character_id="phantom")],
+        secret_citations=[SecretCitation(action="learn", id="s1", character_id="phantom")],
     )
     rt = await _runtime(db_path, {"chat_author": _R(reply)})
     try:

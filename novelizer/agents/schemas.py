@@ -130,30 +130,61 @@ class ThemeIntent(BaseModel):
     note: str = ""
 
 
-class KnowledgeIntent(BaseModel):
-    """One agent-declared secret-knowledge action from structured output.
+class SecretPlant(BaseModel):
+    """One agent-declared NEW secret, minted from a freeform title.
 
-    `plant` mints a new secret from a freeform `title` (the system slugs it
-    into an id -- see novelizer.canon.secrets.slugify_secret_name); `learn`,
-    `reveal`, and `uses` must cite an existing secret's `id` rather than
-    inventing one. `learn`/`uses` additionally require `character_id` (the
-    character who learns/uses the secret); `reveal` and `plant` leave it
-    blank. `BaseAgent._commit_knowledge_intents` turns validated intents
-    into secret.* commits (see novelizer/agents/base.py). CharacterKeeper is
-    restricted to `learn` only (Locked decision #1) -- minting/revealing a
-    secret is a narrative-authoring act reserved for Author/Editor.
+    Deliberately the narrowest model in this module. Planting used to be one
+    branch of a four-way `action` Literal on a merged KnowledgeIntent, sharing
+    `id`/`character_id` fields it never used with three citing actions that
+    each required a secret to already exist. In a story with zero secrets that
+    made three of the four actions unreachable and left minting -- the only
+    reachable one -- as a 1-in-4 branch inside one of seven optional lists.
+    Measured: the slot was offered 641 times and fired zero times, and that
+    stayed true after the prompt-side causes were fixed. A field carrying only
+    what a plant needs is the structural half of that fix.
+
+    The system slugs `title` into the secret's id -- see
+    novelizer.canon.secrets.slugify_secret_name. There is no `id` field on
+    purpose: an agent that can supply one will try to, and a supplied id is a
+    citation, not a mint.
     """
 
-    action: Literal["plant", "learn", "reveal", "uses"]
-    title: str = ""
-    id: str = ""
+    title: str
+    note: str = ""
+
+
+class SecretCitation(BaseModel):
+    """One agent-declared action on a secret that ALREADY EXISTS.
+
+    `id` must name a secret in the agent's context; `learn`/`uses` also need
+    the `character_id` of the character doing so, and `reveal` leaves it blank
+    (a reveal makes the secret public -- it is not one character's act of
+    knowing). That last conditional is the one requiredness rule this pair
+    cannot express in the type, and it is enforced where every other intent
+    rule is: `commit_secret_citations` drops a citation missing its character
+    with a logged warning.
+
+    Deliberately NOT a strict cross-field validator. These models are parsed as
+    part of an agent's whole structured response, so a rejecting validator
+    would fail the entire response -- losing a chapter's prose over one
+    malformed intent. Dropping the intent and keeping the prose is the
+    project's standing trade, and it is why `character_id` has a default.
+
+    `plant` is absent from the action Literal because minting lives in
+    SecretPlant. That is what makes Locked decision #1 -- minting is reserved
+    to Author/Editor -- a property of the schema rather than a runtime check:
+    KeeperOutput carries this model and no SecretPlant field, so the Keeper
+    has no slot to mint in.
+    """
+
+    action: Literal["learn", "reveal", "uses"]
+    id: str
     character_id: str = ""
     note: str = ""
     evidence: str = ""
-    """Canon the citing action rests on — a chNNN handle or canon file path.
-    Empty is legal (minting actions have nothing prior to cite) but a citing
-    action without it is logged: an uncited claim about existing canon is the
-    shape a hallucinated intent takes."""
+    """Canon the citation rests on — a chNNN handle or canon file path. Empty
+    is legal but logged: an uncited claim about existing canon is the shape a
+    hallucinated intent takes."""
 
 
 
@@ -287,7 +318,11 @@ class KeeperOutput(BaseModel):
     new_characters: list[NewCharacter] = Field(default_factory=list)
     updated_characters: list[CharacterUpdate] = Field(default_factory=list)
     flags: list[FlagDraft] = Field(default_factory=list)
-    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    secret_citations: list[SecretCitation] = Field(default_factory=list)
+    """Learn-only in practice (commit_secret_citations is passed
+    allowed_actions={"learn"}). There is deliberately no secret_plants field:
+    Locked decision #1 reserves minting to Author/Editor, and denying the slot
+    makes that unrepresentable rather than merely refused at commit time."""
     arc_intents: list[ArcIntent] = Field(default_factory=list)
     feed_note: str = ""
     no_action: bool = False
@@ -319,7 +354,8 @@ class EditorVerdict(BaseModel):
     notes: str = ""
     feed_note: str = ""
     thread_intents: list[ThreadIntent] = Field(default_factory=list)
-    knowledge_intents: list[KnowledgeIntent] = Field(default_factory=list)
+    secret_plants: list[SecretPlant] = Field(default_factory=list)
+    secret_citations: list[SecretCitation] = Field(default_factory=list)
     causal_intents: list[CausalIntent] = Field(default_factory=list)
     theme_intents: list[ThemeIntent] = Field(default_factory=list)
     voice_drift_flags: list[VoiceDriftFlag] = Field(default_factory=list)

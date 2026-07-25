@@ -7,7 +7,7 @@ from novelizer.canon.read_store import ReadStore
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType
 from novelizer.agents.character_keeper import CharacterKeeper
-from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, FlagDraft, KnowledgeIntent, ArcIntent
+from novelizer.agents.schemas import KeeperOutput, CharacterUpdate, NewCharacter, FlagDraft, SecretPlant, SecretCitation, ArcIntent
 from novelizer.agents.character_keeper import SYSTEM_PROMPT
 from novelizer.canon.events import SecretCreated, BlueprintAdopted, ArcDeclared, ChapterProcessed
 from novelizer.store.models import Character, Chapter, FlagStatus
@@ -119,7 +119,7 @@ async def test_character_keeper_commit_learn_commits_secret_learned(stack):
     await events.append(EventType.SECRET_CREATED, "the-heir-lives", SecretCreated(id="the-heir-lives", title="The Heir Lives"))
     await proj.catch_up()
     out = KeeperOutput(
-        knowledge_intents=[KnowledgeIntent(action="learn", id="the-heir-lives", character_id="mara", note="pieced it together")],
+        secret_citations=[SecretCitation(action="learn", id="the-heir-lives", character_id="mara", note="pieced it together")],
     )
     keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
@@ -132,7 +132,7 @@ async def test_character_keeper_commit_drops_non_learn_actions(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await proj.catch_up()
-    out = KeeperOutput(knowledge_intents=[KnowledgeIntent(action="plant", title="Should Not Commit")])
+    out = KeeperOutput(secret_plants=[SecretPlant(title="Should Not Commit")])
     keeper = CharacterKeeper(FakeRunner(out), read, committer, events)
     await keeper.run_once()
     await proj.catch_up()
@@ -140,7 +140,7 @@ async def test_character_keeper_commit_drops_non_learn_actions(stack):
     assert [e.event_type for e in log if e.event_type.startswith("secret.")] == []
 
 
-async def test_character_keeper_commit_with_no_knowledge_intents_emits_no_secret_events(stack):
+async def test_character_keeper_commit_with_no_secret_citations_emits_no_secret_events(stack):
     events, proj, read, committer = stack
     await events.append(EventType.CHARACTER_CREATED, "mara", Character(id="mara", name="Mara"))
     await proj.catch_up()

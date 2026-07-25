@@ -18,7 +18,7 @@ from novelizer.canon.themes import slugify_theme_name
 from novelizer.canon.promises import slugify_promise_name
 from novelizer.canon.beat_templates import BEAT_TEMPLATES
 from novelizer.agents.schemas import (
-    ThreadIntent, KnowledgeIntent, CausalIntent, ThemeIntent, PromiseIntent,
+    ThreadIntent, SecretPlant, SecretCitation, CausalIntent, ThemeIntent, PromiseIntent,
     BlueprintPlan, RetargetIntent, BriefIntent, BeatIntent, ResolutionPlanIntent, ArcIntent,
 )
 from novelizer.store.models import Flag, FlagStatus, ChapterBriefRecord, ThemeRecord
@@ -266,94 +266,112 @@ async def commit_theme_intents(
         )
 
 
-async def commit_knowledge_intents(
+async def commit_secret_plants(
     committer,
     agent_name: str,
-    intents: list[KnowledgeIntent],
+    plants: list[SecretPlant],
     active_secret_ids: set[str],
     chapter_id: str = "",
-    allowed_actions: frozenset[str] = frozenset({"plant", "learn", "reveal", "uses"}),
+) -> None:
+    """Turn agent-declared SecretPlant entries into secret.created commits.
+
+    Mints the id via slugify_secret_name(plant.title). A blank title is
+    dropped with a warning, and so is a title that slugs to an
+    already-active id: secrets have no touch-analog the way threads do
+    (M3.1's plant-collision downgrades to thread.touched, which needs only
+    id+note), and a colliding plant cannot be reinterpreted as a citation
+    without a character_id or reveal semantics it does not carry.
+
+    Separate from commit_secret_citations because minting and citing share
+    no validation at all -- this one has no id to check, no character to
+    check against a roster, and no action to permit. Only Author and Editor
+    reach it: no other output schema has a secret_plants field to fill
+    (Locked decision #1). No-op on an empty list.
+    """
+    for plant in plants:
+        if not plant.title.strip():
+            logger.warning("%s: dropped secret plant with empty title", agent_name)
+            continue
+        secret_id = slugify_secret_name(plant.title)
+        if secret_id in active_secret_ids:
+            logger.warning(
+                "%s: plant %r collides with existing secret id %r, dropping",
+                agent_name, plant.title, secret_id,
+            )
+            continue
+        await committer.commit(
+            agent_name, EventType.SECRET_CREATED, secret_id,
+            SecretCreated(id=secret_id, title=plant.title, chapter_id=chapter_id, note=plant.note),
+        )
+
+
+async def commit_secret_citations(
+    committer,
+    agent_name: str,
+    citations: list[SecretCitation],
+    active_secret_ids: set[str],
+    chapter_id: str = "",
+    allowed_actions: frozenset[str] = frozenset({"learn", "reveal", "uses"}),
     source: str = "declared",
     character_ids: set[str] | None = None,
 ) -> None:
-    """Turn agent-declared KnowledgeIntent entries into secret.* commits.
+    """Turn agent-declared SecretCitation entries into secret.* commits.
 
-    `plant` mints a new id via slugify_secret_name(intent.title) and is
-    dropped only if the title is blank; a plant colliding with an
-    already-known active id is dropped with a warning -- secrets have no
-    touch-analog the way threads do (M3.1's plant-collision downgrades
-    to thread.touched, which needs only id+note; a colliding secret
-    plant can't be safely reinterpreted as learn/reveal/uses without a
-    character_id or reveal semantics the plant intent doesn't carry, so
-    the safe choice is to drop it, matching how an unknown-id
-    learn/reveal/uses intent is dropped below). `learn`/`reveal`/`uses`
-    must cite an id present in `active_secret_ids`; `learn`/`uses`
-    additionally require a non-blank `character_id`, and -- when the caller
-    supplies a `character_ids` roster -- one that names a real character.
-    A hallucinated character_id must never reach secret_knowledge: the row
-    would seed the knowledge matrix's `known_by` with a phantom id while
-    the character the agent meant still reads "unknown", so the
-    LeakDetector would later flag that character's legitimate use as a
-    leak. `character_ids=None` means "this caller has no roster to check
-    against" and skips the check; `plant`/`reveal` carry no character_id
-    and are never affected either way. `allowed_actions`
-    restricts which actions this caller may commit -- CharacterKeeper
-    passes frozenset({"learn"}) since minting/revealing a secret is a
-    narrative-authoring act reserved for Author/Editor (Locked decision
-    #1). Any intent whose action is not in `allowed_actions`, or that
-    fails validation, is dropped with a logged warning and no event is
-    committed. No-op on an empty list.
+    Every citation must name an id present in `active_secret_ids`.
+    `learn`/`uses` additionally require a non-blank `character_id` and --
+    when the caller supplies a `character_ids` roster -- one that names a
+    real character. A hallucinated character_id must never reach
+    secret_knowledge: the row would seed the knowledge matrix's `known_by`
+    with a phantom id while the character the agent meant still reads
+    "unknown", so the LeakDetector would later flag that character's
+    legitimate use as a leak. `character_ids=None` means "this caller has no
+    roster to check against" and skips the check; `reveal` carries no
+    character_id and is never affected either way.
+
+    `allowed_actions` restricts which actions this caller may commit:
+    CharacterKeeper passes frozenset({"learn"}), and ContinuityChecker's
+    prose-mining path passes frozenset({"learn", "uses"}) because a mined
+    reveal is escalated to a retcon request instead of auto-committed.
+    Any citation whose action is not permitted, or that fails validation, is
+    dropped with a logged warning and no event is committed. No-op on an
+    empty list.
     """
-    for intent in intents:
-        if intent.action not in allowed_actions:
+    for citation in citations:
+        if citation.action not in allowed_actions:
             logger.warning(
-                "%s: dropped knowledge intent action %r not permitted for this agent",
-                agent_name, intent.action,
+                "%s: dropped secret citation action %r not permitted for this agent",
+                agent_name, citation.action,
             )
             continue
-        if intent.action == "plant":
-            if not intent.title.strip():
-                logger.warning("%s: dropped secret plant intent with empty title", agent_name)
-                continue
-            secret_id = slugify_secret_name(intent.title)
-            if secret_id in active_secret_ids:
-                logger.warning(
-                    "%s: plant %r collides with existing secret id %r, dropping",
-                    agent_name, intent.title, secret_id,
-                )
-                continue
-            await committer.commit(
-                agent_name, EventType.SECRET_CREATED, secret_id,
-                SecretCreated(id=secret_id, title=intent.title, chapter_id=chapter_id, note=intent.note),
-            )
-            continue
-        secret_id = _normalize_id(intent.id)
+        secret_id = _normalize_id(citation.id)
         if secret_id not in active_secret_ids:
             logger.warning(
-                "%s: dropped knowledge %s intent for unknown secret id %r", agent_name, intent.action, intent.id
+                "%s: dropped secret %s citation for unknown secret id %r",
+                agent_name, citation.action, citation.id,
             )
             continue
-        if intent.action in ("learn", "uses"):
-            if not intent.character_id.strip():
+        if citation.action in ("learn", "uses"):
+            if not citation.character_id.strip():
                 logger.warning(
-                    "%s: dropped knowledge %s intent with empty character_id", agent_name, intent.action
+                    "%s: dropped secret %s citation with empty character_id",
+                    agent_name, citation.action,
                 )
                 continue
-            if character_ids is not None and _normalize_id(intent.character_id) not in character_ids:
+            if character_ids is not None and _normalize_id(citation.character_id) not in character_ids:
                 logger.warning(
-                    "%s: dropped knowledge %s intent for unknown character id %r",
-                    agent_name, intent.action, intent.character_id,
+                    "%s: dropped secret %s citation for unknown character id %r",
+                    agent_name, citation.action, citation.character_id,
                 )
                 continue
-        _warn_if_ungrounded(agent_name, "knowledge", intent.action, secret_id, intent.evidence)
-        event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[intent.action]
-        if intent.action == "reveal":
-            payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=intent.note,
-                                  evidence=intent.evidence)
+        _warn_if_ungrounded(agent_name, "knowledge", citation.action, secret_id, citation.evidence)
+        event_type, payload_cls = _KNOWLEDGE_EVENT_BY_ACTION[citation.action]
+        if citation.action == "reveal":
+            payload = payload_cls(id=secret_id, chapter_id=chapter_id, note=citation.note,
+                                  evidence=citation.evidence)
         else:
             payload = payload_cls(
-                id=secret_id, character_id=_normalize_id(intent.character_id), chapter_id=chapter_id,
-                note=intent.note, source=source, evidence=intent.evidence,
+                id=secret_id, character_id=_normalize_id(citation.character_id), chapter_id=chapter_id,
+                note=citation.note, source=source, evidence=citation.evidence,
             )
         await committer.commit(agent_name, event_type, secret_id, payload)
 
