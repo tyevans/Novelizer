@@ -16,22 +16,12 @@ from novelizer.store.models import SignalKind
 from novelizer.telemetry.bus import TelemetryBus
 from novelizer.telemetry.recorder import TelemetryRecorder
 from novelizer.telemetry.callbacks import TelemetryCallbackHandler
-from novelizer.agents.author import build_author_runner
-from novelizer.agents.world_architect import build_world_architect_runner
-from novelizer.agents.character_keeper import build_character_keeper_runner
-from novelizer.agents.editor import build_editor_runner
-from novelizer.agents.continuity_checker import (
-    build_continuity_checker_runner, build_continuity_mining_runner,
-)
-from novelizer.agents.retconner import build_retconner_runner
-from novelizer.agents.structure_analyst import build_structure_analyst_runner
-from novelizer.agents.plotter import build_plotter_runner
-# NOTE: start() builds runners via each agent module's own build_X_runner binding
-# (reached through AgentSpec.construct/_construct in registry.py), while
-# apply_settings() below calls the build_X_runner names imported directly into
-# this module's namespace -- two separate bindings to the same underlying
-# functions. This split is intentional (a prior fix in this branch corrected a
-# test that monkeypatched the wrong binding); keep both in sync if you touch either.
+# Runner builders are NOT imported here. Both start() and apply_settings() reach
+# them through each agent's own AgentSpec.construct(ctx), so there is exactly one
+# binding per builder -- the agent module's. The previous second binding in this
+# namespace was how the rebuild path drifted from the construction path (it
+# skipped agents and dropped subagent grants); a test that patches a builder now
+# patches the only binding there is.
 from novelizer.agents.registry import AGENT_REGISTRY
 from novelizer.agents.registry_types import AgentContext
 from novelizer.voices.loader import load_voice_pack
@@ -206,7 +196,14 @@ class Runtime:
         self.kg_store = None
         self.kg_projector = None
 
-    def _runner_for(self, name: str, builder, fallback_name: str | None = None):
+    def _runner_for(self, name: str, builder, fallback_name: str | None = None, settings=None):
+        # `settings` is the settings the caller is building FOR. It matters only
+        # on the apply_settings rebuild path: self.settings is still the old
+        # value there (it is assigned last, so a failed apply leaves the runtime
+        # describing what is actually running), so building from self.settings
+        # would hand the new runner the temperature it was meant to replace.
+        # During start() the two are the same object.
+        settings = settings if settings is not None else self.settings
         if self._runners is not None:
             if name in self._runners:
                 return self._runners[name]
@@ -221,10 +218,10 @@ class Runtime:
             # Any other absent name falls back to the real builder — builders
             # construct lazily and never touch the network before ainvoke(),
             # and partial-roster fixtures only omit agents that never dispatch.
-            return builder(self.settings, callbacks=self._llm_callbacks)
+            return builder(settings, callbacks=self._llm_callbacks)
         if name == "author" and self._runner is not None:
             return self._runner
-        return builder(self.settings, callbacks=self._llm_callbacks)
+        return builder(settings, callbacks=self._llm_callbacks)
 
     def _phase_a_toolkit(self):
         """Build the (backend, tools) pair pull-mode agents use for canon file
@@ -356,15 +353,24 @@ class Runtime:
             "voice_pack": self.voice_pack.name,
             "prose_profile": s.prose_profile,
         }
-        ctx = AgentContext(
-            read=self.read, committer=self.committer, events=self.events, settings=s,
-            casting_note=casting_note, personalities=personalities, provenance=provenance,
-            tooled=self._tooled, runner_for=self._runner_for,
-        )
+        ctx = self._agent_context(s, casting_note, personalities, provenance)
         self._tooling_pinned = {
             spec.name: spec.tool_grant.is_enabled(s)
             for spec in AGENT_REGISTRY
             if spec.tool_grant is not None and spec.name in _TOOLING_PINNED_NAMES
+        }
+        # Every tool/subagent grant flag, frozen at the value start() built with.
+        # Tooling is inert-until-restart by design (M5 contract): a mid-session
+        # flag flip must not change what a later rebuild wires up. Rebuilds
+        # therefore construct against settings with these flags pinned back,
+        # which lets each agent's own construct() read ctx.settings normally and
+        # still honour the contract -- no second, parallel notion of "is this
+        # agent tooled" for a caller to keep in sync.
+        self._grant_pins = {
+            grant.enabled_setting: bool(getattr(s, grant.enabled_setting))
+            for spec in AGENT_REGISTRY
+            for grant in (spec.tool_grant, spec.subagent_grant)
+            if grant is not None
         }
         self.agents_by_name = {spec.name: spec.construct(ctx) for spec in AGENT_REGISTRY}
         self.world_architect = self.agents_by_name["world_architect"]
@@ -406,6 +412,66 @@ class Runtime:
         )
         from novelizer.research.service import ResearchService
         self.research = ResearchService(self._research_runner_for, telemetry=self.telemetry)
+
+    def _agent_context(self, settings, casting_note: str, personalities: dict,
+                       provenance: dict) -> AgentContext:
+        """The construction context every AgentSpec.construct(ctx) receives.
+
+        Shared by start() and apply_settings() so a rebuilt runner is wired
+        exactly like the original -- including the agent's tooling and subagent
+        grants, which live inside its own construct().
+        """
+        def runner_for(name: str, builder, fallback_name: str | None = None):
+            # Bound to *these* settings, so a rebuild builds for the settings
+            # being applied rather than the ones still recorded on self.
+            return self._runner_for(name, builder, fallback_name, settings=settings)
+
+        return AgentContext(
+            read=self.read, committer=self.committer, events=self.events, settings=settings,
+            casting_note=casting_note, personalities=personalities, provenance=provenance,
+            tooled=self._tooled, runner_for=runner_for,
+        )
+
+    # Runner attributes an agent may hold. Rebuilding copies whichever exist
+    # from a freshly constructed instance onto the live one, so the live agent
+    # keeps its accumulated state (counters, backoff ladders, telemetry) and
+    # only its LLM plumbing is swapped.
+    _RUNNER_ATTRS = ("_runner", "_mining_runner")
+
+    def _rebuild_runners_for(self, changed: set[str], settings) -> list[str]:
+        """Re-run construct() for every agent declaring a changed rebuild_on key.
+
+        Returns the names rebuilt. Reusing construct() is what keeps this honest:
+        the previous hand-written block named seven agents and passed `_tooled`
+        without the subagent flag, so a live temperature change both skipped
+        agents (curator, triage) and silently dropped subagent grants from the
+        ones it did rebuild.
+        """
+        casting_note = self.active_prose_profile.casting_note if self.active_prose_profile else ""
+        personalities = self.voice_pack.agent_personalities
+        provenance = {
+            "model": settings.author_model, "temperature": settings.author_temperature,
+            "voice_pack": self.voice_pack.name, "prose_profile": settings.prose_profile,
+        }
+        # Tooling is pinned at start(); everything else comes from the settings
+        # being applied.
+        ctx = self._agent_context(
+            settings.model_copy(update=self._grant_pins),
+            casting_note, personalities, provenance,
+        )
+        rebuilt: list[str] = []
+        for spec in AGENT_REGISTRY:
+            if not (set(spec.rebuild_on) & changed):
+                continue
+            live = self.agents_by_name.get(spec.name)
+            if live is None:
+                continue
+            fresh = spec.construct(ctx)
+            for attr in self._RUNNER_ATTRS:
+                if hasattr(fresh, attr):
+                    setattr(live, attr, getattr(fresh, attr))
+            rebuilt.append(spec.name)
+        return rebuilt
 
     def apply_settings(self, new: EffectiveSettings) -> dict:
         """Apply a freshly loaded EffectiveSettings to the running system.
@@ -501,30 +567,12 @@ class Runtime:
                     agent.personality = personalities.get(agent.name, "")
 
         rebuild = self._runners is None and self._runner is None
-        if "author_temperature" in changed and rebuild:
-            author_builder = self._tooled(build_author_runner, self.author.pull_mode)
-            self.author._runner = author_builder(stored, callbacks=self._llm_callbacks)
-        if "agent_temperature" in changed and rebuild:
-            world_architect_builder = self._tooled(
-                build_world_architect_runner, self._tooling_pinned["world_architect"])
-            self.world_architect._runner = world_architect_builder(stored, callbacks=self._llm_callbacks)
-            character_keeper_builder = self._tooled(
-                build_character_keeper_runner, self._tooling_pinned["character_keeper"])
-            self.character_keeper._runner = character_keeper_builder(stored, callbacks=self._llm_callbacks)
-            editor_builder = self._tooled(build_editor_runner, self._tooling_pinned["editor"])
-            self.editor._runner = editor_builder(stored, callbacks=self._llm_callbacks)
-            checker_builder = self._tooled(build_continuity_checker_runner, self.continuity_checker.pull_mode)
-            self.continuity_checker._runner = checker_builder(stored, callbacks=self._llm_callbacks)
-            self.continuity_checker._mining_runner = build_continuity_mining_runner(stored, callbacks=self._llm_callbacks)
-            retconner_builder = self._tooled(build_retconner_runner, self._tooling_pinned["retconner"])
-            self.retconner._runner = retconner_builder(stored, callbacks=self._llm_callbacks)
-            structure_analyst_builder = self._tooled(
-                build_structure_analyst_runner, self._tooling_pinned["structure_analyst"])
-            self.structure_analyst._runner = structure_analyst_builder(stored, callbacks=self._llm_callbacks)
-            plotter_builder = self._tooled(build_plotter_runner, self._tooling_pinned["plotter"])
-            self.plotter._runner = plotter_builder(stored, callbacks=self._llm_callbacks)
-        if ("agent_temperature" in changed or "author_temperature" in changed) and rebuild:
-            self._chat_runner_cache.clear()
+        if rebuild:
+            # Every agent that declares a changed key in its SPEC.rebuild_on,
+            # rebuilt through its own construct(). No list here to fall out of
+            # date when an agent is added or starts reading a new setting.
+            if self._rebuild_runners_for(set(changed), stored):
+                self._chat_runner_cache.clear()
 
         if self.author is not None and self.author.provenance is not None:
             self.author.provenance = {

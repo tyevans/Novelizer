@@ -49,3 +49,9 @@ class AgentSpec:
     tool_grant: ToolGrant | None
     construct: Callable[[AgentContext], Any]
     subagent_grant: SubagentGrant | None = None
+    # Settings fields whose live change invalidates this agent's runner(s).
+    # The host rebuilds by calling construct() again, so the agent's own
+    # tooling/subagent wiring is reused rather than restated by the caller.
+    # Declared next to the builder that reads the field: an agent that starts
+    # depending on a new setting updates one line, in its own module.
+    rebuild_on: tuple[str, ...] = ()

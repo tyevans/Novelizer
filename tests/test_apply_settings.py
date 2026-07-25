@@ -146,7 +146,7 @@ async def test_rebuild_uses_reverted_settings_when_restart_required_pairs_with_l
         seen.append(settings)
         return _FakeRunner()
 
-    monkeypatch.setattr("novelizer.runtime.build_author_runner", _spy_build_author_runner)
+    monkeypatch.setattr("novelizer.agents.author.build_author_runner", _spy_build_author_runner)
 
     new = old_settings.model_copy(update={
         "author_temperature": 0.2,
@@ -180,7 +180,7 @@ async def test_rebuild_keeps_author_tooled_when_flags_on(tmp_path, monkeypatch):
         seen_kwargs.append({"backend": backend, "tools": tools})
         return _R()
 
-    monkeypatch.setattr("novelizer.runtime.build_author_runner", _spy_build_author_runner)
+    monkeypatch.setattr("novelizer.agents.author.build_author_runner", _spy_build_author_runner)
 
     rt.apply_settings(rt.settings.model_copy(update={"author_temperature": 0.3}))
 
@@ -202,9 +202,9 @@ async def test_rebuild_keeps_checker_tooled_when_flags_on(tmp_path, monkeypatch)
         seen_kwargs.append({"backend": backend, "tools": tools})
         return _R()
 
-    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", _spy_build_checker_runner)
+    monkeypatch.setattr("novelizer.agents.continuity_checker.build_continuity_checker_runner", _spy_build_checker_runner)
     monkeypatch.setattr(
-        "novelizer.runtime.build_continuity_mining_runner",
+        "novelizer.agents.continuity_checker.build_continuity_mining_runner",
         lambda settings, callbacks=None: _R(),
     )
 
@@ -231,14 +231,14 @@ async def test_rebuild_keeps_world_architect_tooled_when_flags_on(tmp_path, monk
         seen_kwargs.append({"backend": backend, "tools": tools})
         return _R()
 
-    monkeypatch.setattr("novelizer.runtime.build_world_architect_runner", _spy_build_world_architect_runner)
-    monkeypatch.setattr("novelizer.runtime.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_plotter_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.world_architect.build_world_architect_runner", _spy_build_world_architect_runner)
+    monkeypatch.setattr("novelizer.agents.character_keeper.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.editor.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.continuity_checker.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.continuity_checker.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
+    monkeypatch.setattr("novelizer.agents.retconner.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.structure_analyst.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.plotter.build_plotter_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
 
     # Simulate a live flag flip without a restart -- pinning must ignore it.
     rt.settings = rt.settings.model_copy(update={"world_architect_tools_enabled": False})
@@ -263,14 +263,14 @@ async def test_rebuild_keeps_plotter_tooled_when_flags_on(tmp_path, monkeypatch)
         seen_kwargs.append({"backend": backend, "tools": tools})
         return _R()
 
-    monkeypatch.setattr("novelizer.runtime.build_world_architect_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
-    monkeypatch.setattr("novelizer.runtime.build_plotter_runner", _spy_build_plotter_runner)
+    monkeypatch.setattr("novelizer.agents.world_architect.build_world_architect_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.character_keeper.build_character_keeper_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.editor.build_editor_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.continuity_checker.build_continuity_checker_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.continuity_checker.build_continuity_mining_runner", lambda settings, callbacks=None: _R())
+    monkeypatch.setattr("novelizer.agents.retconner.build_retconner_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.structure_analyst.build_structure_analyst_runner", lambda settings, callbacks=None, backend=None, tools=None, subagents=None: _R())
+    monkeypatch.setattr("novelizer.agents.plotter.build_plotter_runner", _spy_build_plotter_runner)
 
     rt.apply_settings(rt.settings.model_copy(update={"agent_temperature": 0.3}))
 

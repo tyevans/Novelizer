@@ -215,4 +215,5 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="world_architect_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="world_architect_subagent_enabled"),
     construct=_construct,
+    rebuild_on=("agent_temperature",),
 )
