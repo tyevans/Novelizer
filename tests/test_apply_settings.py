@@ -361,3 +361,49 @@ async def test_apply_after_invalid_voice_pack_does_not_reraise(tmp_path):
     assert result["errors"] == []
     assert rt.author.interval == 45
     await rt.close()
+
+
+async def test_light_model_change_rebuilds_the_flag_labeler_live(tmp_path, monkeypatch):
+    """light_model applies live rather than requiring a restart.
+
+    Unlike agent_model, the only agent reading it declares it in rebuild_on, so
+    a change reconstructs the runner in place. This is the settings-reload trap
+    in its positive form: the field is not in RESTART_REQUIRED_KEYS, so if
+    rebuild_on were ever dropped the change would be silently swallowed --
+    reported as applied while the old model kept serving.
+    """
+    rt = await _started_runtime(tmp_path)
+    rt._runners = None
+    rt._runner = None
+
+    seen: list[str] = []
+
+    def _spy(settings, callbacks=None):
+        seen.append(settings.resolved_light_model)
+        return _R()
+
+    monkeypatch.setattr("novelizer.agents.flaglabeler.build_flaglabeler_runner", _spy)
+
+    result = rt.apply_settings(rt.settings.model_copy(update={"light_model": "tiny"}))
+
+    assert seen == ["tiny"]
+    assert "light_model" not in result.get("restart", [])
+    assert "light_model" in result.get("applied", [])
+    await rt.close()
+
+
+async def test_light_reasoning_change_rebuilds_the_flag_labeler_live(tmp_path, monkeypatch):
+    rt = await _started_runtime(tmp_path)
+    rt._runners = None
+    rt._runner = None
+
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        "novelizer.agents.flaglabeler.build_flaglabeler_runner",
+        lambda settings, callbacks=None: (seen.append(settings.light_reasoning), _R())[1],
+    )
+
+    rt.apply_settings(rt.settings.model_copy(update={"light_reasoning": True}))
+
+    assert seen == [True]
+    await rt.close()
