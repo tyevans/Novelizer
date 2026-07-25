@@ -12,6 +12,22 @@ from novelizer.brain.context import chapter_map_note
 from novelizer.muse.prompts import architect_settings_note
 from novelizer.store.models import WorldEntry, Flag
 
+# Generative lane: the traced failure was an Architect that named three entries
+# it meant to write, then spent the remaining fifty-odd turns re-asking whether
+# to write them and canonized nothing. The note names the bar that ENDS the
+# survey rather than urging speed.
+DECISIVENESS_NOTE = """
+
+## When the survey is over
+Your survey is finished the moment you can name each entry you mean to write and point at the
+chapter or entry that makes it needed. That is the whole bar — a shortlist you can justify is a
+decision, not a proposal to yourself. Write those entries. Re-opening the question of WHICH
+entries to write, once you have already answered it with evidence, is not diligence: it spends
+the pass you were given to canonize lore and ends it with no lore. If something you read genuinely
+changes the shortlist, revise it once, say so in your feed note, and write the revised list — do
+not start the survey again. A file you have already read this pass has not changed since you read
+it; re-reading it in place of emitting is how a pass produces nothing."""
+
 SYSTEM_PROMPT = """You are the World Architect for a living, ever-expanding fictional world. You
 grow the world's lore — geography, factions, history, systems, cosmology — so the story always has
 grounded material to draw on. You are additive: you expand the world, you never contradict what is
@@ -56,7 +72,7 @@ world entry that should be curated, file a flag for the Curator to resolve:
   related_entry_ids naming them, proposed_resolution "merge".
 - An entry filed under the wrong domain or carrying stale/wrong tags → category "world_relevance",
   naming the entry, proposed_resolution describing the correct classification.
-File these in your `flags` output; do not act on them.""" + PASS_PROMPT_INSTRUCTION + """
+File these in your `flags` output; do not act on them.""" + DECISIVENESS_NOTE + PASS_PROMPT_INSTRUCTION + """
 Never set no_action when director seeds are present — a seed is always your work."""
 
 

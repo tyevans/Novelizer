@@ -33,6 +33,20 @@ logger = logging.getLogger(__name__)
 _MINING_CHUNK_CHARS = 3000
 _MINING_CHUNK_OVERLAP = 200
 
+# Judgement lane. This agent's filings reach a human queue, so the note is
+# careful to target only re-verification of a conclusion already reached, and
+# ends by restating the filing bar so nothing here reads as "file more".
+DECISIVENESS_NOTE = """
+
+## Verify once, then commit to the finding
+Your filing bar is already exact: two quoted spans and where each one sits. Reaching that bar
+settles the question — circling a contradiction you have already quoted both sides of adds no
+evidence, it only re-spends the pass. The other direction settles just as firmly: once you have
+read both sides and they do NOT conflict, that is a finished non-finding, so let it go and move to
+the next candidate instead of re-reading toward a contradiction that is not there. None of this
+lowers the bar. An unquotable suspicion still does not get filed, and a pass that files nothing is
+still a success."""
+
 SYSTEM_PROMPT = """You are the Continuity Checker for a living novel written chapter by chapter,
 without stopping. You FIND contradictions in the canon and file each as a retcon_request. You do
 not repair them.
@@ -76,7 +90,7 @@ A factual, logical contradiction is a "contradiction" flag for the Retconner, as
 a world entry has merely DRIFTED from where the story actually went — still internally consistent,
 just no longer matching the narrative's direction — that is a curation concern, not a contradiction.
 File it as category "world_relevance", naming the entry, proposed_resolution describing the drift.
-The Curator, not the Retconner, resolves these.""" + PASS_PROMPT_INSTRUCTION
+The Curator, not the Retconner, resolves these.""" + DECISIVENESS_NOTE + PASS_PROMPT_INSTRUCTION
 
 MINING_SYSTEM_PROMPT = """You are the prose-mining pass of the Continuity Checker. You read ONE
 chapter's full prose plus the current knowledge matrix, the active secret and thread ids, the

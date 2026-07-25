@@ -17,6 +17,20 @@ from novelizer.canon.promises import TERMINAL_PROMISE_STATES
 from novelizer.canon.threads import active_thread_ids
 from novelizer.store.models import DirectorSignal, SignalKind, EditorialStatus, Flag, FlagStatus
 
+# Judgement lane, but the Editor escalates to nobody: its verdict lands on the
+# Author, and the tie-break (approve with notes) is already written. So the note
+# can point at that tie-break as the answer to an unresolvable doubt, rather
+# than nudging the verdict in either direction.
+DECISIVENESS_NOTE = """
+
+## A verdict is one decision
+Your verdict is settled the moment you can quote the line that decides it. Re-reading the chapter
+to re-test a conclusion you have already grounded in a quote does not make the call safer — it
+turns the Author's waiting pass into nothing. Your tie-break is already written above: in doubt
+between a weak revise and an approve-with-notes, approve. So a doubt you cannot resolve with a
+quote is itself the answer, not a reason to read the chapter a third time. What deserves your care
+is the quote and the concrete fix, not repeated confirmation that you meant it."""
+
 SYSTEM_PROMPT = """You are the Editor of a living, continuously-written novel. One chapter has been
 drafted and handed to you. You decide whether it ships as-is (approve) or goes back to the Author for
 one targeted rewrite (revise), and you record what the finished prose demonstrably establishes.
@@ -99,7 +113,7 @@ file it regardless of verdict.
   progress/pay/release cite an existing promise id exactly.
 - `voice_drift_flags`: one per character line that violates that character's voice card. Skip lines
   already listed as filed in the context.
-- `feed_note`: exactly one short line, in your editorial voice, reacting to the verdict."""
+- `feed_note`: exactly one short line, in your editorial voice, reacting to the verdict.""" + DECISIVENESS_NOTE
 
 logger = logging.getLogger(__name__)
 

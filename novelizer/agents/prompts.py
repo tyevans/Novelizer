@@ -69,6 +69,28 @@ OUTPUT_CONVENTIONS_NOTE = (
     "markup tags inside a field; cite only ids you actually saw."
 )
 
+# Agents that carry no decisiveness guidance, and why. The text itself is NOT
+# shared: the stopping condition for a generative agent ("you chose, now write
+# it") is the opposite advice from a judgement agent's ("hesitating before you
+# escalate to a person is sometimes correct"), so each agent declares its own
+# DECISIVENESS_NOTE next to its own prompt. What lives here is only the list of
+# agents where the guidance would be noise, so tests/agents/test_decisiveness.py
+# can tell an exemption from an oversight.
+DECISIVENESS_EXEMPT: dict[str, str] = {
+    "muse": (
+        "The one agent with no LLM at all: it deals seeded corpus draws and commits. "
+        "There is no prompt surface, so there is nothing to deliberate."
+    ),
+    "summarizer": (
+        "A single-turn extractor over prose handed to it in the message, with no tools "
+        "and no decision to re-open — it cannot loop, so it cannot waffle."
+    ),
+    "flaglabeler": (
+        "Untooled, temperature 0, capped at 200 generated tokens: a title-and-sentence "
+        "labeller with no room to deliberate and no judgement call to revisit."
+    ),
+}
+
 DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."
 
 # Three-way rather than act/skip: the middle branch ("confirm first") is where
