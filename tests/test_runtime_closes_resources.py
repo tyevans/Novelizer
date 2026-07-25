@@ -23,6 +23,12 @@ class RecordingEmbeddingStore:
     def __init__(self) -> None:
         self.closed = 0
 
+    async def probe(self, timeout=None):
+        # start() probes the endpoint before backfilling; a healthy answer keeps
+        # this test about close(), which is all it is here to check.
+        from novelizer.store.embeddings import EmbedProbe
+        return EmbedProbe(endpoint="fake", model="fake", ok=True, dimensions=8)
+
     def close(self) -> None:
         self.closed += 1
 

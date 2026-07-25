@@ -1,6 +1,8 @@
 from __future__ import annotations
 import asyncio
+import copy
 from dataclasses import dataclass
+from enum import Enum
 import chromadb
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from novelizer.store.models import (
@@ -21,6 +23,114 @@ class EmptyIndexError(RuntimeError):
     query that could never succeed. The store is the only layer that knows its
     own document count, so it is the layer that must say so.
     """
+
+
+class EmbedProbeFailure(str, Enum):
+    """Why the embedding endpoint could not produce a vector.
+
+    Distinguished rather than collapsed into one "embedding failed" because each
+    one has a different remedy, and an operator told only that embedding is
+    broken has to guess between a host that is down, a model name that does not
+    exist there, and a key that was rejected.
+    """
+
+    unreachable = "unreachable"        # no HTTP response at all: refused, DNS, TLS
+    timeout = "timeout"                # connected, then said nothing in time
+    unauthorized = "unauthorized"      # 401/403: the key is wrong or absent
+    no_such_model = "no_such_model"    # 404: no such model, or no embeddings route
+    http_error = "http_error"          # any other HTTP status
+    no_vectors = "no_vectors"          # a clean 200 carrying nothing usable
+
+
+@dataclass(frozen=True)
+class EmbedProbe:
+    """The outcome of one embed round-trip against the configured endpoint.
+
+    Facts only -- endpoint, model, what went wrong, the raw error. The REMEDY
+    depends on settings this layer deliberately does not read (whether
+    embed_base_url was set at all), so composing the operator-facing sentence is
+    the caller's job; see novelizer.runtime.embed_probe_message, the single
+    formatter both the runtime and `novelizer doctor` share.
+    """
+
+    endpoint: str
+    model: str
+    ok: bool
+    failure: EmbedProbeFailure | None = None
+    dimensions: int | None = None
+    error: str = ""
+
+
+# One short string: the probe exists to answer "can this endpoint embed at all",
+# and a longer input would only cost latency at boot for no extra information.
+_PROBE_TEXT = "novelizer embedding endpoint probe"
+
+# Bound for one probe round-trip. An endpoint can accept a TCP connection and
+# then never answer, so an unbounded probe would hold start() forever -- strictly
+# worse than the dead index it is trying to report. Generous enough that a cold
+# local model loading weights on first request still passes.
+EMBED_PROBE_TIMEOUT_SECONDS = 15.0
+
+
+def _single_attempt(ef):
+    """The same embedding function, best-effort configured not to retry.
+
+    A probe asks "is this endpoint alive right now", so it wants ONE attempt.
+    The openai client chromadb builds retries twice with backoff by default,
+    which is right for the indexer -- a transient blip must not cost an
+    embedding -- and wrong here: against a refused connection it turns an
+    instant answer into ~1.5s of boot latency and learns nothing extra.
+
+    Shallow-copies the function so the store's own embedding function keeps the
+    retries real upserts want. Entirely optional: any embedding function that
+    does not expose an openai-style `client` (the injected test fake, a future
+    chromadb refactor) is probed exactly as it is, because a probe must never
+    fail over an attribute it merely hoped for.
+    """
+    client = getattr(ef, "client", None)
+    if client is None or not hasattr(client, "with_options"):
+        return ef
+    try:
+        probe_ef = copy.copy(ef)
+        probe_ef.client = client.with_options(max_retries=0)
+        return probe_ef
+    except Exception:
+        return ef
+
+
+def _vector_width(vectors) -> int:
+    """Width of the first returned vector, or 0 if the response carries none.
+
+    Defensive by necessity: an OpenAI-compatible endpoint that is not really an
+    embedding endpoint can answer 200 with any shape at all. Measured with len()
+    only, never truthiness -- chromadb hands back numpy arrays, whose truth value
+    is ambiguous and would raise here rather than report.
+    """
+    try:
+        return len(vectors[0]) if len(vectors) else 0
+    except (TypeError, IndexError, KeyError):
+        return 0
+
+
+def _classify_probe_error(exc: BaseException) -> EmbedProbeFailure:
+    """Map an embed exception to a diagnosis using only duck-typed attributes.
+
+    Every openai APIStatusError carries `status_code` (some wrappers carry it on
+    `.response` instead), so classification never imports that SDK's exception
+    hierarchy -- which is a transitive dependency of chromadb's embedding
+    function, not something this store should be pinned to.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is None:
+        # No HTTP response reached us at all: refused connection, DNS, TLS.
+        return EmbedProbeFailure.unreachable
+    if status in (401, 403):
+        return EmbedProbeFailure.unauthorized
+    if status == 404:
+        return EmbedProbeFailure.no_such_model
+    return EmbedProbeFailure.http_error
 
 
 @dataclass
@@ -76,6 +186,13 @@ class EmbeddingStore:
         ef = embedding_function if embedding_function is not None else OpenAIEmbeddingFunction(
             api_key=api_key, model_name=embed_model, api_base=base_url
         )
+        # Kept so probe() can exercise the SAME embedding function the
+        # collections use -- probing a separately-built one would be testing a
+        # different thing than the indexer actually calls -- and so its report
+        # can name the endpoint and model an operator has to go and fix.
+        self._ef = ef
+        self._embed_model = embed_model
+        self._base_url = base_url
         self._world = self._client.get_or_create_collection("world_entries", embedding_function=ef)
         self._chars = self._client.get_or_create_collection("characters", embedding_function=ef)
         self._chapters = self._client.get_or_create_collection("chapters", embedding_function=ef)
@@ -307,6 +424,44 @@ class EmbeddingStore:
             "arc": self._arcs,
             "entity": self._entities,
         }
+
+    async def probe(self, timeout: float = EMBED_PROBE_TIMEOUT_SECONDS) -> EmbedProbe:
+        """Embed one short string and report whether a usable vector came back.
+
+        The cheapest possible answer to "will this index ever fill up?". Every
+        other signal reports a dead embedding endpoint as healthy: upsert
+        failures are swallowed by the drain's never-raise contract, the poison
+        ladder abandons each event after its budget, the cursor ends up past the
+        whole backlog, and lag() then reads 0 forever.
+
+        Never raises -- a probe that crashed the caller would be a worse failure
+        than the one it reports -- and never blocks longer than `timeout`.
+        """
+        try:
+            vectors = await asyncio.wait_for(
+                asyncio.to_thread(_single_attempt(self._ef), [_PROBE_TEXT]), timeout
+            )
+        except asyncio.TimeoutError:
+            # The abandoned worker thread cannot be killed (asyncio.to_thread
+            # threads are not cancellable), but it is detached and daemon-free
+            # bookkeeping only: the caller is released on time, which is the
+            # property that matters here.
+            return self._probe_failed(EmbedProbeFailure.timeout,
+                                      f"TimeoutError: no response within {timeout}s")
+        except Exception as e:
+            return self._probe_failed(_classify_probe_error(e), f"{type(e).__name__}: {e}")
+        dimensions = _vector_width(vectors)
+        if not dimensions:
+            # A clean 200 carrying nothing usable: raises nothing, so no
+            # try/except anywhere would ever have caught this one.
+            return self._probe_failed(EmbedProbeFailure.no_vectors,
+                                      "the endpoint returned no usable vector")
+        return EmbedProbe(endpoint=self._base_url, model=self._embed_model,
+                          ok=True, dimensions=dimensions)
+
+    def _probe_failed(self, failure: EmbedProbeFailure, error: str) -> EmbedProbe:
+        return EmbedProbe(endpoint=self._base_url, model=self._embed_model,
+                          ok=False, failure=failure, error=error)
 
     def _document_count_sync(self) -> int:
         return sum(col.count() for col in self._collections_by_kind().values())

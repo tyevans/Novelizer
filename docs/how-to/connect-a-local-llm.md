@@ -501,8 +501,7 @@ $ curl -s http://localhost:11434/v1/embeddings \
 
 A response whose `data[0].embedding` is a list of floats means retrieval will work.
 An error body on the first request will break every agent in the room; an error on
-the second breaks only indexing — and does so *silently*, which is why check 4
-exists.
+the second breaks only indexing, which check 4 confirms in one command.
 
 **3. Watch one real run end to end.** From a second terminal, plant a seed. It
 targets your last-opened story; to name one explicitly, the `--story` flag goes
@@ -528,11 +527,32 @@ $ novelizer chapters
 
 and read the prose in-app with the Reading view (`v`).
 
-**4. Confirm embedding indexing is actually running.** A quiet feed is not proof
-here: the canon indexer deliberately never alarms — on an embed failure it logs a
-warning, stops at the failing record, and retries on the next cycle, forever. Check
-the log file (all Novelizer logging goes to one rotating file, since the TUI owns
-the terminal):
+**4. Confirm embedding indexing is actually running.** Start with `novelizer
+doctor`, which does checks 1 and 2's embedding half for you — it embeds one probe
+string through the *same* store the room builds, then reports the index's document
+count:
+
+```console
+$ novelizer doctor
+embedding endpoint http://localhost:11434/v1 answers for model 'nomic-embed-text' (768-dimensional vectors).
+Semantic index: 1420 documents.
+```
+
+It exits 1 and names the fault otherwise — an unreachable host, a 404 on an
+`embed_model` that doesn't exist there, a rejected key, or a 200 carrying no
+vector — so it is also the check to put in a script. The running app performs the
+same probe at every launch and logs the same line at ERROR, but it deliberately
+boots anyway rather than refusing to start; a dead index degrades honestly
+(`search_canon` tells agents to browse with `ls`/`glob`/`grep` instead of
+inventing a confident miss), so the room keeps writing while you fix the endpoint.
+
+A live endpoint with a document count of `0` is not automatically wrong — a
+brand-new story has nothing indexed yet — but on a story with chapters it means
+the backlog was abandoned before the endpoint came up. A quiet feed proves
+nothing either way: the canon indexer deliberately never alarms — on an embed
+failure it logs a warning, stops at the failing record, and retries on the next
+cycle up to its poison budget. Check the log file (all Novelizer logging goes to
+one rotating file, since the TUI owns the terminal):
 
 ```console
 $ grep "canon indexing stopped" ~/.config/novelizer/logs/novelizer.log

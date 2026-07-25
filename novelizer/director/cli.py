@@ -18,7 +18,7 @@ from novelizer.settings import (
     update_global_config,
     write_global_config,
 )
-from novelizer.runtime import Runtime
+from novelizer.runtime import Runtime, build_embedding_store, embed_probe_message
 from novelizer.director import commands
 from novelizer.voices.loader import load_voice_pack
 from novelizer.voices.models import VoicePack
@@ -221,6 +221,40 @@ def read(ctx, chapter_id: str):
         console.rule(ch.title)
         console.print(ch.prose)
     asyncio.run(_with_runtime(ctx.obj["settings"], _run))
+
+
+@cli.command()
+@click.pass_context
+def doctor(ctx):
+    """Check that the embedding endpoint works and the semantic index has content."""
+    settings = ctx.obj["settings"]
+
+    async def _run():
+        # The same store the running room builds, so a doctor that passes cannot
+        # be checking a different endpoint than the one that fails.
+        store = build_embedding_store(settings)
+        try:
+            return await store.probe(), await store.document_count()
+        finally:
+            store.close()
+
+    probe, documents = asyncio.run(_run())
+    if not probe.ok:
+        # The runtime deliberately only logs this and boots degraded; doctor is
+        # the entry point whose job is to fail, so a script can act on it.
+        console.print(f"[red]{embed_probe_message(probe, settings)}[/red]")
+        raise SystemExit(1)
+    console.print(
+        f"[green]embedding endpoint {probe.endpoint} answers for model "
+        f"'{probe.model}' ({probe.dimensions}-dimensional vectors).[/green]"
+    )
+    if documents == 0:
+        # Live endpoint, empty index: nothing has been indexed YET (a brand-new
+        # story) or the backlog was abandoned before this endpoint came up.
+        console.print("[yellow]The semantic index holds 0 documents, so search_canon "
+                      "reports itself unavailable. It fills as canon is written.[/yellow]")
+    else:
+        console.print(f"Semantic index: {documents} documents.")
 
 
 @cli.command()
