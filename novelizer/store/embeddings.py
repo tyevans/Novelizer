@@ -10,6 +10,19 @@ from novelizer.store.models import (
 from novelizer.text_chunk import chunk_prose
 
 
+class EmptyIndexError(RuntimeError):
+    """The semantic index holds no documents at all, so no query can be answered.
+
+    Raised rather than returned-as-empty because the two outcomes mean opposite
+    things to a caller: a populated index that matched nothing is EVIDENCE
+    ("canon is silent on this"), while an index with nothing in it is the
+    ABSENCE of evidence ("the search is dead"). Collapsing them into `[]` left
+    every tooled agent believing canon was empty and retrying rephrasings of a
+    query that could never succeed. The store is the only layer that knows its
+    own document count, so it is the layer that must say so.
+    """
+
+
 @dataclass
 class SearchHit:
     kind: str
@@ -295,6 +308,19 @@ class EmbeddingStore:
             "entity": self._entities,
         }
 
+    def _document_count_sync(self) -> int:
+        return sum(col.count() for col in self._collections_by_kind().values())
+
+    async def document_count(self) -> int:
+        """Total vectors stored across every collection.
+
+        The one number that tells an operator whether the semantic index is
+        alive: 0 means every search_canon call is a guaranteed miss, which is
+        invisible from the outside (search just answers, wrongly). Offloaded to
+        a thread like every other chromadb read -- count() is a sqlite query.
+        """
+        return await asyncio.to_thread(self._document_count_sync)
+
     @staticmethod
     def _search_one_collection_sync(col, query: str, n: int) -> list[dict]:
         """Blocking count+query for a single collection -- runs inside
@@ -309,7 +335,17 @@ class EmbeddingStore:
         wanted = list(by_kind) if kinds is None else kinds
         unknown = [k for k in wanted if k not in by_kind]
         if unknown:
+            # Kind validation stays ahead of the emptiness check: a bad kind is
+            # a caller mistake with actionable feedback, and reporting a dead
+            # index instead would hide it.
             raise ValueError(f"Unknown kinds: {unknown}. Valid: {sorted(by_kind)}")
+        # Emptiness is measured over the WHOLE index, not over `kinds`: an empty
+        # kinds-subset of a populated index is a real, informative miss, whereas
+        # a zero-document index cannot answer anything.
+        if await self.document_count() == 0:
+            raise EmptyIndexError(
+                "the semantic index holds no documents; nothing has been indexed yet"
+            )
         hits: list[SearchHit] = []
         seen_chapter_ids: set[str] = set()
         for kind in wanted:

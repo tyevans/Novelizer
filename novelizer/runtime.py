@@ -619,6 +619,32 @@ class Runtime:
             kg_lag=await _safe_lag(self.kg_projector),
         )
 
+    async def index_document_count(self) -> int | None:
+        """How many documents the semantic index actually holds, or None if that
+        is unknown (no store wired, or the probe failed).
+
+        The one number that makes a DEAD index visible. Every other readout
+        reports a zero-document index as healthy: lag() is 0 because the cursor
+        believes it consumed the backlog, catch_up() returns success, and
+        search_canon answers every query with a confident miss. Production ran
+        that way for 690 consecutive search_canon calls, all of them wrong, and
+        nothing said so.
+
+        Unknown is None, NOT 0 -- the opposite of _safe_lag's convention, and
+        deliberately: there, 0 means "healthy" and is the safe reading to
+        default to; here 0 IS the alarm, so a locked database must not raise it.
+        Never raises, because this drives the same status loop background_progress
+        does.
+        """
+        if self.embeddings is None:
+            return None
+        try:
+            return await self.embeddings.document_count()
+        except Exception as e:
+            logger.warning("semantic index size probe failed (%s: %s); reporting unknown",
+                           type(e).__name__, e)
+            return None
+
     async def close(self) -> None:
         # start() constructs the EmbeddingStore and nothing else owns it, so
         # close() owes its release. Omitting it made every caller's

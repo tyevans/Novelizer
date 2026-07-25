@@ -3,6 +3,7 @@ from __future__ import annotations
 from langchain_core.tools import tool
 
 from novelizer.canon_fs.paths import build_path_index
+from novelizer.store.embeddings import EmptyIndexError
 
 # A long novel can match hundreds of records; an uncapped list would crowd out
 # the prose the agent is actually here to read.
@@ -46,6 +47,17 @@ def build_search_canon_tool(embedding_store, read_store, kg_store):
             # The store's message names the valid kinds -- corrective
             # feedback the agent can act on directly, rather than a dead end.
             return str(e)
+        except EmptyIndexError:
+            # An empty index is an UNAVAILABLE search, not a miss. Answering
+            # "No results." tells the agent canon is silent on the topic, and
+            # its only recourse -- rephrase and retry -- reissues a call that
+            # cannot ever succeed (observed in production: 690 calls, 690
+            # misses, one run looping 62 times until it was searching its own
+            # context). Route it to the same browse-instead fallback a live
+            # outage gets, and name the cause so the operator sees it too.
+            return ("Search unavailable (semantic index is empty — nothing has "
+                    "been indexed yet); browse the canon filesystem with "
+                    "ls/glob/grep instead.")
         except Exception as e:
             return (f"Search unavailable ({type(e).__name__}); browse the canon "
                     f"filesystem with ls/glob/grep instead.")
