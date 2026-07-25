@@ -3,7 +3,7 @@ from textual.app import App, ComposeResult
 from tui_kit.run_model import ProseBlock, ThinkingBlock, CallBlock, ToolBlock
 from tui_kit.stream_source import InMemoryStreamSource
 from tui_kit.widgets.stream_view import StreamView
-from textual.widgets import Collapsible, Markdown, Static
+from textual.widgets import Button, Collapsible, Markdown, Static
 
 
 class _Theme:
@@ -220,3 +220,62 @@ async def test_real_scrolling_flips_follow_state_without_calling_notify_scroll()
         window.scroll_end(animate=False)
         await pilot.pause()
         assert view.is_following() is True
+
+
+@pytest.mark.asyncio
+async def test_set_agents_renders_an_all_chip_plus_one_per_agent():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents(["author", "editor", "plotter"])
+        await pilot.pause()
+        assert len(pilot.app.query(Button)) == 4
+
+
+@pytest.mark.asyncio
+async def test_set_agents_is_idempotent_and_does_not_duplicate_chips():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents(["author", "editor"])
+        await pilot.pause()
+        view.set_agents(["author", "editor"])
+        await pilot.pause()
+        assert len(pilot.app.query(Button)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_growing_fleet_only_adds_chips_never_restructures_the_view():
+    """The tab design broke at 13 agents. Chips must not."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents([f"agent{i}" for i in range(13)])
+        await pilot.pause()
+        assert len(pilot.app.query(Button)) == 14
+
+
+@pytest.mark.asyncio
+async def test_toggling_a_chip_hides_other_agents_blocks():
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents(["author", "editor"])
+        view.append_blocks((ProseBlock(text="a", agent_name="author"),
+                            ProseBlock(text="b", agent_name="editor")))
+        await pilot.pause()
+        view.toggle_agent_filter("author")
+        await pilot.pause()
+        assert view.active_filter() == frozenset({"author"})
+        assert len(view.visible_keys()) == 1
+
+
+@pytest.mark.asyncio
+async def test_filtered_out_widgets_are_hidden_not_unmounted():
+    """Toggling must be instant and must not disturb the window or fold state."""
+    async with _App().run_test() as pilot:
+        view = pilot.app.query_one("#stream", StreamView)
+        view.set_agents(["author", "editor"])
+        view.append_blocks((ProseBlock(text="a", agent_name="author"),
+                            ProseBlock(text="b", agent_name="editor")))
+        await pilot.pause()
+        view.toggle_agent_filter("author")
+        await pilot.pause()
+        assert len(view.mounted_keys()) == 2
+        assert len(view.visible_keys()) == 1

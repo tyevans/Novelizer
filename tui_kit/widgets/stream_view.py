@@ -8,14 +8,17 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
-from textual.widgets import Collapsible, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import Button, Collapsible, Static
 from tui_kit.contracts import AgentTheme
 from tui_kit.output_renderer import pick_renderer
 from tui_kit.run_model import (
     CallBlock, ProseBlock, StreamBlock, ThinkingBlock, ToolBlock, block_key,
 )
-from tui_kit.stream_model import StreamState, on_new_blocks, on_scroll, trim_window, visible_blocks
+from tui_kit.stream_model import (
+    StreamState, clear_filter, on_new_blocks, on_scroll, toggle_agent, trim_window,
+    visible_blocks,
+)
 from tui_kit.stream_source import StreamSource
 
 # How close to the bottom still counts as "at the bottom". A couple of
@@ -30,14 +33,18 @@ class StreamView(Vertical):
 
     BINDINGS = [Binding("end", "follow_end", "Follow", show=True)]
 
+    _ALL_CHIP = "sv_chip__all"
+
     def __init__(self, theme: AgentTheme, source: StreamSource, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._theme = theme
         self._source = source
         self._state = StreamState()
         self._mounted: dict[str, Static | Collapsible] = {}
+        self._agents: list[str] = []
 
     def compose(self) -> ComposeResult:
+        yield Horizontal(id="sv_filter", classes="sv-filter")
         yield VerticalScroll(id="sv_window", classes="sv-window")
         yield Static("", id="sv_follow", classes="sv-follow", markup=False)
 
@@ -90,6 +97,54 @@ class StreamView(Vertical):
 
     def mounted_keys(self) -> list[str]:
         return list(self._mounted)
+
+    def visible_keys(self) -> list[str]:
+        return [block_key(b, i) for i, b in enumerate(visible_blocks(self._state))]
+
+    def active_filter(self) -> frozenset[str]:
+        return self._state.agent_filter
+
+    def set_agents(self, names: list[str]) -> None:
+        """The roster arrives as data. The widget's structure does not
+        depend on how many agents there are -- which is exactly what the
+        tab-per-agent design got wrong."""
+        wanted = list(dict.fromkeys(names))
+        if wanted == self._agents:
+            return
+        self._agents = wanted
+        bar = self.query_one("#sv_filter", Horizontal)
+        bar.remove_children()
+        bar.mount(Button("all", id=self._ALL_CHIP, classes="sv-chip sv-chip-on"))
+        for name in wanted:
+            bar.mount(Button(f"{self._theme.glyph(name)} {self._theme.label(name)}",
+                             id=f"sv_chip_{name}", classes="sv-chip"))
+
+    def toggle_agent_filter(self, name: str) -> None:
+        self._state = toggle_agent(self._state, name)
+        self._apply_filter()
+
+    def on_button_pressed(self, event) -> None:
+        bid = event.button.id or ""
+        if bid == self._ALL_CHIP:
+            self._state = clear_filter(self._state)
+            self._apply_filter()
+        elif bid.startswith("sv_chip_"):
+            self.toggle_agent_filter(bid[len("sv_chip_"):])
+
+    def _apply_filter(self) -> None:
+        """Hide rather than unmount: toggling stays instant and fold state
+        and scroll position survive it."""
+        shown = set(self.visible_keys())
+        for key, widget in self._mounted.items():
+            widget.display = key in shown
+        active = self._state.agent_filter
+        for chip in self.query(".sv-chip"):
+            bid = chip.id or ""
+            if bid == self._ALL_CHIP:
+                on = not active
+            else:
+                on = bid[len("sv_chip_"):] in active
+            chip.set_class(on, "sv-chip-on")
 
     def expanded_keys(self) -> list[str]:
         return [k for k, w in self._mounted.items()
