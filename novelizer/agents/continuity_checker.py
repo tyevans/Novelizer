@@ -619,4 +619,5 @@ SPEC = AgentSpec(
     tool_grant=ToolGrant(enabled_setting="checker_tools_enabled"),
     subagent_grant=SubagentGrant(enabled_setting="checker_subagent_enabled"),
     construct=_construct,
+    rebuild_on=("agent_temperature",),
 )
