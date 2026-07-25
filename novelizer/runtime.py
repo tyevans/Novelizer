@@ -27,7 +27,7 @@ from novelizer.agents.registry_types import AgentContext
 from novelizer.voices.loader import load_voice_pack
 from novelizer.chat.service import ChatService
 from novelizer.chat.runners import build_chat_runner
-from novelizer.store.embeddings import EmbeddingStore
+from novelizer.store.embeddings import EmbedProbe, EmbeddingStore, EmbedProbeFailure
 from novelizer.store.indexer import CanonIndexer
 from novelizer.store.kg_store import KGStore
 from novelizer.store.kg_projector import KGProjector
@@ -108,6 +108,59 @@ def _make_progress_probe(events):
         committed = await events.events_for_run(run_id)
         return any(e.event_type not in NON_PROGRESS_EVENT_TYPES for e in committed)
     return probe
+
+
+def build_embedding_store(settings) -> EmbeddingStore:
+    """Construct the story's EmbeddingStore exactly as the running room does.
+
+    Factored out so `novelizer doctor` probes the SAME endpoint, model, key and
+    persist path the runtime will use. A doctor that built its own store from
+    its own reading of settings could pass while the room fails, which is worse
+    than no doctor at all.
+    """
+    return EmbeddingStore(
+        str(Path(settings.db_path).with_name("embeddings")),
+        embed_model=settings.embed_model,
+        base_url=settings.resolved_embed_base_url,
+        api_key=settings.resolved_embed_api_key,
+    )
+
+
+# One phrase per failure mode. Each names a DIFFERENT thing to go and do, so
+# none of them may fall through to a generic "embedding failed": that sentence
+# would leave the operator guessing between a host that is down, a model name
+# that does not exist there, and a key that was rejected.
+_PROBE_PROBLEM = {
+    EmbedProbeFailure.unreachable: "is unreachable",
+    EmbedProbeFailure.timeout: "did not respond in time",
+    EmbedProbeFailure.unauthorized: "rejected our credentials",
+    EmbedProbeFailure.http_error: "could not be reached",
+    EmbedProbeFailure.no_vectors: "returned no vector for model {model!r}",
+    EmbedProbeFailure.no_such_model: "has no model {model!r}",
+}
+
+
+def embed_probe_message(probe: EmbedProbe, settings) -> str:
+    """The single operator-facing line for a failed probe, shared by the runtime
+    and `novelizer doctor` so both entry points say exactly the same thing.
+
+    Lives here rather than on EmbedProbe because the REMEDY depends on settings
+    the store deliberately does not read. When embed_base_url is unset the
+    embedding endpoint IS the chat endpoint -- by design, for all-local setups --
+    so telling that operator to "check embed_base_url" blames them for a setting
+    they never made; the fix is to set one. When they DID configure a dedicated
+    endpoint, that endpoint and the model name are the things to check.
+
+    One line, because it goes to a log and to a status readout.
+    """
+    problem = _PROBE_PROBLEM[probe.failure].format(model=probe.model)
+    if settings.embed_base_url.strip():
+        remedy = " — check embed_base_url and embed_model"
+    else:
+        remedy = (" — it is shared with the chat endpoint (embed_base_url is unset); "
+                  "set embed_base_url if this host serves chat but not embeddings")
+    return (f"embedding endpoint {probe.endpoint} {problem}; "
+            f"semantic search will be unavailable{remedy} ({probe.error})")
 
 
 @dataclass
@@ -192,6 +245,8 @@ class Runtime:
         self._chat_runner_cache: dict[str, object] = {}
         self._research_runner_cache = None
         self.embeddings = embedding_store   # None => built in start()
+        # Last endpoint probe (see _probe_embeddings); None until start() runs.
+        self.embed_probe: Optional[EmbedProbe] = None
         self.indexer = None
         self.kg_store = None
         self.kg_projector = None
@@ -309,12 +364,8 @@ class Runtime:
         await self.telemetry_store.init()
         await self.projector.catch_up()
         if self.embeddings is None:
-            self.embeddings = EmbeddingStore(
-                str(Path(self.settings.db_path).with_name("embeddings")),
-                embed_model=self.settings.embed_model,
-                base_url=self.settings.resolved_embed_base_url,
-                api_key=self.settings.resolved_embed_api_key,
-            )
+            self.embeddings = build_embedding_store(self.settings)
+        await self._probe_embeddings()
         # One shared LLM concurrency ceiling for the whole fleet, built BEFORE
         # the projectors so both the scheduler and the two background drains draw
         # permits from this single object -- the shared endpoint ceiling that does
@@ -618,6 +669,32 @@ class Runtime:
             index_lag=await _safe_lag(self.indexer),
             kg_lag=await _safe_lag(self.kg_projector),
         )
+
+    async def _probe_embeddings(self) -> None:
+        """One embed round-trip, before the backfill it is there to explain.
+
+        Deliberately NEVER fatal, in either configuration. Two reasons, and the
+        second is new:
+
+          * With embed_base_url unset the embedding endpoint is the CHAT endpoint
+            by design (the supported all-local setup), where a cold server that
+            is not up yet is a boot-order race, not a misconfiguration. Refusing
+            to start over it would brick a legitimate config.
+          * A failed probe now degrades HONESTLY. search_canon answers "Search
+            unavailable ...; browse the canon filesystem with ls/glob/grep
+            instead" on an empty index rather than inventing a confident miss, so
+            booting with a dead index is a legible degraded mode instead of a
+            silent corruption of every agent's reasoning. That is what makes
+            loudness sufficient here and hard failure unnecessary; the hard,
+            exit-code failure lives in `novelizer doctor`, whose job is to fail.
+
+        Logged at ERROR because it is a real, novel-degrading fault -- and only on
+        failure, since an ERROR line on every healthy boot would train the
+        operator to ignore the one that matters.
+        """
+        self.embed_probe = await self.embeddings.probe()
+        if not self.embed_probe.ok:
+            logger.error("%s", embed_probe_message(self.embed_probe, self.settings))
 
     async def index_document_count(self) -> int | None:
         """How many documents the semantic index actually holds, or None if that

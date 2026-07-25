@@ -132,6 +132,7 @@ guards the update path).
 | `seed` | `TEXT` | Inject a narrative seed signal |
 | `chapters` | — | List chapters by editorial status |
 | `read` | `CHAPTER_ID` | Print a chapter's prose |
+| `doctor` | — | Check the embedding endpoint and the semantic index's size (exits 1 on a dead endpoint) |
 | `retcons` | — | List open contradiction flags |
 | `proposals` | — | List pending (open) proposals |
 | `approve` | `PROPOSAL_ID` | Approve a pending proposal |
@@ -232,6 +233,47 @@ no wrapping beyond the terminal's, no metadata beyond the title rule.
 Always exits 0. To capture a chapter to a file:
 `novelizer read <full-id> > chapter.txt` (the title rule is included in
 stdout).
+
+## `novelizer doctor`
+
+```
+novelizer [--story PATH] doctor
+```
+
+Checks that the configured embedding endpoint can actually embed, and reports
+how many documents the semantic index holds
+(`novelizer/director/cli.py::doctor`). It embeds one short probe string through
+the same `EmbeddingStore` the running room builds
+(`novelizer.runtime.build_embedding_store`), so a passing `doctor` cannot be
+checking a different endpoint than the one the room uses.
+
+Unlike the runtime — which logs a dead endpoint at ERROR and boots in a
+degraded state on purpose — this command is where a hard failure lives:
+
+| Outcome | Output | Exit code |
+|---|---|---|
+| Endpoint answers | `embedding endpoint <url> answers for model '<model>' (<N>-dimensional vectors).` plus `Semantic index: <N> documents.` | 0 |
+| Endpoint answers, index empty | the success line plus a yellow note that `search_canon` reports itself unavailable until canon is written | 0 |
+| Endpoint fails | the same one-line diagnosis the runtime logs (see below), in red | 1 |
+
+The failure line names the resolved endpoint and the model, and its remedy
+depends on whether `embed_base_url` is set:
+
+| Failure | Line |
+|---|---|
+| unreachable | `embedding endpoint <url> is unreachable; semantic search will be unavailable — ...` |
+| timeout | `... did not respond in time; ...` |
+| unauthorized (401/403) | `... rejected our credentials; ...` |
+| no such model (404) | `... has no model '<model>'; ...` |
+| other HTTP status | `... could not be reached; ...` |
+| empty 200 | `... returned no vector for model '<model>'; ...` |
+
+With `embed_base_url` set the remedy is `check embed_base_url and
+embed_model`. With it unset the endpoint is the chat endpoint by design, so the
+remedy is instead `it is shared with the chat endpoint (embed_base_url is
+unset); set embed_base_url if this host serves chat but not embeddings` — the
+common misconfiguration, since chat routers such as OpenRouter serve no
+embedding models at all.
 
 ## `novelizer retcons`
 

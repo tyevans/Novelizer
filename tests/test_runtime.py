@@ -1189,3 +1189,196 @@ async def test_background_progress_spans_both_real_indexers_end_to_end(settings,
         assert p.caught_up is True
     finally:
         await rt.close()
+
+
+# --- embedding-endpoint probe at boot ----------------------------------------
+#
+# The root cause behind the 690-miss incident was configuration, and it was
+# undetectable from inside the running system: embed_model defaults to
+# "nomic-embed-text" while resolved_embed_base_url falls back to llm_base_url,
+# so pointing the room at a chat-only proxy is a SUPPORTED-looking setting that
+# silently guarantees an empty index. One embed round-trip at boot turns that
+# into a single legible line naming the endpoint and model to go and fix.
+#
+# Policy pinned below: the probe NEVER refuses to boot, in either configuration.
+# It is loud (ERROR) and it is precise about the remedy, which differs by case.
+
+
+from tests.conftest import FakeEmbeddingFunction  # noqa: E402  (section-local helper base)
+
+
+class _ProbeRecordingEmbeddingFunction(FakeEmbeddingFunction):
+    """Records every embed input so the ORDER of probe-vs-backfill is testable."""
+
+    def __init__(self) -> None:
+        self.inputs: list[list[str]] = []
+
+    def __call__(self, input):
+        self.inputs.append(list(input))
+        return super().__call__(input)
+
+
+class _DeadEmbeddingFunction(FakeEmbeddingFunction):
+    def __init__(self, exc: Exception | None = None) -> None:
+        self._exc = exc or ConnectionError("connection refused")
+
+    def __call__(self, input):
+        raise self._exc
+
+
+def _probe_store(tmp_path, ef, name="emb"):
+    from novelizer.store.embeddings import EmbeddingStore
+    return EmbeddingStore(str(tmp_path / name), embed_model="nomic-embed-text",
+                          base_url="http://embed.invalid/v1", embedding_function=ef)
+
+
+async def test_embed_probe_message_names_the_resolved_endpoint_and_model():
+    """The line an operator reads at 2am. It must name the RESOLVED endpoint --
+    not the raw embed_base_url, which is empty in the fallback case and would
+    tell them nothing -- and the model, since a 404 is usually a model typo."""
+    from novelizer.runtime import embed_probe_message
+    from novelizer.store.embeddings import EmbedProbe, EmbedProbeFailure
+
+    settings = Settings(db_path="/tmp/x.db", llm_base_url="http://chat.invalid/v1",
+                        embed_base_url="http://embed.invalid/v1",
+                        embed_model="nomic-embed-text")
+    probe = EmbedProbe(endpoint="http://embed.invalid/v1", model="nomic-embed-text",
+                       ok=False, failure=EmbedProbeFailure.no_such_model,
+                       error="NotFoundError: model not found")
+    message = embed_probe_message(probe, settings)
+
+    assert message.startswith(
+        "embedding endpoint http://embed.invalid/v1 has no model 'nomic-embed-text'; "
+        "semantic search will be unavailable"
+    )
+    assert "NotFoundError" in message
+    assert "\n" not in message, "one line: this goes to a log and a status readout"
+
+
+async def test_embed_probe_message_distinguishes_shared_from_dedicated_endpoint():
+    """The whole difference between a useful check and one that blames the user
+    for a setting they never made. With embed_base_url unset the endpoint is the
+    CHAT endpoint by design (the supported all-local setup), so the remedy is
+    "set embed_base_url" -- not "check the one you configured"."""
+    from novelizer.runtime import embed_probe_message
+    from novelizer.store.embeddings import EmbedProbe, EmbedProbeFailure
+
+    probe = EmbedProbe(endpoint="http://localhost:8080/v1", model="nomic-embed-text",
+                       ok=False, failure=EmbedProbeFailure.no_such_model, error="x: y")
+
+    shared = embed_probe_message(
+        probe, Settings(db_path="/tmp/x.db", llm_base_url="http://localhost:8080/v1",
+                        embed_base_url=""))
+    assert "shared with the chat endpoint" in shared
+    assert "set embed_base_url" in shared
+
+    dedicated = embed_probe_message(
+        probe, Settings(db_path="/tmp/x.db", llm_base_url="http://chat.invalid/v1",
+                        embed_base_url="http://localhost:8080/v1"))
+    assert "shared with the chat endpoint" not in dedicated
+    assert "check embed_base_url and embed_model" in dedicated
+
+
+async def test_embed_probe_covers_every_failure_mode_with_its_own_wording():
+    """No failure mode may fall through to a generic sentence: each one is a
+    different thing to go and do."""
+    from novelizer.runtime import embed_probe_message
+    from novelizer.store.embeddings import EmbedProbe, EmbedProbeFailure
+
+    settings = Settings(db_path="/tmp/x.db", embed_base_url="http://e.invalid/v1")
+    expected = {
+        EmbedProbeFailure.unreachable: "is unreachable",
+        EmbedProbeFailure.timeout: "did not respond in time",
+        EmbedProbeFailure.unauthorized: "rejected our credentials",
+        EmbedProbeFailure.no_such_model: "has no model",
+        EmbedProbeFailure.http_error: "could not be reached",
+        EmbedProbeFailure.no_vectors: "returned no vector",
+    }
+    assert set(expected) == set(EmbedProbeFailure), "a new failure mode needs wording"
+    for failure, phrase in expected.items():
+        probe = EmbedProbe(endpoint="http://e.invalid/v1", model="m", ok=False,
+                           failure=failure, error="E: detail")
+        message = embed_probe_message(probe, settings)
+        assert phrase in message, f"{failure} has no wording of its own: {message}"
+        assert "semantic search will be unavailable" in message
+
+
+async def test_start_probes_the_endpoint_before_backfilling_the_index(settings, tmp_path):
+    """Order matters: the probe exists to explain a backfill that is about to
+    fail, so it must run BEFORE index_catch_up, not after it."""
+    from novelizer.canon.events import ThreadPlanted
+
+    ef = _ProbeRecordingEmbeddingFunction()
+    rt = Runtime(settings, runners=_all_fake_runners(),
+                 embedding_store=_probe_store(tmp_path, ef))
+    # A pending indexable event, so the backfill has real work to embed.
+    await rt.events.init()
+    await rt.events.append(EventType.THREAD_PLANTED, "t1",
+                           ThreadPlanted(id="t1", name="The Ledger"))
+    try:
+        await rt.start()
+        assert ef.inputs, "start() never embedded anything, so it never probed"
+        assert ef.inputs[0] == ["novelizer embedding endpoint probe"], \
+            "the first embed call must be the probe, before any backfill"
+        assert rt.embed_probe is not None and rt.embed_probe.ok is True
+    finally:
+        await rt.close()
+
+
+async def test_start_never_refuses_to_boot_when_the_shared_endpoint_is_dead(settings, tmp_path, caplog):
+    """The all-local exemption, and the reason it exists: embed_base_url unset
+    means the embedding endpoint IS the chat endpoint, which on a cold local
+    server may simply not be up yet. Refusing to boot over a boot-order race
+    would brick a legitimate config -- and since a failed probe now degrades
+    honestly (search_canon answers "unavailable, use ls/glob/grep"), booting
+    degraded is strictly better than not booting at all."""
+    shared = settings.model_copy(update={"llm_base_url": "http://localhost:8080/v1",
+                                         "embed_base_url": ""})
+    rt = Runtime(shared, runners=_all_fake_runners(),
+                 embedding_store=_probe_store(tmp_path, _DeadEmbeddingFunction()))
+    caplog.clear()
+    try:
+        with caplog.at_level("ERROR"):
+            await rt.start()  # must NOT raise
+        assert rt.embed_probe is not None and rt.embed_probe.ok is False
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert any("semantic search will be unavailable" in m for m in errors), \
+            "a dead index must be loud even when it is not fatal"
+        assert any("set embed_base_url" in m for m in errors)
+    finally:
+        await rt.close()
+
+
+async def test_start_never_refuses_to_boot_when_a_dedicated_endpoint_is_dead(settings, tmp_path, caplog):
+    """The same policy with the sharper message: the operator DID configure an
+    embedding endpoint, so name it as the thing to check. Still not fatal -- the
+    room's job is to keep the novel running, and `novelizer doctor` is where a
+    hard, exit-code failure belongs."""
+    dedicated = settings.model_copy(update={"embed_base_url": "http://embed.invalid/v1"})
+    rt = Runtime(dedicated, runners=_all_fake_runners(),
+                 embedding_store=_probe_store(tmp_path, _DeadEmbeddingFunction()))
+    caplog.clear()
+    try:
+        with caplog.at_level("ERROR"):
+            await rt.start()  # must NOT raise
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert any("check embed_base_url and embed_model" in m for m in errors)
+        assert not any("set embed_base_url if" in m for m in errors)
+    finally:
+        await rt.close()
+
+
+async def test_start_says_nothing_when_the_endpoint_is_healthy(settings, tmp_path, caplog):
+    """A healthy boot must stay quiet: an ERROR line every start would train the
+    operator to ignore the one that matters."""
+    rt = Runtime(settings, runners=_all_fake_runners(),
+                 embedding_store=_probe_store(tmp_path, FakeEmbeddingFunction()))
+    caplog.clear()
+    try:
+        with caplog.at_level("ERROR"):
+            await rt.start()
+        assert not [r for r in caplog.records
+                    if r.levelname == "ERROR" and "semantic search" in r.getMessage()]
+        assert rt.embed_probe.ok is True
+    finally:
+        await rt.close()

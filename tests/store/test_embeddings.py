@@ -1,7 +1,10 @@
 import os
 import pytest
 import tempfile
-from novelizer.store.embeddings import EmbeddingStore, EmptyIndexError, SearchHit
+import time
+from novelizer.store.embeddings import (
+    EmbeddingStore, EmbedProbeFailure, EmptyIndexError, SearchHit,
+)
 from novelizer.store.models import WorldEntry, ThemeRecord, ThreadRecord, SecretRecord, Chapter, Character
 from tests.conftest import FakeEmbeddingFunction
 
@@ -191,3 +194,181 @@ async def test_delete_entity_removes_it_from_search(tmp_path):
 
     hits = await store.search("Salted Gull", kinds=["entity"])
     assert [h.id for h in hits] == ["43"]
+
+
+# --- endpoint probe: one call that says WHY the index will stay empty --------
+#
+# A dead embedding endpoint is otherwise undetectable until it has already cost
+# a day of runs: upsert failures are swallowed by the drain's never-raise
+# contract, the poison ladder abandons each event after its budget, the cursor
+# ends up past the whole backlog, and lag() then reads 0 forever. One probe at
+# boot turns that into a single legible line.
+
+
+class _RaisingEmbeddingFunction(FakeEmbeddingFunction):
+    """An embed endpoint that fails the way a real one does. `exc` is raised on
+    every call; chromadb's own protocol methods still work, so the store builds
+    normally and only the probe (or a real upsert) trips it."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def __call__(self, input):
+        raise self._exc
+
+
+class _HttpError(Exception):
+    """Stands in for openai's APIStatusError family without importing it: the
+    probe classifies by the duck-typed `status_code` every one of them carries,
+    so it never depends on that SDK's exception hierarchy."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class _EmptyEmbeddingFunction(FakeEmbeddingFunction):
+    """A 200 response that carries no vectors -- the failure mode that raises
+    nothing at all and so is invisible to any try/except."""
+
+    def __call__(self, input):
+        return []
+
+
+class _HangingEmbeddingFunction(FakeEmbeddingFunction):
+    def __call__(self, input):
+        time.sleep(30)  # far past any probe timeout
+        raise AssertionError("probe waited for a hung endpoint instead of timing out")
+
+
+def _store(tmp_path, ef):
+    return EmbeddingStore(str(tmp_path / "probe"), embed_model="nomic-embed-text",
+                          base_url="http://embed.invalid/v1", embedding_function=ef)
+
+
+async def test_probe_reports_ok_and_the_vector_width_on_a_live_endpoint(tmp_path):
+    store = _store(tmp_path, FakeEmbeddingFunction())
+    try:
+        probe = await store.probe()
+        assert probe.ok is True
+        assert probe.failure is None
+        assert probe.dimensions == FakeEmbeddingFunction._DIM
+        assert probe.endpoint == "http://embed.invalid/v1"
+        assert probe.model == "nomic-embed-text"
+    finally:
+        store.close()
+
+
+async def test_probe_distinguishes_every_failure_mode(tmp_path):
+    """One call, four distinguishable diagnoses. Reporting them as one
+    undifferentiated "embedding failed" would leave the operator guessing
+    between a down host, a typo'd model name and a bad key."""
+    cases = [
+        (_RaisingEmbeddingFunction(ConnectionError("connection refused")),
+         EmbedProbeFailure.unreachable),
+        (_RaisingEmbeddingFunction(_HttpError(404)), EmbedProbeFailure.no_such_model),
+        (_RaisingEmbeddingFunction(_HttpError(401)), EmbedProbeFailure.unauthorized),
+        (_RaisingEmbeddingFunction(_HttpError(403)), EmbedProbeFailure.unauthorized),
+        (_RaisingEmbeddingFunction(_HttpError(500)), EmbedProbeFailure.http_error),
+        (_EmptyEmbeddingFunction(), EmbedProbeFailure.no_vectors),
+    ]
+    for i, (ef, expected) in enumerate(cases):
+        store = EmbeddingStore(str(tmp_path / f"probe{i}"), embedding_function=ef)
+        try:
+            probe = await store.probe()
+            assert probe.ok is False
+            assert probe.failure is expected, f"{ef!r} misclassified as {probe.failure}"
+            assert probe.dimensions is None
+        finally:
+            store.close()
+
+
+async def test_probe_carries_the_underlying_error_for_diagnosis(tmp_path):
+    store = _store(tmp_path, _RaisingEmbeddingFunction(ConnectionError("connection refused")))
+    try:
+        probe = await store.probe()
+        assert "ConnectionError" in probe.error
+        assert "connection refused" in probe.error
+    finally:
+        store.close()
+
+
+async def test_probe_is_bounded_and_never_hangs_on_a_dead_host(tmp_path):
+    """An unreachable host can accept a TCP connection and then say nothing at
+    all. Without a bound the probe would hold start() forever -- strictly worse
+    than the dead index it is trying to report."""
+    store = _store(tmp_path, _HangingEmbeddingFunction())
+    try:
+        began = time.monotonic()
+        probe = await store.probe(timeout=0.25)
+        elapsed = time.monotonic() - began
+        assert probe.ok is False
+        assert probe.failure is EmbedProbeFailure.timeout
+        assert elapsed < 5, f"probe took {elapsed:.1f}s; the timeout did not bind"
+    finally:
+        store.close()
+
+
+async def test_probe_adds_no_meaningful_latency_when_healthy(tmp_path):
+    """One short string, one embed call: the healthy path must not be something
+    an operator would notice at boot."""
+    store = _store(tmp_path, FakeEmbeddingFunction())
+    try:
+        began = time.monotonic()
+        assert (await store.probe()).ok is True
+        assert time.monotonic() - began < 1.0
+    finally:
+        store.close()
+
+
+class _ClientBackedEmbeddingFunction(FakeEmbeddingFunction):
+    """Shaped like chromadb's OpenAIEmbeddingFunction: holds an openai client
+    whose with_options() returns a reconfigured copy. `calls` is shared by
+    reference so it still records after the probe shallow-copies the function."""
+
+    class _Client:
+        def __init__(self, options=None) -> None:
+            self.max_retries = 2
+            self.options = options
+
+        def with_options(self, **kwargs):
+            return _ClientBackedEmbeddingFunction._Client(options=kwargs)
+
+    def __init__(self) -> None:
+        self.client = self._Client()
+        self.calls: list[dict | None] = []
+
+    def __call__(self, input):
+        self.calls.append(self.client.options)
+        return super().__call__(input)
+
+
+async def test_probe_makes_exactly_one_attempt_without_the_indexers_retries(tmp_path):
+    """A probe asks "is it alive right now": one attempt. The embedding client
+    retries twice with backoff by default, which is right for the INDEXER (a
+    transient blip must not lose an embedding) and wrong here -- it turns an
+    instant connection-refused into seconds of boot latency and reports nothing
+    extra."""
+    ef = _ClientBackedEmbeddingFunction()
+    store = _store(tmp_path, ef)
+    try:
+        assert (await store.probe()).ok is True
+        assert ef.calls == [{"max_retries": 0}], \
+            f"probe did not disable retries for its one attempt: {ef.calls}"
+        # The store's own embedding function is untouched, so real upserts keep
+        # the retries they want.
+        assert ef.client.max_retries == 2
+        assert ef.client.options is None
+    finally:
+        store.close()
+
+
+async def test_probe_still_works_when_the_embedding_function_has_no_client(tmp_path):
+    """The no-retry optimisation is best-effort: any embedding function that does
+    not expose an openai-style client is probed exactly as it is, rather than
+    the probe failing over an attribute it merely hoped for."""
+    store = _store(tmp_path, FakeEmbeddingFunction())  # no `.client` at all
+    try:
+        assert (await store.probe()).ok is True
+    finally:
+        store.close()

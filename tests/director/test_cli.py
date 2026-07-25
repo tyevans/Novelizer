@@ -536,3 +536,80 @@ def test_plan_reveal_unknown_secret_reports_rejection(tmp_path):
         assert "\x1b[33m" in r.output  # yellow
     finally:
         os.unlink(path)
+
+
+# --- doctor: the operator-facing entry point to the same endpoint probe -------
+#
+# The runtime deliberately never refuses to boot over a dead embedding endpoint
+# (see Runtime._probe_embeddings). `doctor` is where the HARD failure lives: a
+# command whose whole job is to fail, with an exit code a script can act on.
+
+
+class _FakeProbeStore:
+    """Stands in for the EmbeddingStore build so no test touches a real endpoint."""
+
+    def __init__(self, probe, count=0) -> None:
+        self._probe, self._count = probe, count
+        self.closed = False
+
+    async def probe(self, timeout=None):
+        return self._probe
+
+    async def document_count(self) -> int:
+        return self._count
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _patch_store(monkeypatch, store):
+    import novelizer.director.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "build_embedding_store", lambda settings: store)
+
+
+def test_doctor_reports_a_healthy_endpoint_and_the_index_size(tmp_path, monkeypatch):
+    from novelizer.store.embeddings import EmbedProbe
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    store = _FakeProbeStore(
+        EmbedProbe(endpoint="http://embed.invalid/v1", model="nomic-embed-text",
+                   ok=True, dimensions=768),
+        count=1234,
+    )
+    _patch_store(monkeypatch, store)
+    try:
+        r = CliRunner().invoke(cli, ["doctor"], env=_env(path, xdg))
+        assert r.exit_code == 0, r.output
+        out = _strip_ansi(r.output)
+        assert "http://embed.invalid/v1" in out
+        assert "nomic-embed-text" in out
+        assert "768" in out           # vector width proves a real round-trip
+        assert "1234" in out          # and the index size, the Fix-C number
+        assert store.closed, "doctor must release the store it built"
+    finally:
+        os.unlink(path)
+
+
+def test_doctor_exits_nonzero_with_the_runtime_message_on_a_dead_endpoint(tmp_path, monkeypatch):
+    """One code path, two entry points: doctor prints the SAME line the runtime
+    logs, so an operator never has to reconcile two wordings of one fault."""
+    from novelizer.runtime import embed_probe_message
+    from novelizer.settings import load_effective_settings
+    from novelizer.store.embeddings import EmbedProbe, EmbedProbeFailure
+
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    xdg = tmp_path / "xdg"
+    probe = EmbedProbe(endpoint="http://embed.invalid/v1", model="nomic-embed-text",
+                       ok=False, failure=EmbedProbeFailure.no_such_model,
+                       error="NotFoundError: model not found")
+    _patch_store(monkeypatch, _FakeProbeStore(probe))
+    try:
+        r = CliRunner().invoke(cli, ["doctor"], env=_env(path, xdg))
+        assert r.exit_code != 0, r.output
+        out = _strip_ansi(r.output)
+        assert "has no model 'nomic-embed-text'" in out
+        assert "semantic search will be unavailable" in out
+        assert "Traceback" not in out
+    finally:
+        os.unlink(path)
