@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from langchain_core.tools import tool
 
+from novelizer.canon_fs import search_summary
 from novelizer.canon_fs.paths import build_path_index
 from novelizer.store.embeddings import EmptyIndexError
 
@@ -10,12 +11,23 @@ from novelizer.store.embeddings import EmptyIndexError
 SEARCH_RESULT_CAP = 20
 
 
-def build_search_canon_tool(embedding_store, read_store, kg_store):
+def build_search_canon_tool(embedding_store, read_store, kg_store,
+                            backend=None, settings_provider=None,
+                            callbacks=None):
     """Factory so the tool closes over story-scoped stores (one tool
-    instance per runner, mirroring how runners close over settings)."""
+    instance per runner, mirroring how runners close over settings).
+
+    settings_provider is a zero-arg callable, deliberately: runtime caches
+    this tool for the life of the process (_phase_a_toolkit runs once in
+    start()), so a Settings captured here would freeze the summarizer's
+    model and kill switch at start-up values forever. Reading it per call is
+    what makes the kill switch switchable.
+    """
 
     @tool
-    async def search_canon(query: str, kinds: list[str] | None = None) -> str:
+    async def search_canon(query: str, purpose: str,
+                           kinds: list[str] | None = None,
+                           summarize: bool = True) -> str:
         """Search the story canon by MEANING — chapters, characters, world
         entries, threads, secrets, themes, promises, chapter briefs, arcs,
         and knowledge-graph entities (minor places, factions, items, and
@@ -39,7 +51,14 @@ def build_search_canon_tool(embedding_store, read_store, kg_store):
         canon_fs; arcs have no backing file at all, so their hit line carries
         "(no file — cite id)" in the path slot instead.
 
-        Example: search_canon("the debt Mateo owes", kinds=["thread", "secret"])
+        Say WHY you are asking in `purpose` (e.g. "deciding whether Mateo can
+        repay in ch12"). The results are preceded by a short CONTEXT synthesis
+        of what canon actually says, written against that purpose, so the
+        vaguer the purpose the less useful the synthesis. Pass
+        summarize=False to skip it and get the raw hit list alone.
+
+        Example: search_canon("the debt Mateo owes", purpose="deciding whether
+        Mateo can repay in ch12", kinds=["thread", "secret"])
         """
         try:
             hits = await embedding_store.search(query, kinds=kinds)
@@ -94,7 +113,24 @@ def build_search_canon_tool(embedding_store, read_store, kg_store):
                 f"... {len(hits) - SEARCH_RESULT_CAP} more results — narrow your query "
                 f"or filter by kind."
             )
-        return "\n".join(lines)
+        hit_lines = "\n".join(lines)
+        settings = settings_provider() if settings_provider else None
+        if (not summarize or settings is None or backend is None
+                or not getattr(settings, "search_summarize", True)):
+            return hit_lines
+        entity_lines = {
+            h.id: line for h, line in zip(hits[:SEARCH_RESULT_CAP], lines)
+            if h.kind == "entity"
+        }
+        excerpts = await search_summary.gather_excerpts(
+            hits[:SEARCH_RESULT_CAP], backend, path_by_id, entity_lines)
+        text = await search_summary.summarize(
+            query, purpose, excerpts, settings, callbacks=callbacks)
+        if not text:
+            # A summarizer outage costs a nicety, not the search.
+            return hit_lines
+        return (f"CONTEXT (for: {purpose})\n{text}\n\n"
+                f"RESULTS (cite these ids)\n{hit_lines}")
 
     return search_canon
 

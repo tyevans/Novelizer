@@ -73,15 +73,15 @@ class TestResponseCap:
     async def test_caps_results_and_says_so(self):
         """A truncated list that doesn't announce itself reads as exhaustive."""
         hits = [_Hit(id=f"h{i}", kind="chapter", title=f"T{i}") for i in range(SEARCH_RESULT_CAP + 5)]
-        out = await _tool(hits).ainvoke({"query": "q"})
+        out = await _tool(hits).ainvoke({"query": "q", "purpose": "checking canon"})
         assert len(out.splitlines()) == SEARCH_RESULT_CAP + 1
         assert "narrow your query" in out.splitlines()[-1]
 
     async def test_no_cap_line_when_results_fit(self):
         hits = [_Hit(id="h1", kind="chapter", title="T1")]
-        out = await _tool(hits).ainvoke({"query": "q"})
+        out = await _tool(hits).ainvoke({"query": "q", "purpose": "checking canon"})
         assert "narrow your query" not in out
         assert out.splitlines() == ["(chapter) (no file) — 'T1' [id: h1]"]
 
     async def test_empty_results_unchanged(self):
-        assert await _tool([]).ainvoke({"query": "q"}) == "No results."
+        assert await _tool([]).ainvoke({"query": "q", "purpose": "checking canon"}) == "No results."
