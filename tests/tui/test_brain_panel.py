@@ -89,7 +89,31 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert str(app.query_one("#outline_body", Static).renderable) == OUTLINE_EMPTY
             assert str(app.query_one("#arcs_body", Static).renderable) == ARCS_EMPTY
             assert not app.query("#shape_spark")   # the widget is gone entirely
-            assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause · Outline · Arcs"
+            # Quiet across all six tabs; the index segment is not one of them
+            # and a fresh story's index really does hold nothing yet.
+            assert str(app.query_one("#brain_strip", Static).renderable) == (
+                "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty"
+            )
+    finally:
+        await rt.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_strip_reports_the_semantic_index_size_from_the_runtime():
+    """Wiring proof: _brain_loop reads Runtime.index_document_count() and passes
+    it through refresh_from into the strip. Without it a dead index is invisible
+    -- once the drain abandons an aggregate, lag() reads 0 forever and the
+    readout beside this one actively reassures."""
+    from textual.widgets import Static
+
+    app, rt, path = await _app()
+    try:
+        async def _count():
+            return 1284
+        rt.index_document_count = _count
+        async with app.run_test() as pilot:
+            await pilot.pause(0.5)
+            assert "Index 1284" in str(app.query_one("#brain_strip", Static).renderable)
     finally:
         await rt.close(); os.unlink(path)
 

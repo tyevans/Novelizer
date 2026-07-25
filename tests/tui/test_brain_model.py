@@ -358,6 +358,7 @@ from novelizer.tui.widgets.brain_model import (
     alarm_strip,
     causeway_tab,
     char_initials,
+    index_segment,
     matrix_header,
     secret_row,
     secrets_tab,
@@ -761,6 +762,77 @@ def test_alarm_strip_lag_segment_is_alarm_styled():
     strip = alarm_strip(0, 0, 0, 0, 0, 0, lag=3)
     spans = [(strip.plain[s.start:s.end], str(s.style)) for s in strip.spans]
     assert (" ⚠3 behind", ALARM_STYLE) in spans
+
+
+# --- the semantic index's size, three honest states ----------------------
+# Derivation/formatting is pinned here, on the pure segment, so the
+# three-state logic does not depend on the widget rendering it.
+
+
+def test_index_segment_is_empty_when_nothing_to_report():
+    assert index_segment().plain == ""
+
+
+def test_index_segment_shows_a_populated_count():
+    assert index_segment(1284).plain == "Index 1284"
+
+
+def test_index_segment_populated_count_is_quiet():
+    seg = index_segment(1284)
+    assert all(str(s.style) == "dim" for s in seg.spans)
+
+
+def test_index_segment_zero_documents_reads_as_an_alarm():
+    assert index_segment(0).plain == "Index ⚠empty"
+
+
+def test_index_segment_zero_documents_is_alarm_styled():
+    seg = index_segment(0)
+    spans = [(seg.plain[s.start:s.end], str(s.style)) for s in seg.spans]
+    assert (" ⚠empty", ALARM_STYLE) in spans
+
+
+def test_index_segment_unknown_is_not_an_empty_index():
+    # None means "could not be read". Rendering it as ⚠empty would manufacture
+    # a false alarm -- the mirror of the bug this readout exists to expose.
+    assert index_segment(None).plain == "Index ?"
+
+
+def test_index_segment_unknown_is_quiet():
+    seg = index_segment(None)
+    assert all(str(s.style) == "dim" for s in seg.spans)
+
+
+def test_index_segment_carries_the_count_and_the_lag_together():
+    assert index_segment(0, lag=7).plain == "Index ⚠empty ⚠7 behind"
+
+
+def test_alarm_strip_appends_the_document_count():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, docs=1284).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index 1284"
+    )
+
+
+def test_alarm_strip_appends_the_empty_index_alarm():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, docs=0).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty"
+    )
+
+
+def test_alarm_strip_appends_the_unknown_index_marker():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, docs=None).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ?"
+    )
+
+
+def test_alarm_strip_shows_a_dead_index_and_its_lag_in_one_segment():
+    assert (
+        alarm_strip(0, 0, 0, 0, 0, 0, lag=7, docs=0).plain
+        == "Shape · Threads · Secrets · Cause · Outline · Arcs · Index ⚠empty ⚠7 behind"
+    )
 
 
 def test_outline_tab_empty_state_no_blueprint():
