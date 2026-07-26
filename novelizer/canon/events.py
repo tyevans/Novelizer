@@ -43,6 +43,7 @@ class EventType:
     CHAPTER_MINED = "chapter.mined"
     CHAPTER_PROCESSED = "chapter.processed"
     CHAPTER_SUMMARIZED = "chapter.summarized"
+    CHAPTER_ATTRIBUTED = "chapter.attributed"
     THEME_INTRODUCED = "theme.introduced"
     THEME_DEVELOPED = "theme.developed"
     INSPIRATION_DRAWN = "inspiration.drawn"
@@ -358,6 +359,42 @@ class ChapterSummarized(BaseModel):
     chapter_id: str
     gist: str
     summary: str
+
+
+class AttributedSegment(BaseModel):
+    """One voiced unit of a chapter: an utterance, an interior thought, or the
+    narration between them. Offsets address the CLEAN prose carried on the same
+    event, so the segment list and the stored chapter agree by construction.
+
+    character_id is None when the speaker could not be resolved against the
+    roster -- the segment still exports, carrying a null voice, because a typo
+    in one tag must not cost the chapter its attribution.
+
+    chapter_id is empty on the event -- the event already names its chapter --
+    and is filled in by the read store, where callers grouping many chapters
+    need it on the row."""
+
+    chapter_id: str = ""
+    index: int
+    kind: str
+    character_id: str | None = None
+    character_name: str = ""
+    start_offset: int
+    end_offset: int
+    text: str
+
+
+class ChapterAttributed(BaseModel):
+    """Payload for chapter.attributed -- the Attributor's pass over one chapter
+    revision. Carries the prose with speaker markup STRIPPED, which the
+    projection installs as the chapter's canonical text, plus the dense segment
+    list projected into speech_segments. `problems` records malformed markup
+    the parser could not resolve; it is surfaced as a flag, not an error."""
+
+    chapter_id: str
+    prose: str
+    segments: list[AttributedSegment] = Field(default_factory=list)
+    problems: list[str] = Field(default_factory=list)
 
 
 class ChatUserMessaged(BaseModel):

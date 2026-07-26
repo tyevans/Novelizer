@@ -71,3 +71,37 @@ async def chapter_summarized(ctx: ProjectionContext) -> None:
         upsert("chapter_summaries", "id, data", "?,?"),
         (ctx.payload["chapter_id"], ctx.data),
     )
+
+
+@projects(EventType.CHAPTER_ATTRIBUTED)
+async def chapter_attributed(ctx: ProjectionContext) -> None:
+    """Install the stripped prose as canon and replace this chapter's segments.
+
+    The DELETE is not a dedupe -- it is this event's full meaning. An
+    attribution pass supersedes the previous pass for the same chapter, so
+    replaying the log must land on the last pass's rows, not the union of
+    every pass. A chapter that re-attributes with fewer segments must lose the
+    extras.
+    """
+    p = ctx.payload
+    existing = await load_record(ctx, "chapters", Chapter, p["chapter_id"])
+    if existing is None:
+        logger.warning(
+            "chapter.attributed for unknown chapter_id=%s -- no-op", p["chapter_id"],
+        )
+        return
+    cleaned = existing.model_copy(update={"prose": p["prose"]})
+    await ctx.execute(
+        upsert("chapters", _CHAPTER_COLUMNS, "?,?,?,?"),
+        (cleaned.id, cleaned.model_dump_json(),
+         cleaned.editorial_status.value, cleaned.supersedes_id),
+    )
+    await ctx.execute("DELETE FROM speech_segments WHERE chapter_id = ?", (p["chapter_id"],))
+    for seg in p.get("segments", []):
+        await ctx.execute(
+            "INSERT INTO speech_segments (chapter_id, segment_index, kind, character_id,"
+            " character_name, start_offset, end_offset, text) VALUES (?,?,?,?,?,?,?,?)",
+            (p["chapter_id"], seg["index"], seg["kind"], seg.get("character_id"),
+             seg.get("character_name", ""), seg["start_offset"], seg["end_offset"],
+             seg["text"]),
+        )
