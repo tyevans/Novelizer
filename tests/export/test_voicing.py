@@ -26,6 +26,19 @@ def _mixed():
     ]}
 
 
+def test_budget_mode_never_merges_a_kind_change_for_the_same_speaker():
+    # Same character_id, speech then thought: must not merge even though the
+    # speaker is unchanged -- kind is part of the chunk's identity too.
+    segments = {"ch1": [
+        _seg(0, "speech", "jon", "Jon", '"Three."'),
+        _seg(1, "thought", "jon", "Jon", "He should not have said that."),
+    ]}
+    chunks = build_voicing_export([_chapter()], segments, chunk_by="budget", chunk_size=10_000)
+    assert len(chunks) == 2
+    assert [c.kind for c in chunks] == ["speech", "thought"]
+    assert [c.character_id for c in chunks] == ["jon", "jon"]
+
+
 def test_segment_mode_emits_one_chunk_per_segment():
     chunks = build_voicing_export([_chapter()], _mixed(), chunk_by="segment", chunk_size=0)
     assert len(chunks) == 4
@@ -114,6 +127,20 @@ def test_render_annotated_round_trips_through_the_parser():
     assert reparsed.problems == []
     assert reparsed.clean_prose == "".join(s.text for s in _mixed()["ch1"])
     assert [s.char_name for s in reparsed.spans] == ["Mira", "Mira", "Jon"]
+
+
+def test_render_annotated_escapes_a_quote_in_the_character_name():
+    """A name containing a literal double quote must survive the char="..."
+    attribute and come back out through parse_markers unchanged -- the two
+    functions are halves of one contract."""
+    from novelizer.speech.markers import parse_markers
+
+    segments = {"ch1": [_seg(0, "speech", "bob", 'Bob "Sly" Jones', '"Deal."')]}
+    chunks = build_voicing_export([_chapter()], segments, chunk_by="segment", chunk_size=0)
+    rendered = render_annotated(chunks)
+    reparsed = parse_markers(rendered)
+    assert reparsed.problems == []
+    assert reparsed.spans[0].char_name == 'Bob "Sly" Jones'
 
 
 def test_render_json_round_trips():

@@ -136,7 +136,12 @@ def render_annotated(chunks: list[Chunk]) -> str:
         if chunk.kind == "narration" or not chunk.character_name:
             parts.append(chunk.text)
         else:
+            # Escape a literal quote in the name so it survives inside the
+            # char="..." attribute; markers.py unescapes it back on parse.
+            # Scoped to the attribute only -- chunk.text is real prose and
+            # passes through untouched.
+            escaped_name = chunk.character_name.replace('"', "&quot;")
             parts.append(
-                f'<{chunk.kind} char="{chunk.character_name}">{chunk.text}</{chunk.kind}>'
+                f'<{chunk.kind} char="{escaped_name}">{chunk.text}</{chunk.kind}>'
             )
     return "".join(parts)

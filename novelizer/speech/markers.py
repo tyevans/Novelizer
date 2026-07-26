@@ -106,7 +106,7 @@ def parse_markers(marked: str) -> ParseResult:
         clean_len += len(body)
         spans.append(RawSpan(
             kind=match.group("kind"),
-            char_name=match.group("char").strip(),
+            char_name=match.group("char").strip().replace("&quot;", '"'),
             start=start,
             end=clean_len,
             text=body,
