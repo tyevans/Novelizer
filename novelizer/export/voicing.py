@@ -95,7 +95,9 @@ def _by_budget(chapter_id, ordinal, rows, chunk_size) -> list[Chunk]:
 
     for row in rows:
         same_voice = bool(buffer) and (
-            buffer[0].kind == row.kind and buffer[0].character_id == row.character_id
+            buffer[0].kind == row.kind
+            and buffer[0].character_id == row.character_id
+            and buffer[0].character_name == row.character_name
         )
         fits = same_voice and sum(len(r.text) for r in buffer) + len(row.text) <= chunk_size
         if not fits:

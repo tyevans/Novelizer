@@ -76,6 +76,19 @@ def test_budget_mode_never_merges_across_a_chapter_boundary():
     assert [c.chapter_id for c in chunks] == ["ch1", "ch2"]
 
 
+def test_budget_mode_never_merges_two_different_unresolved_speakers():
+    # Both segments failed to resolve (character_id=None), but they are
+    # DIFFERENT speakers by name -- must not merge into one chunk labelled
+    # with the first speaker's name.
+    segments = {"ch1": [
+        _seg(0, "speech", None, "Mira", '"One."'),
+        _seg(1, "speech", None, "Jon", '"Two."'),
+    ]}
+    chunks = build_voicing_export([_chapter()], segments, chunk_by="budget", chunk_size=10_000)
+    assert len(chunks) == 2
+    assert [c.character_name for c in chunks] == ["Mira", "Jon"]
+
+
 def test_chapter_ordinal_follows_chapter_order():
     chapters = [_chapter("ch1"), _chapter("ch2")]
     segments = {"ch1": [_seg(0, "narration", None, "", "a")],
