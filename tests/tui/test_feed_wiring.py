@@ -9,6 +9,7 @@ from novelizer.agents.schemas import (
     ContinuityOutput, RetconAmendments, StructureAnalystOutput, SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 _AGENTS = ["world_architect", "character_keeper", "author", "editor",
            "continuity_checker", "retconner", "structure_analyst", "summarizer"]
@@ -35,7 +36,7 @@ def _runners():
 async def _quiet_runtime(path):
     settings = Settings(db_path=path, projector_interval=0.1,
                         author_interval=100, default_agent_interval=100, continuity_interval=100)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     for name in _AGENTS:
         rt.scheduler.pause_agent(name)

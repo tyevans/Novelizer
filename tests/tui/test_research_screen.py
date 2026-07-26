@@ -10,6 +10,7 @@ from novelizer.telemetry.events import (
     TelemetryEventType, AgentRunStarted, AgentRunFinished, TokenDelta,
 )
 from tui_kit.widgets.live_stream_panel import LiveStreamPanel
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -38,7 +39,7 @@ def db_path():
 
 async def _runtime(path, runner):
     settings = Settings(db_path=path, projector_interval=0.05)
-    rt = Runtime(settings, runners={"research": runner})
+    rt = Runtime(settings, runners=stub_runners(**{"research": runner}))
     await rt.start()
     return rt
 

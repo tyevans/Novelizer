@@ -4,6 +4,7 @@ from novelizer.settings.layers import global_config_path
 from novelizer.settings.toml_io import load_toml_file, write_toml_file
 from novelizer.tui.app import NovelizerApp
 from tests.tui.test_app_smoke import _room_runners
+from tests.tui.conftest import stub_runners
 
 
 async def _story_app(tmp_path, monkeypatch):
@@ -15,7 +16,7 @@ async def _story_app(tmp_path, monkeypatch):
         author_interval=300,
         projector_interval=0.1,
     )
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     app.SETTINGS_POLL_INTERVAL = 0.05

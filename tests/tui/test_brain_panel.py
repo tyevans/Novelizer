@@ -1,13 +1,30 @@
 import os
 import tempfile
+from pathlib import Path
+
 import pytest
+from textual.app import App, ComposeResult
+
+import novelizer.tui.app
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.projector import Projector
+from novelizer.canon.read_store import ReadStore
 from novelizer.settings import EffectiveSettings as Settings
 from novelizer.runtime import Runtime
 from novelizer.tui.app import NovelizerApp
+from novelizer.tui.widgets.brain_panel import BrainPanel
+
 from novelizer.tui.widgets.brain_model import (
     ARCS_EMPTY, CAUSEWAY_EMPTY, OUTLINE_EMPTY, SECRETS_EMPTY, SHAPE_EMPTY, THREADS_EMPTY,
 )
 from novelizer.agents.schemas import SummarizerOutput
+from tests.tui.conftest import stub_runners
+
+# The panel takes these as arguments; _brain_loop passes them from settings, so
+# a harness test reads them off the same defaults rather than inventing numbers.
+_DEFAULTS = Settings(db_path="unused.db")
+DEFAULT_STALENESS_THRESHOLD = _DEFAULTS.staleness_threshold_chapters
+DEFAULT_SAG_SPIKE_DELTA = _DEFAULTS.sag_spike_delta
 
 
 class _R:
@@ -15,10 +32,43 @@ class _R:
         return {"structured_response": SummarizerOutput(gist="g", summary="s")}
 
 
+class _PanelHarness(App):
+    """Mounts BrainPanel and nothing else.
+
+    The app-level tests below need the real NovelizerApp -- bindings, mode
+    classes, the _brain_loop wiring. A test that only asserts on what the panel
+    renders does not, and paying for the full widget tree to find out is the
+    single biggest cost in this band.
+    """
+
+    CSS_PATH = str(Path(novelizer.tui.app.__file__).parent / "app.tcss")
+
+    def compose(self) -> ComposeResult:
+        yield BrainPanel(id="brain")
+
+
+async def _panel_harness():
+    """A BrainPanel harness over a real (empty) ReadStore.
+
+    A ReadStore, not a Runtime: the panel reads canon through it, and nothing
+    here needs agents, a scheduler, or an embedding index. The Projector owns
+    the read-model schema, so it creates the tables the store then reads.
+    """
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    events = EventStore(path)
+    await events.init()
+    projector = Projector(events, path)
+    await projector.init()
+    await projector.close()
+    read = ReadStore(path)
+    await read.init()
+    return _PanelHarness(), read, path
+
+
 async def _app(**settings_overrides):
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1, **settings_overrides)
-    rt = Runtime(settings, runners={"summarizer": _R()})
+    rt = Runtime(settings, runners=stub_runners(**{"summarizer": _R()}))
     await rt.start()
     for a in rt.scheduler.status():
         rt.scheduler.pause_agent(a["name"])
@@ -75,12 +125,26 @@ async def test_keys_1_to_4_switch_brain_tabs():
 
 @pytest.mark.asyncio
 async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
+    """What the panel RENDERS for an empty story -- so it mounts the panel, not
+    the whole app.
+
+    The full app costs ~1.27s to mount and tear down (14 widgets and their
+    layout) plus ~0.46s for a Runtime, and then this test had to wait out a
+    _brain_loop tick on top. None of that is under test here: the subject is
+    BrainPanel's own output, and refresh_from() is the same call the loop makes.
+    Driving it directly is ~6x cheaper AND deterministic -- there is no tick to
+    race, which is what made this test one of the band's intermittent failures.
+    """
     from textual.widgets import Static
 
-    app, rt, path = await _app()
+    app, read, path = await _panel_harness()
     try:
         async with app.run_test() as pilot:
-            await pilot.pause(0.5)  # first _brain_loop refresh
+            await pilot.pause()
+            await app.query_one(BrainPanel).refresh_from(
+                read, threshold=DEFAULT_STALENESS_THRESHOLD, delta=DEFAULT_SAG_SPIKE_DELTA,
+            )
+            await pilot.pause()
             shape_body = app.query_one("#shape_body", Static).renderable
             assert [t.plain for t in shape_body.renderables] == [SHAPE_EMPTY]
             assert str(app.query_one("#threads_body", Static).renderable) == THREADS_EMPTY
@@ -91,7 +155,7 @@ async def test_fresh_story_shows_designed_empty_states_and_quiet_strip():
             assert not app.query("#shape_spark")   # the widget is gone entirely
             assert str(app.query_one("#brain_strip", Static).renderable) == "Shape · Threads · Secrets · Cause · Outline · Arcs"
     finally:
-        await rt.close(); os.unlink(path)
+        await read.close(); os.unlink(path)
 
 
 @pytest.mark.asyncio

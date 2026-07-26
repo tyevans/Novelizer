@@ -10,6 +10,7 @@ from novelizer.agents.schemas import (
     SummarizerOutput,
 )
 from novelizer.agents.base import ChapterDraft
+from tests.tui.conftest import stub_runners
 
 
 class _R:
@@ -31,7 +32,7 @@ def _runners():
 async def test_command_input_seeds_via_dispatch():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -57,7 +58,7 @@ async def test_command_provider_discovers_every_registered_command():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -77,7 +78,7 @@ async def test_command_provider_discovers_every_registered_command():
 async def test_room_toggle_hides_right_column():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -96,7 +97,7 @@ async def test_room_toggle_hides_right_column():
 async def test_followup_input_prefills_and_dispatches_on_submit():
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -170,7 +171,7 @@ async def test_command_provider_search_narrows_to_matching_commands():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -194,7 +195,7 @@ async def test_command_provider_run_dispatches_args_command_to_followup():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -219,7 +220,7 @@ async def test_command_provider_run_executes_zero_arg_command():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:
@@ -248,7 +249,7 @@ async def test_ctrl_r_opens_research_screen():
 
     fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
     settings = Settings(db_path=path, projector_interval=0.1)
-    rt = Runtime(settings, runners=_runners())
+    rt = Runtime(settings, runners=stub_runners(**_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:

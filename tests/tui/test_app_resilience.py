@@ -10,6 +10,7 @@ from novelizer.agents.schemas import (
     WorldEntriesDraft, KeeperOutput, EditorVerdict, ContinuityOutput, RetconAmendments, StructureAnalystOutput,
     SummarizerOutput,
 )
+from tests.tui.conftest import stub_runners
 
 
 class BoomRunner:
@@ -52,7 +53,7 @@ async def test_author_loop_survives_exception_and_feed_keeps_working():
         projector_interval=0.1,
         outline_gate_enabled=False,  # gate off: exercises app/feed wiring with a mock Author, not the outline gate
     )
-    rt = Runtime(settings, runners=_idle_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_idle_room_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     try:

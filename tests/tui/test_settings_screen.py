@@ -4,6 +4,7 @@ from novelizer.tui.app import NovelizerApp
 from novelizer.tui.settings_screen import SettingsScreen
 from tests.tui.test_app_smoke import _room_runners
 from textual.widgets import DataTable
+from tests.tui.conftest import stub_runners
 
 
 async def _app(tmp_path, monkeypatch, **settings_kwargs):
@@ -13,7 +14,7 @@ async def _app(tmp_path, monkeypatch, **settings_kwargs):
         db_path=str(sd.db_path), chroma_path=str(sd.chroma_path),
         projector_interval=0.1, **settings_kwargs,
     )
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     return NovelizerApp(rt), rt, sd
 
@@ -185,7 +186,7 @@ async def test_table_converges_after_external_apply(tmp_path, monkeypatch):
         db_path=str(sd.db_path), chroma_path=str(sd.chroma_path),
         projector_interval=0.1, author_interval=300,
     )
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     app.SETTINGS_POLL_INTERVAL = 0.05
@@ -242,7 +243,7 @@ async def test_external_change_updates_table_and_preserves_cursor(tmp_path, monk
         db_path=str(sd.db_path), chroma_path=str(sd.chroma_path),
         projector_interval=0.1, author_interval=300,
     )
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     app = NovelizerApp(rt)
     app.SETTINGS_POLL_INTERVAL = 0.05

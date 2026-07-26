@@ -8,6 +8,7 @@ from novelizer.tui.chat_screen import ChatScreen
 from novelizer.canon.events import EventType, StoredEvent
 from novelizer.chat.schemas import ChatReply
 from tests.tui.test_chat_screen import _R, _fake_agent_runners
+from tests.tui.conftest import stub_runners
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def db_path():
 async def test_at_mention_opens_chat_and_generates_reply(db_path):
     settings = Settings(db_path=db_path, projector_interval=0.05)
     runners = _fake_agent_runners() | {"chat_author": _R(ChatReply(reply_text="thinking in scenes"))}
-    rt = Runtime(settings, runners=runners)
+    rt = Runtime(settings, runners=stub_runners(**runners))
     await rt.start()
     try:
         app = NovelizerApp(rt)
@@ -41,7 +42,7 @@ async def test_at_mention_opens_chat_and_generates_reply(db_path):
 @pytest.mark.asyncio
 async def test_alias_and_bare_mention_open_without_sending(db_path):
     settings = Settings(db_path=db_path, projector_interval=0.05)
-    rt = Runtime(settings, runners=_fake_agent_runners())
+    rt = Runtime(settings, runners=stub_runners(**_fake_agent_runners()))
     await rt.start()
     try:
         app = NovelizerApp(rt)
@@ -59,7 +60,7 @@ async def test_alias_and_bare_mention_open_without_sending(db_path):
 @pytest.mark.asyncio
 async def test_unknown_agent_reports_error_and_stays(db_path):
     settings = Settings(db_path=db_path, projector_interval=0.05)
-    rt = Runtime(settings, runners=_fake_agent_runners())
+    rt = Runtime(settings, runners=stub_runners(**_fake_agent_runners()))
     await rt.start()
     try:
         app = NovelizerApp(rt)

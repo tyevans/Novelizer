@@ -10,6 +10,7 @@ from novelizer.tui.escalations_screen import EscalationsScreen
 from novelizer.canon.events import EventType
 from novelizer.store.models import Flag
 from tests.tui.test_app_smoke import _room_runners
+from tests.tui.conftest import stub_runners
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def db_path():
 
 async def _app_with_escalated_flag(db_path):
     settings = Settings(db_path=db_path, projector_interval=0.05)
-    rt = Runtime(settings, runners=_room_runners())
+    rt = Runtime(settings, runners=stub_runners(**_room_runners()))
     await rt.start()
     flag = Flag(
         id="f1", category="contradiction", description="critical one",
