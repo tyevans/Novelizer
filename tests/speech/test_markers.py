@@ -145,3 +145,26 @@ def test_escaped_quote_in_char_attribute_recovers_the_literal_name():
     result = parse_markers(marked)
     assert result.problems == []
     assert result.spans[0].char_name == 'Bob "Sly" Jones'
+
+
+def test_literal_quot_entity_in_body_text_survives_byte_for_byte():
+    """The &quot; unescape only applies to the char attribute. Prose BODY text
+    that happens to contain the literal characters &quot; -- e.g. quoting a
+    tag example, or a character discussing markup -- must pass through
+    untouched, both in clean_prose and in the owning span's text. This is the
+    obvious way the attribute-unescaping fix could have silently corrupted
+    unrelated prose."""
+    marked = (
+        'She read the manual aloud. '
+        '<speech char="Mira">"It says &quot;insert card&quot; right there."</speech>'
+    )
+    result = parse_markers(marked)
+    assert result.problems == []
+    assert "&quot;" in result.clean_prose
+    assert result.clean_prose == (
+        'She read the manual aloud. '
+        '"It says &quot;insert card&quot; right there."'
+    )
+    span = result.spans[0]
+    assert span.text == '"It says &quot;insert card&quot; right there."'
+    assert result.clean_prose[span.start:span.end] == span.text
