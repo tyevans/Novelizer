@@ -56,8 +56,37 @@ def parse_markers(marked: str) -> ParseResult:
     cursor = 0
     clean_len = 0
 
+    # Kinds whose outer tag was already reported via a "nested" problem: the
+    # regex below stops at the first same-kind closing tag (the inner one),
+    # so the outer's own closing tag is always left behind as a lone
+    # remnant. That remnant is the other half of the SAME malformed
+    # construct, not a second defect, so it is consumed silently here rather
+    # than raising a duplicate "unclosed" problem.
+    pending_nested_kinds: list[str] = []
+
+    def strip_remnants(segment: str) -> str:
+        """Remove any stray tag-ish text from a plain-prose segment.
+
+        Every removed remnant is either folded into `pending_nested_kinds`
+        (already accounted for) or reported as its own "unclosed or stray"
+        problem -- one problem per genuinely-unaccounted-for remnant.
+        """
+        pieces: list[str] = []
+        pos = 0
+        for remnant in _REMNANT_RE.finditer(segment):
+            pieces.append(segment[pos:remnant.start()])
+            token = remnant.group(0)
+            closing = re.match(r"^</(speech|thought)\s*>?$", token)
+            if closing and closing.group(1) in pending_nested_kinds:
+                pending_nested_kinds.remove(closing.group(1))
+            else:
+                problems.append(f"unclosed or stray speaker tag: {token!r}")
+            pos = remnant.end()
+        pieces.append(segment[pos:])
+        return "".join(pieces)
+
     for match in _TAG_RE.finditer(marked):
-        before = marked[cursor:match.start()]
+        before = strip_remnants(marked[cursor:match.start()])
         out.append(before)
         clean_len += len(before)
 
@@ -67,6 +96,10 @@ def parse_markers(marked: str) -> ParseResult:
                 f"nested speaker tag inside <{match.group('kind')} "
                 f"char={match.group('char')!r}>"
             )
+            pending_nested_kinds.append(match.group("kind"))
+            # The nested markup must never survive into clean prose or the
+            # span's own text -- only the dialogue/thought body it wraps.
+            body = _REMNANT_RE.sub("", body)
 
         start = clean_len
         out.append(body)
@@ -80,9 +113,6 @@ def parse_markers(marked: str) -> ParseResult:
         ))
         cursor = match.end()
 
-    tail = marked[cursor:]
-    for remnant in _REMNANT_RE.finditer(tail):
-        problems.append(f"unclosed or stray speaker tag: {remnant.group(0)!r}")
-    out.append(_REMNANT_RE.sub("", tail))
+    out.append(strip_remnants(marked[cursor:]))
 
     return ParseResult(clean_prose="".join(out), spans=spans, problems=problems)

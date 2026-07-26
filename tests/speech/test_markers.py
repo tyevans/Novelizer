@@ -90,3 +90,48 @@ def test_spans_never_overlap_and_are_ordered(marked):
     for span in result.spans:
         assert span.start >= previous_end
         previous_end = span.end
+
+
+def test_nested_tag_markup_never_survives_into_clean_prose():
+    marked = '<speech char="Mira">"He said <speech char="Jon">go</speech> and left."</speech>'
+    result = parse_markers(marked)
+    assert "<speech" not in result.clean_prose
+    assert "<thought" not in result.clean_prose
+    for span in result.spans:
+        assert "<speech" not in span.text
+        assert "<thought" not in span.text
+
+
+def test_nested_tag_yields_exactly_one_problem():
+    marked = '<speech char="Mira">"He said <speech char="Jon">go</speech> and left."</speech>'
+    result = parse_markers(marked)
+    assert len(result.problems) == 1
+
+
+# The generator above blacklists < > " so it can never produce malformed
+# markup. This one includes them, so it actually exercises the paths where
+# tag-ish text is malformed, stray, or nested -- the gap that let the
+# clean-prose leak through undetected.
+_messy = st.text(min_size=0, max_size=40)
+
+
+@st.composite
+def _messy_marked_prose(draw):
+    parts = []
+    for _ in range(draw(st.integers(min_value=0, max_value=5))):
+        parts.append(draw(_messy))
+        if draw(st.booleans()):
+            kind = draw(st.sampled_from(["speech", "thought"]))
+            name = draw(_names)
+            body = draw(_messy)
+            parts.append(f'<{kind} char="{name}">{body}</{kind}>')
+    return "".join(parts)
+
+
+@given(_messy_marked_prose())
+def test_never_raises_and_never_leaks_tag_markup(marked):
+    result = parse_markers(marked)  # must not raise
+    assert "<speech" not in result.clean_prose
+    assert "<thought" not in result.clean_prose
+    assert "</speech" not in result.clean_prose
+    assert "</thought" not in result.clean_prose
