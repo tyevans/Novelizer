@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
-from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, SPEECH_MARKER_NOTE
 from novelizer.agents.schemas import EditorVerdict
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.context import (
@@ -339,7 +339,7 @@ def build_editor_runner(settings, callbacks=None, backend=None, tools=None, suba
             settings.agent_temperature, max_tokens=settings.llm_max_tokens,
             callbacks=None, streaming=callbacks is not None,
         )
-        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + SPEECH_MARKER_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=EditorVerdict,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,

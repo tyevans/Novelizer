@@ -114,3 +114,17 @@ PASS_PROMPT_INSTRUCTION = (
     "- Something you suspect but cannot yet confirm: read the canon to confirm before you "
     "emit. Never emit on suspicion alone."
 )
+
+# Prose carries inline speaker markup between the Author writing a chapter and
+# the Attributor formalizing it. That window is short but real, and an agent
+# that quotes or "corrects" the tags would corrupt canon -- so every agent that
+# can see prose is told they are furniture.
+SPEECH_MARKER_NOTE = (
+    "\n\n## Speaker markup\n"
+    "Prose may contain speaker tags: <speech char=\"Name\">\"...\"</speech> around spoken "
+    "dialogue and <thought char=\"Name\">...</thought> around interior thought. They mark who "
+    "is speaking for downstream narration and are stripped from the finished book. Read "
+    "straight through them as if they were not there. Do not quote them, do not comment on "
+    "them, do not treat them as an error or a style problem, and never reproduce them in "
+    "anything you write except prose you are authoring."
+)

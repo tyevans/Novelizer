@@ -3,7 +3,7 @@ import logging
 from novelizer.agents.base import BaseAgent, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
 from novelizer.agents.schemas import TriageVerdict
-from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, SPEECH_MARKER_NOTE
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.canon_fs.skills_route import CRAFT_SKILLS
 from novelizer.canon.read_store import ReadStore
@@ -192,7 +192,7 @@ def build_triage_runner(settings, callbacks=None, backend=None, tools=None, suba
         )
         # Triage's pushed context is a single flag with no chapter index, so it
         # takes the BASE note (no "the chapter list below" sentence).
-        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
+        system_prompt = SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + SPEECH_MARKER_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=TriageVerdict,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,

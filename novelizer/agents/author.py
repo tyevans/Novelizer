@@ -166,12 +166,31 @@ card that no longer fits the character's arc). Leave `flags` empty otherwise.
 ## Your feed note
 Do the writing and the note-setting as a craftsperson. Then, last, write `feed_note` —
 one short line in your own voice reacting to the chapter you just made.
+
+## Marking who speaks
+
+Wrap every line of spoken dialogue in a speaker tag, and every passage of
+rendered interior thought in a thought tag:
+
+    He stopped at the counter. <speech char="Mira">"Twenty dollars."</speech>
+    <thought char="Jon">Twenty. He had four.</thought> He counted it out anyway.
+
+Rules:
+- Tag EVERY utterance, including short ones in a rapid exchange where no "she
+  said" tells the reader who is speaking. That case is exactly why the tags
+  exist -- nothing downstream can recover it from the prose alone.
+- Use the character's canonical name or a known alias, spelled as it appears in
+  canon. Never invent an id or a slug.
+- Leave narration untagged. Do not tag reported or summarized speech that is not
+  in quotation marks.
+- Tags wrap the utterance including its quotation marks, and never nest.
 """ + DECISIVENESS_NOTE + AI_TELL_BAN_NOTE
 
 # Re-exported from novelizer.agents.prompts, which is the real home: six sibling
 # agents still import these through here. Migrate those imports, then drop this.
 RETRIEVAL_NOTE_BASE = prompts.RETRIEVAL_NOTE_BASE
 RETRIEVAL_NOTE = prompts.RETRIEVAL_NOTE
+SPEECH_MARKER_NOTE = prompts.SPEECH_MARKER_NOTE
 
 
 def _summarize(
@@ -415,7 +434,7 @@ def build_author_runner(settings, callbacks=None, backend=None, tools=None, suba
     )
     if backend is not None:
         from novelizer.agents.middleware import TodoContextMiddleware, tool_call_budget
-        system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE + OUTPUT_CONVENTIONS_NOTE
+        system_prompt = AUTHOR_SYSTEM_PROMPT + RETRIEVAL_NOTE + SPEECH_MARKER_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=ChapterDraft,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,

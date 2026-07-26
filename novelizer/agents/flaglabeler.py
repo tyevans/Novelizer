@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import SPEECH_MARKER_NOTE
 from novelizer.agents.schemas import FlagLabel
 from novelizer.canon.committer import Committer
 from novelizer.canon.events import EventType, FlagLabeled
@@ -109,7 +110,7 @@ def build_flaglabeler_runner(settings, callbacks=None):
         max_tokens=min(200, settings.llm_max_tokens), callbacks=callbacks,
         reasoning=settings.light_reasoning,
     )
-    return build_simple_runner(model=model, system_prompt=SYSTEM_PROMPT,
+    return build_simple_runner(model=model, system_prompt=SYSTEM_PROMPT + SPEECH_MARKER_NOTE,
                                response_format=FlagLabel)
 
 

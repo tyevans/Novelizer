@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
 from agent_kit import GRAPH_RECURSION_LIMIT
-from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE
+from novelizer.agents.prompts import OUTPUT_CONVENTIONS_NOTE, SPEECH_MARKER_NOTE
 from novelizer.agents.schemas import PlotterOutput
 from novelizer.agents.author import RETRIEVAL_NOTE_BASE
 from novelizer.brain.beat_drift import beat_drifts
@@ -334,7 +334,7 @@ def build_plotter_runner(settings, callbacks=None, backend=None, tools=None, sub
             callbacks=None, streaming=callbacks is not None,
         )
         from novelizer.agents.middleware import TodoContextMiddleware, tool_call_budget
-        system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + OUTPUT_CONVENTIONS_NOTE
+        system_prompt = PLOTTER_SYSTEM_PROMPT + RETRIEVAL_NOTE_BASE + SPEECH_MARKER_NOTE + OUTPUT_CONVENTIONS_NOTE
         graph = create_deep_agent(
             model=model, system_prompt=system_prompt, response_format=PlotterOutput,
             backend=backend, tools=tools, skills=CRAFT_SKILLS, subagents=subagents,
