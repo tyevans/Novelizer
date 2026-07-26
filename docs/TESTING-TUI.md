@@ -46,8 +46,15 @@ hang signature so nobody re-diagnoses it from scratch.
 - Run the TUI suite as: `uv run pytest tests/tui tests/tui_kit -q -W error`
 - **Zero warnings is a hard gate** (`-W error`). Textual deprecations and un-awaited
   coroutines surface as failures, on purpose.
-- `live_llm`-marked tests are deselected by `addopts = "-m 'not live_llm'"` in
-  `pyproject.toml`; a full run reporting "N deselected" is normal.
+- `live_llm`-marked tests are deselected by `addopts` in `pyproject.toml`; a full
+  run reporting "N deselected" is normal.
+- **`tests/tui` is excluded from the default run.** `addopts` carries
+  `--ignore=tests/tui` (alongside `-n 8 --dist loadfile`), so `uv run pytest`
+  runs 2641 tests in ~1:02 and covers none of the pilot band. Keybindings,
+  screen stack and refresh-loop wiring are therefore NOT gated by the default
+  command -- run the line above explicitly before merging anything that touches
+  `novelizer/tui/`. An explicit path overrides `--ignore`, so
+  `uv run pytest tests/tui` collects all 357 normally.
 
 ## What a pilot test actually costs (2026-07-25)
 
