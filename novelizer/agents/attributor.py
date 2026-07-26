@@ -111,11 +111,45 @@ class Attributor(BaseAgent):
         problems = list(parsed.problems)
         for name in sorted(set(unresolved)):
             problems.append(f"unresolved speaker {name!r}")
+
+        # NOTE: we cannot use ReadStore.list_speech_segments here -- a
+        # chapter.revised event wipes that chapter's projected segment rows
+        # before this pass ever runs (see the CHAPTER_REVISED projection
+        # handler and Invariant 2 in docs/reference/speech-attribution.md),
+        # so by re-attribution time the read store already shows zero
+        # segments regardless of what the prior pass found. The prior pass's
+        # segment set only survives on the *previous* chapter.attributed
+        # event itself, so that is what we compare against.
+        had_speakers = any(
+            s.get("kind") != NARRATION for s in await self._prior_segments(chapter.id)
+        )
+        has_speakers = any(s.kind != NARRATION for s in segments)
+        if had_speakers and not has_speakers:
+            problems.append(
+                "re-attribution produced zero speech/thought segments where the "
+                "chapter previously had attribution -- the revised prose may have "
+                "lost its speaker markup"
+            )
+
         payload = ChapterAttributed(
             chapter_id=chapter.id, prose=parsed.clean_prose,
             segments=segments, problems=problems,
         )
         return payload, problems
+
+    async def _prior_segments(self, chapter_id: str) -> list[dict]:
+        """The segment list from this chapter's most recent chapter.attributed
+        event, if any -- looked up in the event log rather than the read
+        store, since a chapter.revised in between has already deleted the
+        projected rows (this is called before the new chapter.attributed for
+        this pass is committed)."""
+        attributed = await self._events.events_since(
+            0, event_types=[EventType.CHAPTER_ATTRIBUTED]
+        )
+        for event in reversed(attributed):
+            if event.payload.get("chapter_id") == chapter_id:
+                return event.payload.get("segments", [])
+        return []
 
     async def _repair(self, marked: str) -> str | None:
         try:

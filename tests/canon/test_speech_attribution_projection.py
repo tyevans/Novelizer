@@ -144,6 +144,49 @@ async def test_revision_invalidates_prior_attribution(db_path):
 
 
 @pytest.mark.asyncio
+async def test_created_attributed_revised_attributed_lifecycle_agrees_with_prose(db_path):
+    events, proj, read = await _stores(db_path)
+    try:
+        await events.append(EventType.CHAPTER_CREATED, "ch1",
+                            Chapter(id="ch1", title="One",
+                                    prose='He waited. <speech char="Mira">"Hi."</speech>'))
+        await events.append(
+            EventType.CHAPTER_ATTRIBUTED, "ch1",
+            ChapterAttributed(chapter_id="ch1", prose='He waited. "Hi."',
+                              segments=_segments(), problems=[]),
+        )
+        await proj.catch_up()
+
+        await events.append(
+            EventType.CHAPTER_REVISED, "ch1",
+            ChapterRevised(chapter_id="ch1",
+                           prose='She left. <speech char="Jon">"Bye."</speech>'),
+        )
+        new_segments = [
+            AttributedSegment(index=0, kind="narration", character_id=None,
+                              character_name="", start_offset=0, end_offset=10, text="She left. "),
+            AttributedSegment(index=1, kind="speech", character_id="jon",
+                              character_name="Jon", start_offset=10, end_offset=16, text='"Bye."'),
+        ]
+        await events.append(
+            EventType.CHAPTER_ATTRIBUTED, "ch1",
+            ChapterAttributed(chapter_id="ch1", prose='She left. "Bye."',
+                              segments=new_segments, problems=[]),
+        )
+        await proj.catch_up()
+
+        stored = await read.get_chapter("ch1")
+        assert stored.prose == 'She left. "Bye."'
+        segments = await read.list_speech_segments("ch1")
+        assert len(segments) == 2
+        for seg in segments:
+            assert stored.prose[seg.start_offset:seg.end_offset] == seg.text
+        assert segments[1].character_id == "jon"
+    finally:
+        await read.close(); await proj.close(); await events.close()
+
+
+@pytest.mark.asyncio
 async def test_attribution_for_unknown_chapter_stores_no_segments(db_path):
     events, proj, read = await _stores(db_path)
     try:

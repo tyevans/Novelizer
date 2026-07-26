@@ -217,6 +217,49 @@ async def test_revision_triggers_reattribution(stack):
 
 
 @pytest.mark.asyncio
+async def test_revision_that_strips_all_markup_raises_a_flag(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One",
+                                prose='He waited. <speech char="Mira">"Twenty."</speech>'))
+    await events.append(EventType.CHARACTER_CREATED, "mira",
+                        Character(id="mira", name="Mira", aliases=[]))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    # Revised prose comes back with the speaker markup lost -- the model
+    # failed to re-apply the marker contract on the revise path.
+    await events.append(EventType.CHAPTER_REVISED, "ch1",
+                        ChapterRevised(chapter_id="ch1", prose="He waited. Twenty."))
+    await proj.catch_up()
+    await agent.run_once()
+    await proj.catch_up()
+
+    flags = await read.list_flags(category="attribution")
+    assert any("lost its speaker markup" in f.description for f in flags), (
+        "a chapter that had attribution and re-attributes to all-narration "
+        "must raise a flag, not commit silently"
+    )
+
+
+@pytest.mark.asyncio
+async def test_first_time_attribution_with_no_speakers_does_not_flag(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose="Plain narration only."))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    flags = await read.list_flags(category="attribution")
+    assert not any("lost its speaker markup" in f.description for f in flags)
+
+
+@pytest.mark.asyncio
 async def test_readiness_is_backlog_proportional(stack):
     events, proj, read, committer = stack
     for i in range(3):
