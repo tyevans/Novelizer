@@ -88,6 +88,12 @@ CREATE TABLE IF NOT EXISTS arcs (
 CREATE TABLE IF NOT EXISTS chapter_summaries (
     id TEXT PRIMARY KEY, data TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS speech_segments (
+    chapter_id TEXT NOT NULL, segment_index INTEGER NOT NULL,
+    kind TEXT NOT NULL, character_id TEXT, character_name TEXT NOT NULL DEFAULT '',
+    start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL, text TEXT NOT NULL,
+    PRIMARY KEY (chapter_id, segment_index)
+);
 """
 
 # Derived from the schema, never hand-maintained: a table added to _CREATE but

@@ -35,6 +35,23 @@ from novelizer.store.models import Flag
 # a filer, and a filer owes itself the feedback.
 _FILING_MARKERS = ("_commit_flag_drafts", "filed_by=self.name")
 
+# Agents that honour their own rejections some other way than
+# `_own_rejections_note`, and why -- same shape as DECISIVENESS_EXEMPT
+# (tests/agents/test_decisiveness.py): a name here must point at the actual
+# mechanism, so the claim is checkable rather than an assertion of good
+# intent.
+REJECTION_FEEDBACK_EXEMPT: dict[str, str] = {
+    "attributor": (
+        "Files flags from deterministic parser output, not model judgement, so "
+        "there is no prompt for `_own_rejections_note` to feed -- it cannot gate "
+        "a re-file the way it does for an LLM-driven filer. Instead it honours "
+        "rejections in plain code: Attributor.commit() (novelizer/agents/"
+        "attributor.py) loads this agent's own rejected `attribution` flags via "
+        "novelizer.canon.flags.own_rejections and drops any draft whose "
+        "description matches one, before ever calling _commit_flag_drafts."
+    ),
+}
+
 
 def _module(name: str):
     return importlib.import_module(f"novelizer.agents.{name}")
@@ -50,16 +67,32 @@ FILERS = [
 ]
 
 
+GUIDED_FILERS = [name for name in FILERS if name not in REJECTION_FEEDBACK_EXEMPT]
+
+
 def test_the_filing_roster_is_derived_and_non_empty():
     assert len(FILERS) >= 7, f"derivation found only {FILERS} -- the marker scan is broken"
 
 
-@pytest.mark.parametrize("name", FILERS)
+@pytest.mark.parametrize("name", GUIDED_FILERS)
 def test_every_filing_agent_reads_its_own_rejections(name):
     """A filed_by nobody reads back is the finding this test closes."""
     assert "_own_rejections_note" in _source(name), (
         f"{name} files flags but never asks which of them were rejected"
     )
+
+
+def test_rejection_feedback_exemptions_are_justified_and_current():
+    """Same discipline as DECISIVENESS_EXEMPT: an exemption must name the real
+    mechanism, checkable in the module's own source, not merely assert one
+    exists."""
+    for name, reason in REJECTION_FEEDBACK_EXEMPT.items():
+        assert name in FILERS, f"{name} is exempt but no longer a filer -- stale exemption"
+        assert len(reason) > 40, f"{name}'s exemption is asserted, not reasoned"
+        assert "own_rejections" in _source(name), (
+            f"{name} is exempt from _own_rejections_note but its source names no "
+            "alternative rejection-handling mechanism"
+        )
 
 
 class FakeRunner:

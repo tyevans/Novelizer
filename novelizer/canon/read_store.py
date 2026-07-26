@@ -11,6 +11,7 @@ from novelizer.store.models import (
     BlueprintRecord, BeatRecord, ChapterBriefRecord, ArcRecord,
 )
 from novelizer.canon.autonomy import Proposal, AutonomyState
+from novelizer.canon.events import AttributedSegment
 
 
 class ReadStore:
@@ -38,6 +39,26 @@ class ReadStore:
         cur = await self._conn.execute("SELECT data FROM chapters WHERE id=?", (chapter_id,))
         row = await cur.fetchone()
         return Chapter.model_validate_json(row[0]) if row else None
+
+    async def list_speech_segments(self, chapter_id: Optional[str] = None) -> list[AttributedSegment]:
+        """Ordered voiced segments, chapter by chapter. Ordering is
+        (chapter_id, segment_index); callers wanting reading order pair this
+        with list_chapters(), whose creation order is the chapter ordinal."""
+        sql = ("SELECT chapter_id, segment_index, kind, character_id, character_name,"
+               " start_offset, end_offset, text FROM speech_segments")
+        params: tuple = ()
+        if chapter_id is not None:
+            sql += " WHERE chapter_id=?"
+            params = (chapter_id,)
+        sql += " ORDER BY chapter_id, segment_index"
+        cur = await self._conn.execute(sql, params)
+        return [
+            AttributedSegment(
+                chapter_id=r[0], index=r[1], kind=r[2], character_id=r[3],
+                character_name=r[4], start_offset=r[5], end_offset=r[6], text=r[7],
+            )
+            for r in await cur.fetchall()
+        ]
 
     async def list_world_entries(self, domain: Optional[str] = None) -> list[WorldEntry]:
         if domain:

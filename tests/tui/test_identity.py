@@ -3,7 +3,7 @@ from novelizer.tui.identity import IDENTITIES, SPEAKER_WIDTH, identity_for
 
 def test_every_fleet_agent_plus_director_and_system_present():
     assert set(IDENTITIES) == {
-        "author", "editor", "world_architect", "character_keeper",
+        "author", "attributor", "editor", "world_architect", "character_keeper",
         "continuity_checker", "retconner", "structure_analyst", "plotter", "muse",
         "summarizer", "curator", "triage", "flaglabeler", "director", "system",
     }
@@ -11,7 +11,7 @@ def test_every_fleet_agent_plus_director_and_system_present():
 
 def test_glyphs_match_spec_table_verbatim():
     expected = {
-        "author": "✎", "editor": "§", "world_architect": "⌂",
+        "author": "✎", "attributor": "”", "editor": "§", "world_architect": "⌂",
         "character_keeper": "♥", "continuity_checker": "⚖",
         "retconner": "↺", "structure_analyst": "∿", "plotter": "⌖", "muse": "✦",
         "summarizer": "≡", "curator": "❖", "triage": "⑂", "flaglabeler": "⚑",
@@ -22,7 +22,8 @@ def test_glyphs_match_spec_table_verbatim():
 
 def test_labels_keep_existing_feed_names():
     expected = {
-        "author": "Author", "editor": "Editor", "world_architect": "Architect",
+        "author": "Author", "attributor": "Attributor", "editor": "Editor",
+        "world_architect": "Architect",
         "character_keeper": "Keeper", "continuity_checker": "Continuity",
         "retconner": "Retconner", "structure_analyst": "Analyst", "plotter": "Plotter",
         "muse": "Muse", "summarizer": "Summary", "curator": "Curator",

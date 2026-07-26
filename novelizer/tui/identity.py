@@ -38,6 +38,7 @@ class AgentIdentity:
 
 IDENTITIES: dict[str, AgentIdentity] = {
     "author": AgentIdentity("author", "Author", "✎", "A", "#d7af00"),
+    "attributor": AgentIdentity("attributor", "Attributor", "”", "V", "#ff5faf"),
     "editor": AgentIdentity("editor", "Editor", "§", "E", "#8787d7"),
     "world_architect": AgentIdentity("world_architect", "Architect", "⌂", "W", "#00af87"),
     "character_keeper": AgentIdentity("character_keeper", "Keeper", "♥", "K", "#d75f87"),
@@ -87,12 +88,13 @@ def identity_for(agent_name: str) -> AgentIdentity:
 # registry, so the next added agent fails a test instead of vanishing.
 AGENT_NAMES = (
     "world_architect", "character_keeper", "muse", "plotter", "author",
-    "editor", "continuity_checker", "retconner", "curator", "structure_analyst",
-    "summarizer", "triage", "flaglabeler",
+    "attributor", "editor", "continuity_checker", "retconner", "curator",
+    "structure_analyst", "summarizer", "triage", "flaglabeler",
 )
 
 _VERBS = {
     "author": "drafting",
+    "attributor": "attributing speech",
     "editor": "reviewing",
     "world_architect": "worldbuilding",
     "character_keeper": "tending characters",

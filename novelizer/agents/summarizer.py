@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 from novelizer.agents.base import BaseAgent, Runner
+from novelizer.agents.prompts import SPEECH_MARKER_NOTE
 from novelizer.agents.schemas import SummarizerOutput
 from novelizer.brain.context_assembly import assemble_verbatim
 from novelizer.brain.watermarks import current_done_ids
@@ -156,7 +157,7 @@ def build_summarizer_runner(settings, callbacks=None):
         settings.agent_model, settings.llm_base_url, settings.llm_api_key,
         temperature=0.2, max_tokens=settings.llm_max_tokens, callbacks=callbacks,
     )
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT,
+    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT + SPEECH_MARKER_NOTE,
                              response_format=ProviderStrategy(SummarizerOutput))
 
 

@@ -238,6 +238,7 @@ class Runtime:
         self.summarizer = None
         self.plotter = None
         self.muse = None
+        self.attributor = None
         self.scheduler: Optional[Scheduler] = None
         self.voice_pack = None
         self.active_prose_profile = None
@@ -442,6 +443,7 @@ class Runtime:
         self.retconner = self.agents_by_name["retconner"]
         self.structure_analyst = self.agents_by_name["structure_analyst"]
         self.summarizer = self.agents_by_name["summarizer"]
+        self.attributor = self.agents_by_name["attributor"]
         # the planner ticks before the writer in a fresh room -- AGENT_REGISTRY
         # order encodes scheduling order, same as this list did before.
         self.agents = [self.agents_by_name[spec.name] for spec in AGENT_REGISTRY]
@@ -558,7 +560,7 @@ class Runtime:
         # the TUI projector/scheduler/status loops.
         interval_map = {
             "author_interval": [self.author],
-            "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner],
+            "default_agent_interval": [self.world_architect, self.character_keeper, self.editor, self.retconner, self.attributor],
             "continuity_interval": [self.continuity_checker],
             "structure_analyst_interval": [self.structure_analyst],
             "summarizer_interval": [self.summarizer],
