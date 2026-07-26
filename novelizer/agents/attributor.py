@@ -20,10 +20,12 @@ from novelizer.brain.watermarks import current_done_ids
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import AttributedSegment, ChapterAttributed, EventType
+from novelizer.canon.flags import own_rejections
 from novelizer.canon.read_store import ReadStore
 from novelizer.speech.markers import parse_markers
 from novelizer.speech.resolve import build_name_index, resolve_speaker
 from novelizer.speech.segments import NARRATION, segment_prose
+from novelizer.store.models import FlagStatus
 
 logger = logging.getLogger(__name__)
 
@@ -132,15 +134,33 @@ class Attributor(BaseAgent):
         return out.prose
 
     async def commit(self, results: dict, ctx: dict) -> None:
+        # _commit_flag_drafts dedupes only against currently OPEN flags, and
+        # `problems` is recomputed from the prose every pass -- so without
+        # this, a finding Triage rejected (e.g. "unresolved speaker 'Nobody'
+        # is intentional") would be re-filed verbatim the next time this
+        # chapter is (re)attributed, forever. This agent files in plain code
+        # rather than by model judgement, so it cannot read its own
+        # rejections from a prompt the way an LLM-driven filer does
+        # (BaseAgent._own_rejections_note); honouring them here, before
+        # drafting, is the code-side equivalent -- see own_rejections.
+        rejected = own_rejections(
+            await self._read.list_flags(category=FLAG_CATEGORY, status=FlagStatus.rejected),
+            filed_by=self.name,
+        )
+        rejected_descriptions = {f.description for f in rejected}
+
         drafts: list[FlagDraft] = []
         for chapter_id, (payload, problems) in results.items():
             await self._committer.commit(
                 self.name, EventType.CHAPTER_ATTRIBUTED, chapter_id, payload,
             )
             for problem in problems:
+                description = f"chapter {chapter_id}: {problem}"
+                if description in rejected_descriptions:
+                    continue
                 drafts.append(FlagDraft(
                     category=FLAG_CATEGORY,
-                    description=f"chapter {chapter_id}: {problem}",
+                    description=description,
                     related_entry_ids=[chapter_id],
                 ))
         await self._commit_flag_drafts(drafts, FLAG_CATEGORY)

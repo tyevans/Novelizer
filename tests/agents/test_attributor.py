@@ -9,9 +9,10 @@ from novelizer.agents.schemas import RepairedMarkup
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import ChapterRevised, EventType
+from novelizer.canon.flags import mark_declined
 from novelizer.canon.projector import Projector
 from novelizer.canon.read_store import ReadStore
-from novelizer.store.models import Chapter, Character
+from novelizer.store.models import Chapter, Character, Flag, FlagStatus
 
 
 class _Runner:
@@ -140,6 +141,44 @@ async def test_successful_repair_is_reparsed_and_adopted(stack):
     assert payload["problems"] == []
     flags = await events.events_since(0, event_types=[EventType.FLAG_CREATED])
     assert flags == [], "a successful repair leaves nothing to flag"
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_flag_is_not_refiled_but_a_new_one_still_is(stack):
+    """The code-side equivalent of _own_rejections_note: this agent files in
+    plain code, so a prompt note can't gate a re-file -- honouring rejections
+    has to happen in commit() itself, or the same finding re-files forever on
+    every re-attribution."""
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose='<speech char="Nobody">"Hi."</speech>'))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+    await agent.run_once()
+    await proj.catch_up()
+
+    filed = (await read.list_flags(category="attribution", status=FlagStatus.open))
+    assert len(filed) == 1
+    rejected_description = filed[0].description
+    declined = mark_declined(filed[0], by="triage", resolution="not_actionable",
+                             reason="Nobody is an intentional unnamed extra")
+    await committer.commit("triage", EventType.FLAG_REJECTED, declined.id, declined)
+    await proj.catch_up()
+
+    # Revise the chapter: the same unresolved speaker persists, plus a
+    # genuinely new one.
+    await events.append(EventType.CHAPTER_REVISED, "ch1",
+                        ChapterRevised(chapter_id="ch1",
+                                       prose='<speech char="Nobody">"Hi."</speech> '
+                                             '<speech char="AlsoUnknown">"Bye."</speech>'))
+    await proj.catch_up()
+    await agent.run_once()
+    await proj.catch_up()
+
+    open_flags = await read.list_flags(category="attribution", status=FlagStatus.open)
+    descriptions = {f.description for f in open_flags}
+    assert rejected_description not in descriptions, "a rejected finding must not be re-filed"
+    assert any("AlsoUnknown" in d for d in descriptions), "a genuinely new problem must still be flagged"
 
 
 @pytest.mark.asyncio
