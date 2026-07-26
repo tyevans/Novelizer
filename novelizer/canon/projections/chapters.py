@@ -55,6 +55,13 @@ async def chapter_revised(ctx: ProjectionContext) -> None:
         upsert("chapters", _CHAPTER_COLUMNS, "?,?,?,?"),
         (revised.id, revised.model_dump_json(), EditorialStatus.draft.value, revised.supersedes_id),
     )
+    # A revision invalidates any prior attribution: stored segment offsets
+    # address the pre-revision prose, so leaving them in place would let the
+    # voicing export silently pair old speaker assignments with new text.
+    # Missing attribution is visibly empty; stale attribution is not. The
+    # chapter has no valid attribution until the Attributor re-runs on the
+    # new prose and a fresh chapter.attributed replaces these rows.
+    await ctx.execute("DELETE FROM speech_segments WHERE chapter_id = ?", (p["chapter_id"],))
 
 
 @projects(EventType.ANNOTATION_STRUCTURE_SCORED)
