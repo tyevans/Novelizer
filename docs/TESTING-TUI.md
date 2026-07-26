@@ -49,6 +49,55 @@ hang signature so nobody re-diagnoses it from scratch.
 - `live_llm`-marked tests are deselected by `addopts = "-m 'not live_llm'"` in
   `pyproject.toml`; a full run reporting "N deselected" is normal.
 
+## What a pilot test actually costs (2026-07-25)
+
+Measured, because three plausible theories were all wrong. Median of 5 boots
+each, one `run_test()` boot + teardown:
+
+| what you mount | cost |
+| --- | --- |
+| bare Textual app (`run_test` itself) | 0.057s |
+| bare app + `app.tcss` | 0.059s (CSS parsing is ~2ms) |
+| one real widget (`BrainPanel`, `EngineRoom`) in a minimal harness | ~0.19s |
+| the whole `NovelizerApp`, background workers disabled | 1.098s |
+| the whole `NovelizerApp` as tests build it | 1.266s |
+
+Plus `Runtime.start()` at ~0.46s, which is ~1.7s of a ~2s pilot test.
+
+**The bill is mounting the app's widget tree** — Header, Footer, RichLog,
+BrainPanel, EngineRoom, StoryBrowser, ActivityStrip and their layout — once per
+test, ~100 times per run. Not `run_test`, not CSS, not the loops.
+
+Dead ends, measured, so nobody re-runs them:
+
+- **Converting fixed `pilot.pause(0.8)` to poll-until-condition**: saved 0.3s on
+  a file with four such sites (expected ~3.2s). The pauses are not the cost.
+- **Shrinking the refresh intervals** (`BRAIN_INTERVAL` and friends) so tests
+  need not wait a tick: *backfired*. Three files went 68.5s -> 105.4s at
+  0.01-0.02s, and -> 80.0s at 0.1-0.15s. Every tick does real DB work, so a
+  tighter interval costs more than the wait it saves.
+- **`pytest -n`**: the band fails nondeterministically (a different 2-9 tests
+  each run at `-n 8`); `-n 4` was worse on both time and failures.
+
+### The rule that follows
+
+Mount the smallest thing that can answer the question, and drive it directly
+rather than waiting for a loop.
+
+- *Does it render X?* -> mount the widget in a harness (see
+  `tests/tui/test_brain_panel_scroll.py`, and `_PanelHarness` in
+  `test_brain_panel.py`) over a `ReadStore`, and call the same update method the
+  loop calls (`BrainPanel.refresh_from`). ~0.19s, and deterministic: there is no
+  tick to race.
+- *Is it wired into the app?* -> the real `NovelizerApp`. Worth 1.27s for
+  bindings, screen stack and mode classes. There are not many of these.
+- *Is the string right?* -> a pure model test. Milliseconds.
+
+Worked example: `test_fresh_story_shows_designed_empty_states_and_quiet_strip`
+went 0.9s -> 0.14s this way, and stopped being one of the band's intermittent
+failures. Slowness and flakiness here have the same cause -- waiting on a loop
+you did not need to start.
+
 ## Why the suite is as fast as it is (2026-07-22)
 
 A "tests are slow, must be doing real inference" investigation found **zero live
