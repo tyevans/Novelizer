@@ -1346,7 +1346,9 @@ A pure function from chapters and segments to chunks. The chunking knob is confi
   - `Chunk(chapter_id: str, chapter_ordinal: int, kind: str, character_id: str | None, character_name: str, text: str, segment_indexes: list[int])` — frozen dataclass
   - `build_voicing_export(chapters, segments, *, chunk_by: str, chunk_size: int) -> list[Chunk]`
   - `render_json(chunks: list[Chunk], *, title: str) -> str`
+  - `render_annotated(chunks: list[Chunk]) -> str`
   - `CHUNK_MODES: tuple[str, ...] = ("segment", "chapter", "budget")`
+  - `FORMATS: tuple[str, ...] = ("json", "annotated")`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1360,7 +1362,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from novelizer.canon.events import AttributedSegment
-from novelizer.export.voicing import build_voicing_export, render_json
+from novelizer.export.voicing import build_voicing_export, render_annotated, render_json
 from novelizer.store.models import Chapter
 
 
@@ -1439,6 +1441,39 @@ def test_unknown_chunk_mode_is_rejected():
         build_voicing_export([_chapter()], _mixed(), chunk_by="nonsense", chunk_size=0)
 
 
+def test_render_annotated_rebuilds_the_marked_prose():
+    chunks = build_voicing_export([_chapter()], _mixed(), chunk_by="segment", chunk_size=0)
+    assert render_annotated(chunks) == (
+        'He waited. '
+        '<speech char="Mira">"One."</speech>'
+        '<speech char="Mira">"Two."</speech>'
+        '<speech char="Jon">"Three."</speech>'
+    )
+
+
+def test_render_annotated_refuses_chapter_chunks():
+    chunks = build_voicing_export([_chapter()], _mixed(), chunk_by="chapter", chunk_size=0)
+    with pytest.raises(ValueError):
+        render_annotated(chunks)
+
+
+def test_render_annotated_leaves_narration_bare():
+    segments = {"ch1": [_seg(0, "narration", None, "", "Just prose.")]}
+    chunks = build_voicing_export([_chapter()], segments, chunk_by="segment", chunk_size=0)
+    assert render_annotated(chunks) == "Just prose."
+
+
+def test_render_annotated_round_trips_through_the_parser():
+    """The rendering and the parser are the two halves of one contract."""
+    from novelizer.speech.markers import parse_markers
+
+    chunks = build_voicing_export([_chapter()], _mixed(), chunk_by="segment", chunk_size=0)
+    reparsed = parse_markers(render_annotated(chunks))
+    assert reparsed.problems == []
+    assert reparsed.clean_prose == "".join(s.text for s in _mixed()["ch1"])
+    assert [s.char_name for s in reparsed.spans] == ["Mira", "Mira", "Jon"]
+
+
 def test_render_json_round_trips():
     chunks = build_voicing_export([_chapter()], _mixed(), chunk_by="segment", chunk_size=0)
     data = json.loads(render_json(chunks, title="Book"))
@@ -1478,10 +1513,15 @@ the caller's knob, but it can only ever GROUP segments -- a chunk never spans
 two speakers, two kinds, or two chapters, so no chunking choice can blur the
 attribution the Attributor established.
 
-JSON is the only emitter. Emitters are kept behind render_* functions with a
-common signature so an SSML target can be added without touching the chunker;
-building one now would bind the format to one engine's voice-tag conventions
-before there is a consumer to bind to.
+Two emitters: JSON for the pipeline, annotated prose for a human checking the
+attribution by eye. Both are render_* functions over the same chunks, so an
+SSML target can be added without touching the chunker; building SSML now would
+bind the format to one engine's voice-tag conventions before there is a
+consumer to bind to.
+
+The annotated rendering is DERIVED, never stored. Clean prose plus segments
+already carries everything the marked-up prose does -- storing a second copy
+would be duplicate state with no third source to arbitrate a drift.
 """
 from __future__ import annotations
 
@@ -1489,6 +1529,7 @@ import json
 from dataclasses import asdict, dataclass
 
 CHUNK_MODES: tuple[str, ...] = ("segment", "chapter", "budget")
+FORMATS: tuple[str, ...] = ("json", "annotated")
 
 
 @dataclass(frozen=True)
@@ -1578,12 +1619,41 @@ def render_json(chunks: list[Chunk], *, title: str) -> str:
         {"title": title, "chunks": [asdict(c) for c in chunks]},
         ensure_ascii=False, indent=2,
     )
+
+
+def render_annotated(chunks: list[Chunk]) -> str:
+    """Rebuild the marked-up prose, for reading the attribution by eye.
+
+    Round-trips through novelizer.speech.markers.parse_markers: this function
+    and that parser are the two halves of one contract, and
+    tests/export/test_voicing.py pins that they agree.
+
+    Chunks are dense and ordered, so concatenating them with the non-narration
+    ones re-wrapped reproduces the prose exactly -- no offsets needed.
+    """
+    parts: list[str] = []
+    for chunk in chunks:
+        if chunk.kind == "chapter":
+            # A whole-chapter chunk has already flattened its speakers away.
+            # Rendering it bare would silently drop every tag, so refuse: the
+            # caller wants chunk_by="segment" or "budget".
+            raise ValueError(
+                "render_annotated needs voiced chunks; chunk_by='chapter' has no speaker "
+                "to re-wrap. Use chunk_by='segment' or 'budget'."
+            )
+        if chunk.kind == "narration" or not chunk.character_name:
+            parts.append(chunk.text)
+        else:
+            parts.append(
+                f'<{chunk.kind} char="{chunk.character_name}">{chunk.text}</{chunk.kind}>'
+            )
+    return "".join(parts)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/export/test_voicing.py -v`
-Expected: PASS, 11 tests
+Expected: PASS, 15 tests
 
 - [ ] **Step 5: Commit**
 
@@ -1647,6 +1717,47 @@ async def test_writes_a_json_document_under_export(tmp_path, voicing_runtime):
 
 
 @pytest.mark.asyncio
+async def test_annotated_format_writes_marked_prose(tmp_path, voicing_runtime):
+    runtime = voicing_runtime(
+        tmp_path,
+        chapters=[Chapter(id="ch1", title="One", prose='He. "Hi."')],
+        segments=[
+            AttributedSegment(chapter_id="ch1", index=0, kind="narration", character_id=None,
+                              character_name="", start_offset=0, end_offset=4, text="He. "),
+            AttributedSegment(chapter_id="ch1", index=1, kind="speech", character_id="mira",
+                              character_name="Mira", start_offset=4, end_offset=9, text='"Hi."'),
+        ],
+    )
+    from novelizer.tui.voicing_export_screen import VoicingExportScreen
+
+    screen = VoicingExportScreen(runtime)
+    screen.export_format = "annotated"
+    screen.chunk_by = "segment"
+    path = await screen.write_export()
+
+    assert path.suffix == ".txt"
+    assert Path(path).read_text() == 'He. <speech char="Mira">"Hi."</speech>'
+
+
+@pytest.mark.asyncio
+async def test_annotated_format_rejects_chapter_chunking(tmp_path, voicing_runtime):
+    runtime = voicing_runtime(
+        tmp_path,
+        chapters=[Chapter(id="ch1", title="One", prose="x")],
+        segments=[AttributedSegment(chapter_id="ch1", index=0, kind="narration",
+                                    character_id=None, character_name="",
+                                    start_offset=0, end_offset=1, text="x")],
+    )
+    from novelizer.tui.voicing_export_screen import VoicingExportScreen
+
+    screen = VoicingExportScreen(runtime)
+    screen.export_format = "annotated"
+    screen.chunk_by = "chapter"
+    assert await screen.write_export() is None
+    assert "per-chapter" in screen._error
+
+
+@pytest.mark.asyncio
 async def test_reports_an_error_when_no_segments_exist(tmp_path, voicing_runtime):
     runtime = voicing_runtime(tmp_path, chapters=[], segments=[])
     from novelizer.tui.voicing_export_screen import VoicingExportScreen
@@ -1686,7 +1797,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Select, Static
 
-from novelizer.export.voicing import build_voicing_export, render_json
+from novelizer.export.voicing import build_voicing_export, render_annotated, render_json
 from novelizer.settings.discovery import slugify
 
 DEFAULT_CHUNK_SIZE = 800
@@ -1701,12 +1812,17 @@ class VoicingExportScreen(ModalScreen):
         self.title_value = runtime.settings.story_title or Path(runtime.settings.db_path).parent.name
         self.chunk_by = "budget"
         self.chunk_size = DEFAULT_CHUNK_SIZE
+        self.export_format = "json"
         self._error: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="voicing_box") as box:
             box.border_title = "EXPORT FOR VOICING"
             yield Input(value=self.title_value, placeholder="Title", id="voicing_title")
+            yield Select(
+                [("Voicing JSON", "json"), ("Annotated prose", "annotated")],
+                id="voicing_format", allow_blank=False, value=self.export_format,
+            )
             yield Select(
                 [("Per segment", "segment"), ("Per chapter", "chapter"),
                  ("Packed to budget", "budget")],
@@ -1729,6 +1845,8 @@ class VoicingExportScreen(ModalScreen):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "voicing_chunk_by":
             self.chunk_by = event.value
+        elif event.select.id == "voicing_format":
+            self.export_format = event.value
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "voicing_confirm":
@@ -1759,17 +1877,31 @@ class VoicingExportScreen(ModalScreen):
         for row in rows:
             by_chapter.setdefault(row.chapter_id, []).append(row)
 
+        chunk_by = self.chunk_by
+        if self.export_format == "annotated" and chunk_by == "chapter":
+            # render_annotated has no speaker to re-wrap on a chapter chunk and
+            # refuses rather than silently dropping every tag.
+            self._set_error(
+                "Annotated prose needs per-segment or budget chunking, not per-chapter."
+            )
+            return None
+
         chunks = build_voicing_export(
-            chapters, by_chapter, chunk_by=self.chunk_by, chunk_size=self.chunk_size,
+            chapters, by_chapter, chunk_by=chunk_by, chunk_size=self.chunk_size,
         )
-        document = render_json(chunks, title=self.title_value)
+        if self.export_format == "annotated":
+            document = render_annotated(chunks)
+            suffix = ".txt"
+        else:
+            document = render_json(chunks, title=self.title_value)
+            suffix = ".json"
 
         story_root = Path(self.runtime.settings.db_path).parent
         export_dir = story_root / "export"
         export_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        final_path = export_dir / f"{slugify(self.title_value)}-voicing-{stamp}.json"
-        tmp_path = final_path.with_suffix(".json.tmp")
+        final_path = export_dir / f"{slugify(self.title_value)}-voicing-{stamp}{suffix}"
+        tmp_path = final_path.with_suffix(f"{suffix}.tmp")
         try:
             tmp_path.write_text(document, encoding="utf-8")
             tmp_path.rename(final_path)
@@ -1794,7 +1926,7 @@ here.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/tui/test_voicing_export_screen.py -v`
-Expected: PASS, 2 tests
+Expected: PASS, 4 tests
 
 - [ ] **Step 5: Wire the palette command**
 
