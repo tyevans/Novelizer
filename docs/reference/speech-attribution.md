@@ -64,6 +64,61 @@ chapter.
 formalizes markup the Author already wrote rather than introducing new canon
 content.
 
+## Voicing export JSON document
+
+`novelizer.export.voicing.render_json` (consumed by the TUI's voicing export
+screen and, ultimately, a text-to-speech pipeline) serializes a chunked
+linearization of one or more chapters:
+
+```json
+{
+  "title": "My Story",
+  "chunks": [
+    {
+      "chapter_id": "ch1",
+      "chapter_ordinal": 1,
+      "kind": "speech",
+      "character_id": "mira",
+      "character_name": "Mira",
+      "text": "\"One.\" \"Two.\"",
+      "segment_indexes": [1, 2]
+    }
+  ]
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `title` | `str` | Story title, passed through by the caller. |
+| `chunks` | `list[Chunk]` | Ordered; see `build_voicing_export` in `novelizer/export/voicing.py`. |
+
+Each chunk:
+
+| Field | Type | Notes |
+|---|---|---|
+| `chapter_id` | `str` | The chapter this chunk belongs to. |
+| `chapter_ordinal` | `int` | 1-based position of the chapter among those exported (creation order), for a consumer that wants chapters in reading order without re-deriving it. |
+| `kind` | `str` | `speech`, `thought`, or `narration` -- `chapter` for the synthetic chunk described below. |
+| `character_id` | `str \| None` | The resolved speaker, or `None` for narration or an unresolved speaker. |
+| `character_name` | `str` | The freeform name as authored; empty for narration. |
+| `text` | `str` | The chunk's concatenated text -- one voice, one kind, never spanning a chapter boundary. |
+| `segment_indexes` | `list[int]` | The `AttributedSegment.index` values folded into this chunk, in order -- lets a caller trace a chunk back to its source segments. |
+
+Three chunking modes (`chunk_by`, see `CHUNK_MODES`):
+
+- `"segment"` -- one chunk per `AttributedSegment`, verbatim.
+- `"budget"` -- consecutive same-voice, same-kind segments within the same
+  chapter are packed together up to `chunk_size` characters. `same_voice`
+  compares `kind`, `character_id`, **and** `character_name` -- two adjacent
+  segments that both failed to resolve (`character_id=None`) but name
+  different speakers are never merged into one mislabeled chunk.
+- `"chapter"` -- one chunk per chapter, `kind="chapter"`, `character_id=None`,
+  `character_name=""`. This chunk has no single voice: it flattens every
+  speaker in the chapter into one blob of `text`, keeping only
+  `segment_indexes` for a caller that wants per-chapter files and will
+  re-read segment detail itself. `render_annotated` refuses `"chapter"`
+  chunks for this reason -- there is no speaker to re-wrap.
+
 ## Invariants
 
 1. **Offsets address the clean prose carried on the same event.** `start_offset`/`end_offset` on every segment are positions into `ChapterAttributed.prose` — the stripped text, not the Author's original marked-up draft. Because the projector installs that same `prose` string as the chapter's canonical text in the same handler invocation, the table and `chapters.data->prose` agree by construction: there is no window where the projected chapter text and the segment offsets could refer to different strings.
