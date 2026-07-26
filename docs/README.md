@@ -57,6 +57,10 @@ plans, and the docs backlog).
   the TUI and every headless subcommand that operates against a story's event store.
 - [research-domain CLI](reference/research-domain-cli.md) — the `research-domain` command
   for the synthetic proof-domain built on `substrate` (`append` and `show`).
+- [Speech attribution: `chapter.attributed` and `speech_segments`](reference/speech-attribution.md)
+  — the event payload and projection table that record who is speaking in a chapter.
+- [The Attributor](reference/attributor-agent.md) — the agent that formalizes the Author's
+  inline speaker markup into clean prose plus a segment list.
 
 ## Explanation (understanding-oriented)
 
@@ -67,6 +71,9 @@ plans, and the docs backlog).
 - [Architecture boundaries](explanation/architecture-boundaries.md) — the package-level
   import boundaries across the four root packages (`substrate`, `novelizer`,
   `research_domain`, `tui_kit`) and why they're drawn where they are.
+- [Why attribution is authored, not inferred](explanation/speech-attribution-inline.md) —
+  why the Author marks speakers inline instead of a later pass inferring them, and why
+  clean prose is canon with the annotation derived from it.
 
 ## Project history and roadmap
 
