@@ -44,7 +44,27 @@ def test_adjacent_spans_produce_no_empty_narration():
     assert [s.kind for s in segs] == ["speech", "speech"]
 
 
-@given(st.text(alphabet=st.characters(blacklist_characters="<>\"", min_codepoint=32), max_size=60))
-def test_segments_concatenate_to_the_clean_prose(text):
-    clean, segs = _segments(text)
+_plain_run = st.text(
+    alphabet=st.characters(blacklist_characters="<>\"", min_codepoint=32), max_size=15
+)
+_tag_body = _plain_run.filter(lambda s: s.strip() != "")
+_tag_kind = st.sampled_from(["speech", "thought"])
+_char_name = st.sampled_from(["Mira", "Jorin", "Q"])
+
+
+def _make_tag(kind, name, body):
+    return f'<{kind} char="{name}">{body}</{kind}>'
+
+
+_tag_block = st.builds(_make_tag, _tag_kind, _char_name, _tag_body)
+_block = st.one_of(_plain_run, _tag_block)
+
+
+@given(st.lists(_block, min_size=0, max_size=8))
+def test_segments_concatenate_to_the_clean_prose(blocks):
+    marked = "".join(blocks)
+    clean, segs = _segments(marked)
     assert "".join(s.text for s in segs) == clean
+    assert [s.index for s in segs] == list(range(len(segs)))
+    assert all(s.text for s in segs)
+    assert all(clean[s.start:s.end] == s.text for s in segs)
