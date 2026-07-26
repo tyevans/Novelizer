@@ -66,6 +66,22 @@ class NovelizerApp(App):
     CSS_PATH = "app.tcss"
     SETTINGS_POLL_INTERVAL: float = 1.0
 
+    # How often each background refresh loop redraws its pane. These are a
+    # presentation policy -- "how fresh should this pane look to a human" --
+    # not a correctness property, so they live here as named constants rather
+    # than as magic numbers buried in the loop bodies.
+    #
+    # They also set a floor on every pilot test that waits for a pane to
+    # refresh: a test cannot observe a browser or brain update sooner than the
+    # next tick, so at 1.0s it waits ~1s no matter how it waits. Polling the UI
+    # cannot beat an interval; overriding it can (see tests/tui/conftest.py).
+    FEED_INTERVAL: float = 0.3
+    BROWSER_INTERVAL: float = 1.0
+    PROPOSALS_INTERVAL: float = 0.5
+    STATUSBAR_INTERVAL: float = 0.5
+    BRAIN_INTERVAL: float = 1.0
+    TELEMETRY_REFRESH_INTERVAL: float = 0.5
+
     BINDINGS = [
         ("a", "approvals", "Approve"),
         ("r", "toggle_room", "Room"),
@@ -217,7 +233,7 @@ class NovelizerApp(App):
                     self.messages.append(rendered.plain)
             except Exception as e:
                 self._report_worker_error("feed", e)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(self.FEED_INTERVAL)
 
     async def _browser_loop(self) -> None:
         while True:
@@ -228,7 +244,7 @@ class NovelizerApp(App):
                 )
             except Exception as e:
                 self._report_worker_error("browser", e)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(self.BROWSER_INTERVAL)
 
     async def _proposals_loop(self) -> None:
         while True:
@@ -240,7 +256,7 @@ class NovelizerApp(App):
                 banner.set_class(bool(open_count), "open")
             except Exception as e:
                 self._report_worker_error("proposals", e)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(self.PROPOSALS_INTERVAL)
 
     async def _statusbar_loop(self) -> None:
         while True:
@@ -250,7 +266,7 @@ class NovelizerApp(App):
                 self.query_one("#statusbar", Static).update(strip)
             except Exception as e:
                 self._report_worker_error("statusbar", e)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(self.STATUSBAR_INTERVAL)
 
     async def _brain_loop(self) -> None:
         while True:
@@ -281,7 +297,7 @@ class NovelizerApp(App):
                 )
             except Exception as e:
                 self._report_worker_error("brain", e)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(self.BRAIN_INTERVAL)
 
     async def _settings_watch_loop(self) -> None:
         story_dir = StoryDirectory(root=Path(self.runtime.settings.db_path).parent)
@@ -437,7 +453,7 @@ class NovelizerApp(App):
                 self._render_agent_panes(engine_room, time.monotonic())
             except Exception as e:
                 self._report_worker_error("telemetry-refresh", e)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(self.TELEMETRY_REFRESH_INTERVAL)
 
     async def action_approvals(self) -> None:
         await _app_open_approvals(self)
