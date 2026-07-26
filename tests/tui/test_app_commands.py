@@ -148,6 +148,8 @@ def _expected_command_names_from_bindings():
     # "export_epub" has no keybinding (only reachable via the palette / Ctrl+K),
     # so it isn't derivable from BINDINGS -- add it explicitly.
     names.add("export_epub")
+    # "export_voicing" is the same: palette-only, no keybinding.
+    names.add("export_voicing")
     return names
 
 

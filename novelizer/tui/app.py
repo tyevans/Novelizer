@@ -623,6 +623,14 @@ def _app_open_export(app: NovelizerApp) -> None:
     app.push_screen(ExportScreen(app.runtime))
 
 
+def _app_open_voicing_export(app: NovelizerApp) -> None:
+    from novelizer.tui.voicing_export_screen import VoicingExportScreen
+
+    if app.screen is not app.default_screen:
+        return
+    app.push_screen(VoicingExportScreen(app.runtime))
+
+
 def _app_quit(app: NovelizerApp) -> None:
     app.exit()
 
@@ -644,6 +652,7 @@ APP_COMMANDS: list[AppCommand] = [
     AppCommand("toggle_reading", "Toggle Reading view", _app_toggle_reading),
     AppCommand("settings", "Open settings", _app_open_settings),
     AppCommand("export_epub", "Export EPUB", _app_open_export),
+    AppCommand("export_voicing", "Export for voicing (JSON)", _app_open_voicing_export),
     AppCommand("talk_to_project", "Talk to the Project (research)", _app_open_research),
     AppCommand("open_escalations", "Review escalated flags", _app_open_escalations),
     AppCommand("quit", "Quit Novelizer", _app_quit),
