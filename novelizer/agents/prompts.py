@@ -89,6 +89,11 @@ DECISIVENESS_EXEMPT: dict[str, str] = {
         "Untooled, temperature 0, capped at 200 generated tokens: a title-and-sentence "
         "labeller with no room to deliberate and no judgement call to revisit."
     ),
+    "attributor": (
+        "Deterministic parse/resolve/commit over unambiguous markup; the model is reached "
+        "only as a single-turn markup-repair transcription with no tools, and a failed "
+        "repair still commits the parsed result -- there is no judgement call to revisit."
+    ),
 }
 
 DEFAULT_PASS_REMARK = "Nothing needs my attention — carry on with the story."

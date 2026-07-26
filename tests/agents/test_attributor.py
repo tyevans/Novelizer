@@ -1,0 +1,145 @@
+"""Attributor: deterministic parse/resolve/commit of the Author's inline
+speaker markup into chapter.attributed. The model is called only to repair
+markup the parser flags, and a failed repair still commits what was parsed."""
+import os
+import tempfile
+import pytest
+from novelizer.agents.attributor import Attributor
+from novelizer.canon.committer import Committer
+from novelizer.canon.event_store import EventStore
+from novelizer.canon.events import ChapterRevised, EventType
+from novelizer.canon.projector import Projector
+from novelizer.canon.read_store import ReadStore
+from novelizer.store.models import Chapter, Character
+
+
+class _Runner:
+    """The Attributor must not call the model on well-formed markup."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def ainvoke(self, _payload):
+        self.calls += 1
+        return {"structured_response": None}
+
+
+@pytest.fixture
+async def stack():
+    fd, path = tempfile.mkstemp(suffix=".db"); os.close(fd)
+    events = EventStore(path); await events.init()
+    proj = Projector(events, path); await proj.init()
+    read = ReadStore(path); await read.init()
+    yield events, proj, read, Committer(events)
+    await read.close(); await proj.close(); await events.close(); os.unlink(path)
+
+
+@pytest.mark.asyncio
+async def test_attributes_a_clean_chapter_without_calling_the_model(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One",
+                                prose='He waited. <speech char="Mira">"Twenty."</speech>'))
+    await events.append(EventType.CHARACTER_CREATED, "mira",
+                        Character(id="mira", name="Mira", aliases=[]))
+    await proj.catch_up()
+    runner = _Runner()
+    agent = Attributor(runner, read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])
+    assert len(log) == 1
+    payload = log[0].payload
+    assert payload["prose"] == 'He waited. "Twenty."'
+    assert [s["kind"] for s in payload["segments"]] == ["narration", "speech"]
+    assert payload["segments"][1]["character_id"] == "mira"
+    assert runner.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_speaker_gets_a_null_id_and_raises_a_flag(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose='<speech char="Nobody">"Hi."</speech>'))
+    await events.append(EventType.CHARACTER_CREATED, "mira",
+                        Character(id="mira", name="Mira", aliases=[]))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])
+    payload = log[0].payload
+    assert payload["segments"][0]["character_id"] is None
+    assert payload["segments"][0]["character_name"] == "Nobody"
+    flags = await events.events_since(0, event_types=[EventType.FLAG_CREATED])
+    assert flags, "unresolved speaker must be flagged"
+
+
+@pytest.mark.asyncio
+async def test_malformed_markup_still_commits_and_flags(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose='<speech char="Mira">"Hi."'))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    attributed = await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])
+    assert attributed, "a malformed chapter must not block"
+    flags = await events.events_since(0, event_types=[EventType.FLAG_CREATED])
+    assert flags
+
+
+@pytest.mark.asyncio
+async def test_already_attributed_chapters_are_skipped(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose="Plain."))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+    first = len(await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED]))
+
+    await agent.run_once()
+    await proj.catch_up()
+    assert len(await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])) == first
+
+
+@pytest.mark.asyncio
+async def test_revision_triggers_reattribution(stack):
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose="old prose"))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+    await agent.run_once()
+
+    await events.append(EventType.CHAPTER_REVISED, "ch1",
+                        ChapterRevised(chapter_id="ch1", prose="new prose"))
+    await proj.catch_up()
+    await agent.run_once()
+
+    log = await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])
+    assert len(log) == 2
+
+
+@pytest.mark.asyncio
+async def test_readiness_is_backlog_proportional(stack):
+    events, proj, read, committer = stack
+    for i in range(3):
+        await events.append(EventType.CHAPTER_CREATED, f"ch{i}",
+                            Chapter(id=f"ch{i}", title=str(i), prose="Plain."))
+    await proj.catch_up()
+    agent = Attributor(_Runner(), read, committer, events)
+
+    assert await agent.readiness() > 0
+    await agent.run_once()
+    assert await agent.readiness() == 0.0
