@@ -135,3 +135,13 @@ def test_never_raises_and_never_leaks_tag_markup(marked):
     assert "<thought" not in result.clean_prose
     assert "</speech" not in result.clean_prose
     assert "</thought" not in result.clean_prose
+
+
+def test_escaped_quote_in_char_attribute_recovers_the_literal_name():
+    """The Author's prompt tells it to write a literal quote in a name as
+    &quot; inside char="...". Confirm the parser reads that form back to the
+    exact original name, with no reported problems."""
+    marked = 'He said, <speech char="Bob &quot;Sly&quot; Jones">"Deal."</speech>'
+    result = parse_markers(marked)
+    assert result.problems == []
+    assert result.spans[0].char_name == 'Bob "Sly" Jones'

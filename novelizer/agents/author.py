@@ -180,7 +180,9 @@ Rules:
   said" tells the reader who is speaking. That case is exactly why the tags
   exist -- nothing downstream can recover it from the prose alone.
 - Use the character's canonical name or a known alias, spelled as it appears in
-  canon. Never invent an id or a slug.
+  canon. Never invent an id or a slug. If that name itself contains a double
+  quote, write it as `&quot;` inside the attribute (e.g. `char="Bob &quot;Sly&quot;
+  Jones"`) so the tag still parses.
 - Leave narration untagged. Do not tag reported or summarized speech that is not
   in quotation marks.
 - Tags wrap the utterance including its quotation marks, and never nest.
