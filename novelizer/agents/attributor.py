@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 
 from novelizer.agents.base import BaseAgent, Runner
-from novelizer.agents.schemas import FlagDraft
+from novelizer.agents.schemas import FlagDraft, RepairedMarkup
 from novelizer.brain.watermarks import current_done_ids
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
@@ -116,21 +116,20 @@ class Attributor(BaseAgent):
         return payload, problems
 
     async def _repair(self, marked: str) -> str | None:
-        # The Attributor files attribution flags itself (unresolved speakers,
-        # unrepairable markup); reading its own rejected ones back is the same
-        # feedback loop every other filer has -- so a pattern Triage already
-        # dismissed doesn't drive an identical repair attempt every pass.
-        rejections = await self._own_rejections_note()
         try:
             result = await self._runner.ainvoke(
-                {"messages": [{"role": "user", "content": marked + rejections}]}
+                {"messages": [{"role": "user", "content": marked}]}
             )
         except Exception:
             logger.warning("%s: repair call raised; committing the parsed result as-is",
                            self.name, exc_info=True)
             return None
-        text = result.get("structured_response") or result.get("output")
-        return text if isinstance(text, str) and text.strip() else None
+        out = result.get("structured_response")
+        if not isinstance(out, RepairedMarkup) or not out.prose.strip():
+            logger.warning("%s: no usable repair (%r); committing the parsed result as-is",
+                           self.name, type(out).__name__)
+            return None
+        return out.prose
 
     async def commit(self, results: dict, ctx: dict) -> None:
         drafts: list[FlagDraft] = []
@@ -175,7 +174,8 @@ def build_attributor_runner(settings, callbacks=None):
         settings.agent_model, settings.llm_base_url, settings.llm_api_key,
         temperature=0.0, max_tokens=settings.llm_max_tokens, callbacks=callbacks,
     )
-    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT)
+    return create_deep_agent(model=model, system_prompt=SYSTEM_PROMPT,
+                             response_format=RepairedMarkup)
 
 
 from novelizer.agents.registry_types import AgentContext, AgentSpec, AgentTier

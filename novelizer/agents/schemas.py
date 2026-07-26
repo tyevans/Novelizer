@@ -328,6 +328,15 @@ class KeeperOutput(BaseModel):
     no_action: bool = False
 
 
+class RepairedMarkup(BaseModel):
+    """The Attributor's markup-repair output: the SAME prose with speaker tags
+    corrected -- closed, unnested, well-formed. Never a rewrite; a response
+    whose reparse still reports problems is discarded and the original parse
+    is committed instead (see novelizer/agents/attributor.py)."""
+
+    prose: str
+
+
 class SummarizerOutput(BaseModel):
     """One chapter's rolling summary. gist: a single line (<=140 chars) for
     the chapter map; summary: one paragraph for advisory contexts."""

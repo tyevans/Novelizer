@@ -5,6 +5,7 @@ import os
 import tempfile
 import pytest
 from novelizer.agents.attributor import Attributor
+from novelizer.agents.schemas import RepairedMarkup
 from novelizer.canon.committer import Committer
 from novelizer.canon.event_store import EventStore
 from novelizer.canon.events import ChapterRevised, EventType
@@ -94,6 +95,51 @@ async def test_malformed_markup_still_commits_and_flags(stack):
     assert attributed, "a malformed chapter must not block"
     flags = await events.events_since(0, event_types=[EventType.FLAG_CREATED])
     assert flags
+
+
+class _RepairingRunner:
+    """Simulates a real deep-agent runner: response_format=RepairedMarkup, so a
+    successful call returns a structured_response of that model -- the shape
+    create_deep_agent actually produces (verified against
+    deepagents/middleware/subagents.py), not the shape the code under test
+    assumes."""
+
+    def __init__(self, repaired: str):
+        self._repaired = repaired
+        self.calls = 0
+
+    async def ainvoke(self, _payload):
+        self.calls += 1
+        return {"structured_response": RepairedMarkup(prose=self._repaired)}
+
+
+@pytest.mark.asyncio
+async def test_successful_repair_is_reparsed_and_adopted(stack):
+    """The reparse-and-adopt branch: malformed markup goes in, the repair call
+    returns corrected markup, and the committed payload reflects the REPAIRED
+    parse (both spans resolved) rather than the degraded one (a bare unclosed
+    tag with no span at all)."""
+    events, proj, read, committer = stack
+    await events.append(EventType.CHAPTER_CREATED, "ch1",
+                        Chapter(id="ch1", title="One", prose='<speech char="Mira">"Hi."'))
+    await events.append(EventType.CHARACTER_CREATED, "mira",
+                        Character(id="mira", name="Mira", aliases=[]))
+    await proj.catch_up()
+    runner = _RepairingRunner('<speech char="Mira">"Hi."</speech>')
+    agent = Attributor(runner, read, committer, events)
+
+    await agent.run_once()
+    await proj.catch_up()
+
+    log = await events.events_since(0, event_types=[EventType.CHAPTER_ATTRIBUTED])
+    payload = log[0].payload
+    assert runner.calls == 1
+    assert payload["prose"] == '"Hi."'
+    assert [s["kind"] for s in payload["segments"]] == ["speech"]
+    assert payload["segments"][0]["character_id"] == "mira"
+    assert payload["problems"] == []
+    flags = await events.events_since(0, event_types=[EventType.FLAG_CREATED])
+    assert flags == [], "a successful repair leaves nothing to flag"
 
 
 @pytest.mark.asyncio
